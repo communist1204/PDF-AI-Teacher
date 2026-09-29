@@ -1,0 +1,30 @@
+{
+  "name": "pdf-ai-teacher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "tsx apps/server/src/index.ts",
+    "start": "tsx apps/server/src/index.ts --production",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "fixtures": "node scripts/create-fixtures.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.4",
+    "express": "^5.2.1",
+    "katex": "^0.18.9",
+    "lucide-react": "^1.48.0",
+    "openai": "^7.23.0",
+    "pdfjs-dist": "^6.3.289",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  }
+}
