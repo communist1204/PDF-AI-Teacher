@@ -25,7 +25,7 @@ export type AskResponse = Envelope & { plan: TeachingPlan; mode: 'demo' | 'live'
 export type UsageRecord = { requestId: string; model: string; category: 'text' | 'tts'; inputTokens: number | null; outputTokens: number | null; characters: number | null; estimatedCost: null; cancelled: boolean };
 export const TtsRequestSchema = EnvelopeSchema.extend({ text: z.string().min(1).max(1600), speed: z.number().min(0.5).max(2) });
 export type CapabilityState = 'unconfigured' | 'untested' | 'supported' | 'unsupported' | 'error';
-export type AppConfig = { mode: 'demo' | 'live' | 'unconfigured'; sessionId: string; csrfToken: string; capabilities: Record<'text' | 'vision' | 'structuredOutput' | 'tts' | 'transcription' | 'realtimeAudio' | 'realtimeTools' | 'interruption', CapabilityState>; models: { chat: string; vision: string; tts: string }; maxRequests: number };
+export type AppConfig = { mode: 'demo' | 'live' | 'unconfigured'; sessionId: string; generationId: number; contextRevision: number; csrfToken: string; capabilities: Record<'text' | 'vision' | 'structuredOutput' | 'tts' | 'transcription' | 'realtimeAudio' | 'realtimeTools' | 'interruption', CapabilityState>; models: { chat: string; vision: string; tts: string }; maxRequests: number };
 export type ReadingCursor = { documentId: string; pageIndex: number; blockId: string; sentenceId: string; textVersion: string; sentenceIndex: number };
 export type Sentence = { sentenceId: string; sourceText: string; speechText: string };
 export function sameEnvelope(a: Envelope, b: Envelope) { return a.sessionId === b.sessionId && a.generationId === b.generationId && a.contextRevision === b.contextRevision; }
