@@ -209,3 +209,88 @@ describe('Realtime permission lifecycle with mock devices', () => {
     expect(f.controller.getSnapshot()).toMatchObject({ connection: 'off', input: 'off' });
   });
 });
+describe('Realtime remote audio callbacks across reconnection', () => {
+  it.each(['play rejection', 'onplaying', 'onerror'])('ignores an old %s after stop and a fresh start', async lateEvent => {
+    vi.useFakeTimers();
+    const f = setup(); f.controller.stop();
+    vi.stubGlobal('window', new EventTarget());
+    vi.stubGlobal('document', Object.assign(new EventTarget(), { hidden: false }));
+    const tracks: Array<EventTarget & { stop: ReturnType<typeof vi.fn> }> = [];
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: vi.fn(async () => {
+      const track = Object.assign(new EventTarget(), { stop: vi.fn() }); tracks.push(track);
+      return { getTracks: () => [track], getAudioTracks: () => [track] };
+    }) } });
+    class FakeMeter {
+      createMediaStreamSource() { return { connect: vi.fn() }; }
+      createAnalyser() { return { fftSize: 1024, getFloatTimeDomainData: (data: Float32Array) => data.fill(0) }; }
+      close = vi.fn(async () => {});
+    }
+    vi.stubGlobal('AudioContext', FakeMeter);
+    const outputs: FakeAudio[] = [];
+    class FakeAudio {
+      autoplay = false; muted = false; volume = 1; srcObject: unknown = null;
+      onplaying: (() => void) | null = null; onerror: (() => void) | null = null;
+      rejectPlay!: (error: Error) => void;
+      playback = new Promise<void>((_resolve, reject) => { this.rejectPlay = reject; });
+      play = vi.fn(() => this.playback); pause = vi.fn();
+      constructor() { outputs.push(this); }
+    }
+    vi.stubGlobal('Audio', FakeAudio);
+    const peers: FakePeer[] = [];
+    class FakePeer {
+      connectionState = 'connected';
+      ontrack: ((event: { track: MediaStreamTrack; streams: MediaStream[] }) => void) | null = null;
+      onconnectionstatechange: (() => void) | null = null;
+      senders: Array<{ track: MediaStreamTrack }> = [];
+      channel = { readyState: 'open', send: f.channel.send, onmessage: null as ((event: { data: string }) => void) | null, onclose: null as (() => void) | null, onerror: null as (() => void) | null, close: vi.fn() };
+      createDataChannel() { return this.channel; }
+      addTrack(track: MediaStreamTrack) { this.senders.push({ track }); }
+      createOffer = vi.fn(async () => ({ type: 'offer', sdp: 'mock-offer' }));
+      setLocalDescription = vi.fn(async () => {});
+      setRemoteDescription = vi.fn(async () => {});
+      getSenders() { return this.senders; }
+      getReceivers() { return []; }
+      close = vi.fn(() => { this.connectionState = 'closed'; });
+      constructor() { peers.push(this); }
+    }
+    vi.stubGlobal('RTCPeerConnection', FakePeer);
+    let connection = 0;
+    const request = vi.fn(async (path: string, init: RequestInit) => {
+      if (path === '/api/realtime/connect') {
+        const body = JSON.parse(String(init.body)) as Envelope;
+        return { ok: true, json: async () => ({ ...body, sdp: 'mock-answer', connectionId: `mock-connection-${++connection}` }) };
+      }
+      if (path === '/api/realtime/disconnect') return { ok: true, json: async () => ({ upstreamCancellation: 'confirmed' }) };
+      throw Error('Unexpected network path: ' + path);
+    });
+    vi.stubGlobal('fetch', request);
+    const start = async () => {
+      await f.controller.start('live');
+      const peer = peers.at(-1)!;
+      peer.channel.onmessage?.({ data: JSON.stringify({ type: 'session.created' }) });
+      expect(f.controller.getSnapshot().connection).toBe('connected');
+      const track = tracks.at(-1)! as unknown as MediaStreamTrack;
+      peer.ontrack?.({ track, streams: [{ getTracks: () => [track] } as unknown as MediaStream] });
+      expect(outputs.at(-1)!.play).toHaveBeenCalledOnce();
+    };
+    await start();
+    const oldAudio = outputs[0]; const oldPlaying = oldAudio.onplaying; const oldError = oldAudio.onerror;
+    expect(oldPlaying).toBeTypeOf('function'); expect(oldError).toBeTypeOf('function');
+    f.controller.stop();
+    expect(oldAudio.onplaying).toBeNull(); expect(oldAudio.onerror).toBeNull(); expect(tracks[0].stop).toHaveBeenCalled();
+    await start();
+    if (lateEvent === 'play rejection') oldAudio.rejectPlay(Error('late autoplay rejection'));
+    else if (lateEvent === 'onplaying') oldPlaying?.();
+    else oldError?.();
+    await Promise.resolve(); await Promise.resolve();
+    expect(f.controller.getSnapshot()).toMatchObject({ connection: 'connected', input: 'listening', error: '' });
+    expect(peers[1].close).not.toHaveBeenCalled(); expect(tracks[1].stop).not.toHaveBeenCalled();
+    // The new audio has not emitted onplaying: the old callback must not make its playback confirmed.
+    await f.teach();
+    await f.controller.receive({ type: 'response.done', response: { id: 'audio-a', status: 'completed' } });
+    await f.controller.receive({ type: 'output_audio_buffer.stopped', response_id: 'audio-a' });
+    expect(f.onStepComplete).not.toHaveBeenCalled();
+    expect(f.onMessage).toHaveBeenCalledWith('assistant', '已经开始讲解。', 'unconfirmed');
+    expect(request.mock.calls.every(([path]) => path.startsWith('/api/realtime/'))).toBe(true);
+  });
+});
