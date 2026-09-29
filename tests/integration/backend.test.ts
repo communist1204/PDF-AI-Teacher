@@ -214,6 +214,25 @@ describe('mocked live provider lifecycle (no paid calls)', () => {
     expect(provider.ask).toHaveBeenCalledTimes(2);
   });
 
+  it('remembers cancellation before ask or tts arrives without spending quota or calling the provider', async () => {
+    const provider = mockProvider(); const app = createApp({ config: liveConfig(), provider }); const client = await browser(app);
+    await post(app, client, '/api/cancel', { generationId: 5 }).expect(200);
+    // An older cancellation arriving later must not move the cancellation boundary back.
+    await post(app, client, '/api/cancel', { generationId: 2 }).expect(200);
+    await post(app, client, '/api/ask', { ...askBody(), generationId: 5 }).expect(409);
+    await post(app, client, '/api/tts', { text: '迟到的原文', speed: 1, generationId: 4 }).expect(409);
+    expect(provider.ask).not.toHaveBeenCalled();
+    expect(provider.speak).not.toHaveBeenCalled();
+    expect((await usage(app, client).expect(200)).body.requestCount).toBe(0);
+    const refreshed = await request(app).get('/api/config').set({ Host: HOST, Cookie: client.cookie }).expect(200);
+    expect(refreshed.body.generationId).toBe(5);
+    await post(app, client, '/api/ask', { ...askBody(), generationId: refreshed.body.generationId + 1 }).expect(200);
+    expect(provider.ask).toHaveBeenCalledOnce();
+    // Consecutive TTS chunks share a generation when it has not been cancelled.
+    await post(app, client, '/api/tts', { text: '第一句。', speed: 1, generationId: 7 }).expect(200);
+    await post(app, client, '/api/tts', { text: '第二句。', speed: 1, generationId: 7 }).expect(200);
+    expect(provider.speak).toHaveBeenCalledTimes(2);
+  });
   it('times out once even when a provider ignores AbortSignal', async () => {
     const provider = mockProvider(); vi.mocked(provider.ask).mockImplementation(() => new Promise(() => undefined));
     const app = createApp({ config: { ...liveConfig(), requestTimeoutMs: 40 }, provider }); const client = await browser(app);

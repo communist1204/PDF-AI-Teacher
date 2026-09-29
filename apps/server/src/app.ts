@@ -9,7 +9,7 @@ import { OpenAITeachingProvider, type TeachingProvider } from './provider';
 
 type Job = { envelope: Envelope; controller: AbortController };
 type Session = {
-  id: string; csrf: string; touchedAt: number; generation: number; revision: number;
+  id: string; csrf: string; touchedAt: number; generation: number; revision: number; cancelledThrough: number;
   requests: number; recentRequests: number[]; usage: UsageRecord[]; jobs: Set<Job>;
 };
 const SESSION_COOKIE = 'pdf_teacher_session';
@@ -77,6 +77,9 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     return session;
   }
   function checkFresh(session: Session, envelope: Envelope) {
+    // Cancellation may arrive before its request. Persist the boundary to prevent
+    // a delayed request from starting a paid provider operation afterwards.
+    if (envelope.generationId <= session.cancelledThrough) throw new HttpError(409, 'stale_request', '本代任务已取消，迟到请求已丢弃。');
     if (envelope.generationId < session.generation || envelope.contextRevision < session.revision) throw new HttpError(409, 'stale_request', '过期请求已丢弃。');
     if (envelope.generationId > session.generation || envelope.contextRevision > session.revision) {
       for (const job of session.jobs) job.controller.abort(cancelledError());
@@ -130,12 +133,12 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     let session = sessions.get(cookieSession(req) ?? '');
     if (!session) {
       if (sessions.size >= 128) throw new HttpError(429, 'session_capacity', '本地会话数达到上限，请关闭闲置页面后重启本项目。');
-      session = { id: randomUUID(), csrf: randomBytes(32).toString('hex'), touchedAt: now(), generation: 0, revision: 0, requests: 0, recentRequests: [], usage: [], jobs: new Set() };
+      session = { id: randomUUID(), csrf: randomBytes(32).toString('hex'), touchedAt: now(), generation: 0, revision: 0, cancelledThrough: -1, requests: 0, recentRequests: [], usage: [], jobs: new Set() };
       sessions.set(session.id, session);
     }
     session.touchedAt = now();
     res.cookie(SESSION_COOKIE, session.id, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: SESSION_TTL });
-    const body: AppConfig = { mode, sessionId: session.id, generationId: session.generation, contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel }, maxRequests: config.maxRequests };
+    const body: AppConfig = { mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel }, maxRequests: config.maxRequests };
     res.json(body);
   });
 
@@ -208,6 +211,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     const parsed = EnvelopeSchema.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, 'invalid_request', '取消请求格式不正确。');
     const envelope = parsed.data;
+    session.cancelledThrough = Math.max(session.cancelledThrough, envelope.generationId);
     let cancelled = 0;
     for (const job of session.jobs) if (job.envelope.generationId <= envelope.generationId && !job.controller.signal.aborted) { job.controller.abort(cancelledError()); cancelled += 1; }
     setEnvelope(res, envelope);

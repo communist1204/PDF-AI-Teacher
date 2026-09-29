@@ -48,3 +48,5 @@
 覆盖：Host/Origin/CSRF/Cookie、密钥缺失、显式 demo、上下文/请求 schema、sourceId 白名单、跨书隔离、大小上限、限流、会话上限与过期、刷新 generation 继承、取消与晚到结果、超时、服务商认证/权限/模型/配额错误脱敏、缺失用量、TTS 精确输入、缓存与清理。Responses/TTS 的 SDK fetch 全部注入 mock，无网络请求。
 
 真实文字/视觉/TTS、真实中文发音与数学朗读正确性均 **未测**：需要用户本机配置凭证并明确同意最小付费验收。M2/M3 没有实现，能力返回 unsupported；不能把浏览器演示声音或文字取消称为 Realtime 打断。
+
+取消竞态修复：取消水位保存在当前本地会话中；即使取消先于原请求到达，后到的旧 generation 也不会启动付费调用或消耗请求配额。配置响应包含取消水位，刷新后新 generation 仍可正确继续。同一未取消 generation 的多句 TTS 仍可连续请求。
