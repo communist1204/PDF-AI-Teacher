@@ -273,3 +273,57 @@ describe('browser adapter capability boundaries', () => {
     } finally { vi.unstubAllGlobals(); vi.useRealTimers(); }
   });
 });
+
+describe('pause during unresolved browser play()', () => {
+  const makeRace = () => {
+    const attempts: Array<ReturnType<typeof deferred<void>>> = [];
+    let input: PlaybackInput;
+    const handle = {
+      play: vi.fn(() => { const attempt = deferred<void>(); attempts.push(attempt); return attempt.promise; }),
+      pause: vi.fn(), stop: vi.fn(), dispose: vi.fn(), setRate: vi.fn(), setVolume: vi.fn(),
+    };
+    const onError = vi.fn();
+    const audio = new AudioCoordinator({ requestSpeech: vi.fn(), onChange: vi.fn(), onError, playbackAdapter: { create: value => { input = value; return handle; } } });
+    audio.load(target, envelope, 'demo');
+    return { audio, attempts, handle, onError, started: () => input.onStarted() };
+  };
+
+  it('keeps the paused handle when pause aborts the initial play promise', async () => {
+    const h = makeRace();
+    const pending = h.audio.play();
+    await tick();
+    h.audio.pause();
+    h.attempts[0].reject(new DOMException('play interrupted by pause', 'AbortError'));
+    await pending;
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'paused', hasBookmark: true, sentenceIndex: 0 });
+    expect(h.onError).not.toHaveBeenCalled();
+    expect(h.handle.dispose).not.toHaveBeenCalled();
+    const resumed = h.audio.resume();
+    h.started(); h.attempts[1].resolve();
+    await resumed;
+    expect(h.audio.getSnapshot().status).toBe('speaking');
+    expect(h.handle.play).toHaveBeenCalledTimes(2);
+    h.audio.dispose();
+  });
+
+  it('does not let a paused resume reject after a newer resume and stop that output', async () => {
+    const h = makeRace();
+    const initial = h.audio.play();
+    await tick();
+    h.started(); h.attempts[0].resolve();
+    await initial;
+    h.audio.pause();
+    const oldResume = h.audio.resume();
+    h.audio.pause();
+    const latestResume = h.audio.resume();
+    h.started(); h.attempts[2].resolve();
+    await latestResume;
+    h.attempts[1].reject(new DOMException('old play interrupted by pause', 'AbortError'));
+    await oldResume;
+    expect(h.audio.getSnapshot().status).toBe('speaking');
+    expect(h.onError).not.toHaveBeenCalled();
+    expect(h.handle.dispose).not.toHaveBeenCalled();
+    expect(h.handle.play).toHaveBeenCalledTimes(3);
+    h.audio.dispose();
+  });
+});

@@ -46,6 +46,7 @@ export class AudioCoordinator {
   private active: PlaybackHandle | null = null;
   private request: AbortController | null = null;
   private epoch = 0;
+  private playbackAttempt = 0;
   private disposed = false;
   private readonly adapter: PlaybackAdapter;
 
@@ -134,7 +135,14 @@ export class AudioCoordinator {
       // Settings may change while the network/voice discovery was pending.
       handle.setRate(this.state.rate);
       handle.setVolume(this.state.volume);
-      await handle.play();
+      const attempt = ++this.playbackAttempt;
+      try { await handle.play(); }
+      catch (error) {
+        // pause() can reject an in-flight HTMLMediaElement.play() Promise.
+        // A later resume owns a new attempt; neither case is a playback failure.
+        if (attempt !== this.playbackAttempt) return;
+        throw error;
+      }
     } catch (error) {
       if (!valid()) return;
       this.fail(error instanceof Error ? `朗读未能完成：${error.message}` : '朗读未能完成，请重试。');
@@ -165,7 +173,10 @@ export class AudioCoordinator {
 
   pause(): void {
     if (this.disposed || (this.state.status !== 'speaking' && this.state.status !== 'buffering')) return;
-    if (this.active) this.active.pause();
+    if (this.active) {
+      this.playbackAttempt += 1;
+      this.active.pause();
+    }
     else this.cancel(); // A pending request cannot later begin playing behind a paused UI.
     this.state.status = 'paused';
     this.emit();
@@ -177,8 +188,9 @@ export class AudioCoordinator {
       const token = this.epoch;
       this.state.status = 'buffering';
       this.emit();
+      const attempt = ++this.playbackAttempt;
       try { await this.active.play(); }
-      catch (error) { if (token === this.epoch) this.fail(error instanceof Error ? `无法继续播放：${error.message}` : '无法继续播放，请重试。'); }
+      catch (error) { if (token === this.epoch && attempt === this.playbackAttempt) this.fail(error instanceof Error ? `无法继续播放：${error.message}` : '无法继续播放，请重试。'); }
       return;
     }
     this.state.status = 'silent';
