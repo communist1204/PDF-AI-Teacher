@@ -42,6 +42,7 @@ async function selectSample(page: Page) {
   await expect(page.locator('main')).toHaveAttribute('aria-busy', 'false');
   await expect(page.locator('.textLayer span').filter({ hasText: '指数移动平均将过去' }).first()).toBeVisible();
   await page.getByRole('button', { name: '选本页文字', exact: true }).click();
+  await page.locator('.optional-voice>summary').click();
   await expect(page.getByRole('button', { name: '语音转文字提问', exact: true })).toBeEnabled();
 }
 async function startAndCapture(page: Page, demo = false) {

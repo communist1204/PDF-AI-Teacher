@@ -169,9 +169,9 @@ export class AudioCoordinator {
   }
 
   /** The caller must display this TeachingStep before starting its speech. */
-  loadExplanation(target: PdfTarget, step: TeachingStep, envelope: Envelope, mode: 'demo' | 'live'): void {
+  loadExplanation(target: PdfTarget, step: TeachingStep, envelope: Envelope, mode: 'demo' | 'live', restart = false): void {
     if (this.disposed) return;
-    const unchanged = this.state.channel === 'explanation' && sameTarget(this.target, target) && this.state.teachingStepId === step.stepId && this.explanationText === step.speechText;
+    const unchanged = !restart && this.state.channel === 'explanation' && sameTarget(this.target, target) && this.state.teachingStepId === step.stepId && this.explanationText === step.speechText;
     const index = unchanged && this.state.hasBookmark ? this.state.sentenceIndex : 0;
     const hasBookmark = unchanged && this.state.hasBookmark;
     this.cancel();

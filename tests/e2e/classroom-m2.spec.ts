@@ -64,10 +64,11 @@ test('JSON/Markdown导出、清书记录及导入恢复，其他书不被删除'
   const mdDownload=page.waitForEvent('download');await page.getByRole('button',{name:'导出笔记 Markdown',exact:true}).click();const markdown=await readFile(await (await mdDownload).path(),'utf8');expect(markdown).toContain('需要复习 beta');expect(markdown).toContain('latex');
   await page.getByRole('button',{name:'关闭设置',exact:true}).click();
   const different=await PDFDocument.load(await readFile('public/sample.pdf'));different.removePage(0);
-  await page.locator('input[type=file]').setInputFiles({name:'sample.pdf',mimeType:'application/pdf',buffer:Buffer.from(await different.save())});await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
+  await page.locator('input[type=file]').setInputFiles({name:'sample.pdf',mimeType:'application/pdf',buffer:Buffer.from(await different.save())});await expect(page.getByRole('spinbutton',{name:'PDF 页序号'})).toHaveAttribute('max','1');await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
   await page.getByRole('textbox',{name:'本书本地笔记',exact:true}).fill('另一本书的笔记');
-  await expect.poll(async()=>(await saved(page)).length).toBe(2);
-  await page.locator('input[type=file]').setInputFiles('public/sample.pdf');await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
+  await expect(page.getByRole('textbox',{name:'本书本地笔记',exact:true})).toHaveValue('另一本书的笔记');
+  await expect.poll(async()=>(await saved(page)).find(item=>(item.document as {documentId:string}).documentId!==record.document.documentId)?.note).toBe('另一本书的笔记');
+  await page.locator('input[type=file]').setInputFiles('public/sample.pdf');await expect(page.getByRole('spinbutton',{name:'PDF 页序号'})).toHaveAttribute('max','2');await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
   await expect(page.getByRole('textbox',{name:'本书本地笔记',exact:true})).toHaveValue('需要复习 beta 的幂。');
   await settings(page);await page.getByRole('button',{name:'删除本书记录',exact:true}).click();await page.getByRole('button',{name:'确认删除本书记录',exact:true}).click();
   await expect.poll(async()=>(await saved(page)).length).toBe(1);await page.waitForTimeout(350);expect((await saved(page))[0].note).toBe('另一本书的笔记');

@@ -162,3 +162,15 @@ Realtime 的首音等待仍有固定上限；开始播放后的看门狗按速�
 体验入口包含明确动作而非功能罗列。试用选段通过实际 PDF.js 文本层 DOM Range 生成文本、坐标和 sourceId，找不到合适文字时提示手选；打开说明不自动开麦、发声或调用模型。引导只有观察到同来源原文播放、暂停/打断、同 sentenceId 恢复才显示完成；自然读完回到可重播状态，不误报完成。分步板书在 DEMO 明说固定 EMA，API 模式明说会发送选区并计费。图片没有可靠文字时不提供不可完成的朗读打断路径。
 
 顶栏麦克风在等待权限/建立连接时显示“语音准备中”，不将 connecting 当作已经监听。功能说明的 Esc 只关闭弹窗，不清选区。调用分步讲解时关闭原文试用引导，重启试用重新观察真实状态。已有 PDF、笔记、音频书签、课堂与真实 API 适配继续走原实现。
+
+## 文字解题优先，声音独立负责朗读（2026-09-29）
+
+用户明确交互不需要人声输入，专业教材回答应使用最高能力的理论推理模型。本轮据此将默认入口改成打字提问与听讲解；不继续 GPT-Live 集成，保留已有 M2/M3 可选功能及原验收记录，未改 PRD 完成标准。
+
+采用已有 Responses → TeachingPlan → TTS 流程。强模型一次生成 answer、推导板书、speechText，后者保留条件、符号关系和关键论证；TTS 不接受独立解题任务。用户手动点击声音按钮才朗读，不自动付费生成音频。失败不自动重问或换模型。未对任何模型作“专业问题绝对正确”的承诺。
+
+官方已重新搜索并打开：[GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra) 为当前最高能力模型，支持图像输入和 Structured Outputs；[推理指南](https://developers.openai.com/api/docs/guides/reasoning) 说明 effort 和推理 token 预算；[TTS](https://developers.openai.com/api/docs/guides/text-to-speech) 支持自然语气指令与 marin/cedar。质量配置示例为 Astra + xhigh + 32000 tokens / 300 秒，纯本机建议，账号权限未测。模型字段继续留空，不把查过文档等同用户账号已验证。
+
+新增 CHAT_REASONING_EFFORT / VISION_REASONING_EFFORT，空白不传，以保留其他模型兼容性；专用 TEACHING_MAX_OUTPUT_TOKENS（默认16000）和 TEACHING_TIMEOUT_MS（默认180000）仅控制解题，不扩大 TTS/转写/实时请求期限。/api/config 只公开模型参数，不公开 Key。Responses SDK 7.23.0 的 ResponsesParser 对 incomplete 状态不解析半段JSON，本地已核对；服务显式报告截断并保留已知用量。
+
+「从头听」显式重置讲解句索引；暂停/续读保留原粒度。回答的完成提示依据实际播放完成的步骤集合。截图提问显示视觉模型；可选实时模式开启后保留既有文字同会话行为，并在界面明确告知会使用实时模型。

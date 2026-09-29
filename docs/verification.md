@@ -10,14 +10,14 @@
 | npm.cmd run fixtures | 通过 | 生成 public/sample.pdf，两页自制中文材料，可选择文字；未打包商业教材 |
 | npm.cmd run typecheck | 通过 | tsc --noEmit，退出 0 |
 | npm.cmd run lint | 通过 | ESLint，退出 0 |
-| npm.cmd test | 通过 | 12 test files / **257 tests passed**，1.05s |
+| npm.cmd test | 通过 | 12 test files / **274 tests passed**，1.27s |
 | npm.cmd run build | 通过 | Vite 生产构建；存在 >500kB chunk 体积提示，不是编译错误 |
-| npm.cmd run test:e2e | 通过 | **43 passed (30.5s)**，5 个本机 Edge worker |
+| npm.cmd run test:e2e | 通过 | **46 passed (32.0s)**，6 个本机 Edge worker |
 | node scripts/verify-production.mjs | 通过 | 独立回环 4318 启动生产构建、打开 PDF、选区、演示教案；0 pageErrors；只关闭该脚本启动的进程 |
 | npm 安装审计 | 通过 | 初次安装报告 0 vulnerabilities；只装项目局部依赖 |
 | Git diff / 凭证检查 | 通过 | 自有代码 diff --check 通过；原需求未修改；.env 忽略；前端 bundle 无凭证模式命中 |
 
-最新单元测试覆盖 PDF/坐标/提取、音频与竞态、课堂状态机、学习记录与恢复快照、会话/教案、Realtime 工具/控制器及后端 mock 集成。共 12 文件、257 项，没有任何测试依赖真实 Key。后文 M1/M2 历史记录保留当时计数。
+最新单元测试覆盖 PDF/坐标/提取、音频与竞态、课堂状态机、学习记录与恢复快照、会话/教案、Realtime 工具/控制器及后端 mock 集成。共 12 文件、274 项，没有任何测试依赖真实 Key。后文 M1/M2 历史记录保留当时计数。
 
 基础场景端到端测试摘要（本次新增项另见文末）：
 
@@ -219,3 +219,23 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 本轮首个完整浏览器回归 40/40。随后代码复核发现自然结束引导卡住、图片目标不可朗读及权限期间虚报开麦，修复并保留新增回归，最终 43/43；没有删测试掩盖问题。首次脚本编辑受 Windows BOM/行尾影响的匹配已在正式类型检查前修正。M3 真实接口/真人 A14/A15、A12 二十分钟、复杂长书等验收状态不变。
 
 仅重启核实的本项目 PID 31892，新后台 PID **28116** 监听 127.0.0.1:4317；首页 HTTP 200，demo 模式，.env 不存在。原 AGENTS/PRD/START_HERE 未改。用户现在只需刷新 → 顶栏「功能体验」→ 走一遍，或直接把底部语速调低。电脑重启后仍执行 npm.cmd run dev。
+
+## 文字理论解答与独立自然朗读（2026-09-29 23:50）
+
+按用户新偏好，主入口为打字问理论→同一 TeachingPlan 的答案和黑板→「听这次讲解」；麦克风功能默认收起。真实模型仍未接通，不将模拟教案用于判定理论正确性。
+
+最终执行：typecheck / lint / build 均退出 0；Vitest **12 文件、274 项通过（1.27s）**；完整 Edge E2E **46 项通过（32.0s，6 workers）**。Vite 仍保留 >500 kB chunk 提示。生产 smoke 于 23:44:50 在独立 4318 使用最终构建，真实本机 SpeechSynthesis 收到 rate=0.25，观察到准备→朗读→停止，0 pageErrors、0 providerCalls；不代表中文听感验收。见 [production-smoke.json](production-smoke.json)。
+
+新增或加强的证据：
+
+- 后端新增 17 项模拟测试：文字/图片分别传 reasoning.effort；留空省略参数；教学 token 预算和独立超时；TTS/转写/Realtime 超时不被教学配置延长；不完整教案明确拒绝、保留已知 usage，不自动换模型；公开配置不泄露凭证。
+- 新增 3 项实际浏览器场景：真实 PDF 选区与自定义文字请求；回答不自动出声；点击朗读使用同次讲解稿、不重复 ask、不访问麦克风/转写/Realtime；第二句暂停后从头回第一句；逐步继续、打字停音、恢复独立原文书签；TTS 失败保留答案，缺少 TTS 时仍可文字解答。
+- 上述问答和 TTS HTTP 为模拟；输出使用真实 HTMLAudioElement 播放测试静音 WAV，句末事件由测试推进。截图模型名称和内容明确为 mock / 接口模拟，不算真实供应商语音或专业理论测评。
+- 设置显示实际模型/推理强度/token/超时；兼容模型未配置 reasoning 时不会臆造支持。麦克风演练从隐藏的对话栏进入仍展开正确面板。
+- 已实际查看 [桌面回答朗读](screenshots/text-teacher-desktop.png) 与 [1280×720 回答朗读](screenshots/text-teacher-720.png)：朗读按钮、当前步骤和底部暂停/停止均可见，分栏长内容独立滚动，没有遮挡播放控制。
+
+首次完整回归为 44/46，保留失败原因：一项设置断言使用旧文案，更新为当前独立文字/TTS 的说明；另一项快速换书时笔记为空。后三次定向重跑复现后检查 trace：新书记录仍在加载、main 处于 inert，笔记框却先变为 enabled，自动化 fill 没有产生实际输入；空值在删除前已存在。现将笔记框禁用到该书 recordReady，测试同时等待目标书页数和 ready、核对输入值并检查该书 IndexedDB 持久化，再做删除/导入。没有删除测试或重写无证据的存储逻辑，最终完整 46/46 通过。
+
+日常服务只重启了已核实的本项目 PID 7956，新 PID 31632 监听 127.0.0.1:4317。23:50 的实际 Edge 检查：HTTP 200、默认文字入口可见、麦克风折叠、设置显示当前后端 16000 tokens / 180 秒；pageErrors=[]，没有 ask/TTS/转写/Realtime 请求。见 [dev-smoke.json](dev-smoke.json)。服务保持运行；电脑重启后仍需 npm.cmd run dev。
+
+未测：GPT-6 Astra 账号权限、真实复杂理论推导质量、真实 TTS 中文自然度和公式读法、真人听音；没有 .env、没有真实 Key、没有付费调用。README 与 .env.example 中的 Astra+xhigh+marin 是配置建议，未声称当前已启用。原 PRD 验收标准和此前 A06/A10/A12/A14/A15 等真人待验状态不变。

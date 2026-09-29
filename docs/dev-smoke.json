@@ -1,10 +1,19 @@
 {
-  "date": "2026-09-29T13:58:48.967Z",
-  "port": 4317,
-  "title": "PDF AI Teacher · 学习工作台",
-  "featureGuide": true,
-  "minimumRate": "0.25",
-  "selectedText": "指数移动平均将过去的梯度按权重累积。初始值为零时，早期估计会偏小。偏差修正通过除以权重",
-  "audioState": "待机本机合成语音 · 演示",
-  "pageErrors": []
+  "date": "2026-09-29T15:50:11.668Z",
+  "url": "http://127.0.0.1:4317",
+  "httpStatus": 200,
+  "browser": "154.0.4258.37",
+  "mode": "demo",
+  "teaching": {
+    "chatReasoningEffort": null,
+    "visionReasoningEffort": null,
+    "maxOutputTokens": 16000,
+    "timeoutMs": 180000
+  },
+  "textRouteVisible": true,
+  "microphoneCollapsed": true,
+  "settingsShowCurrentBackend": true,
+  "pageErrors": [],
+  "providerEndpoints": [],
+  "humanListening": "未测；本次只检查启动及页面，不发模型或声音请求"
 }
