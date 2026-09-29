@@ -9,7 +9,9 @@ export type PdfTarget = SourceRef & { imageDataUrl?: string };
 export type DocumentRecord = { documentId: string; fileName: string; pageCount: number; pageLabels: string[] | null; extractionVersion: string };
 export const ContextSchema = z.object({ documentId: z.string(), sources: z.array(SourceSchema).min(1).max(8), selectedBoardText: z.string().max(4000).nullable(), imageDataUrl: z.string().max(3000000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/).nullable() });
 export type ContextSnapshot = z.infer<typeof ContextSchema>;
+export const DiagramSchema = z.object({ id:z.string(), type:z.literal('diagram'), nodes:z.array(z.object({id:z.string().min(1).max(40),label:z.string().min(1).max(80)})).min(1).max(8), edges:z.array(z.object({from:z.string().max(40),to:z.string().max(40),label:z.string().max(60).nullable()})).max(12) });
 export const BoardBlockSchema = z.discriminatedUnion('type', [
+  DiagramSchema,
   z.object({ id: z.string(), type: z.literal('text'), markdown: z.string().max(5000) }),
   z.object({ id: z.string(), type: z.literal('math'), latex: z.string().max(2000), label: z.string().nullable() }),
   z.object({ id: z.string(), type: z.literal('table'), headers: z.array(z.string()).max(8), rows: z.array(z.array(z.string())).max(30) }),
@@ -38,7 +40,13 @@ export function validatePlan(value: unknown, context: ContextSnapshot, revision:
     if (ids.has(step.stepId) || step.sourceIds.some(id => !allowed.has(id))) throw new Error('板书步骤或来源无效');
     ids.add(step.stepId);
     const blockIds = new Set<string>();
-    for (const block of step.boardBlocks) { if (blockIds.has(block.id)) throw new Error('板书块重复'); blockIds.add(block.id); }
+    for (const block of step.boardBlocks) {
+      if (blockIds.has(block.id)) throw new Error('板书块重复'); blockIds.add(block.id);
+      if(block.type==='diagram'){
+        const nodes=new Set(block.nodes.map(node=>node.id));
+        if(nodes.size!==block.nodes.length||block.edges.some(edge=>!nodes.has(edge.from)||!nodes.has(edge.to)))throw new Error('图示节点或连线无效');
+      }
+    }
   }
   return plan;
 }
