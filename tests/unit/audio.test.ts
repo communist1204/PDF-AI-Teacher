@@ -504,3 +504,192 @@ describe('M2 separate source and explanation playback (mock audio)', () => {
     audio.dispose();
   });
 });
+
+describe('M3 external output ownership (mock transport; no realtime API)', () => {
+  it('silences local playback before granting remote output and preserves both bookmarks', async () => {
+    const h = harness();
+    await h.audio.play();
+    h.handles[0].input.onEnded();
+    await tick();
+    const sourceBookmark = h.audio.getBookmark();
+    h.audio.loadExplanation(target, explanationStep, envelope, 'live');
+    await h.audio.play();
+    h.handles[2].input.onEnded();
+    await tick();
+    const explanationBookmark = h.audio.getExplanationBookmark();
+    const oldHandle = h.handles[3];
+    let remoteAudible = false;
+    const stopRemote = vi.fn(() => { remoteAudible = false; });
+    const lease = h.audio.claimExternalOutput(stopRemote);
+    expect(lease.isCurrent()).toBe(true);
+    expect(h.audible()).toBe(0);
+    expect(oldHandle.stopped).toBe(true);
+    expect(remoteAudible).toBe(false);
+    remoteAudible = lease.isCurrent();
+    expect(remoteAudible).toBe(true);
+    expect(h.audio.getSnapshot()).toMatchObject({ outputOwner: 'realtime', status: 'silent', channel: 'explanation', sentenceIndex: 1 });
+    expect(h.audio.getBookmark()).toEqual(sourceBookmark);
+    expect(h.audio.getExplanationBookmark()).toEqual(explanationBookmark);
+    oldHandle.input.onStarted();
+    oldHandle.input.onEnded();
+    oldHandle.input.onError('stale local output');
+    expect(h.onError).not.toHaveBeenCalled();
+    expect(h.onComplete).not.toHaveBeenCalled();
+    expect(h.audio.getExplanationBookmark()).toEqual(explanationBookmark);
+    await h.audio.resume();
+    expect(remoteAudible).toBe(false);
+    expect(lease.isCurrent()).toBe(false);
+    expect(stopRemote).toHaveBeenCalledOnce();
+    expect(h.audible()).toBe(1);
+    expect(h.audio.getSnapshot()).toMatchObject({ outputOwner: 'local', channel: 'explanation', sentenceIndex: 1 });
+    expect(h.requestSpeech).toHaveBeenLastCalledWith('这是第二句讲解。', envelope, 1, expect.any(AbortSignal));
+    expect(h.audio.getBookmark()).toEqual(sourceBookmark);
+    expect(h.maxAudible()).toBe(1);
+    h.audio.dispose();
+  });
+
+  it('aborts pending TTS and rejects its late audio after external ownership begins', async () => {
+    const response = deferred<Blob>();
+    const requestSpeech = vi.fn().mockImplementation(() => response.promise);
+    const h = harness(requestSpeech);
+    const pending = h.audio.play();
+    const signal = requestSpeech.mock.calls[0][3] as AbortSignal;
+    const bookmark = h.audio.getBookmark();
+    const stopRemote = vi.fn();
+    const lease = h.audio.claimExternalOutput(stopRemote);
+    expect(signal.aborted).toBe(true);
+    response.resolve(new Blob(['late paid audio']));
+    await pending;
+    expect(h.handles).toHaveLength(0);
+    expect(lease.isCurrent()).toBe(true);
+    expect(h.audio.getBookmark()).toEqual(bookmark);
+    lease.release();
+    lease.release();
+    expect(stopRemote).toHaveBeenCalledOnce();
+    expect(h.requestSpeech).toHaveBeenCalledOnce();
+    expect(h.audio.getSnapshot()).toMatchObject({ outputOwner: 'local', status: 'silent' });
+    h.audio.dispose();
+  });
+
+  it('disposes an adapter that finishes connecting after an external lease was claimed', async () => {
+    const lateHandle = deferred<PlaybackHandle>();
+    const handle = { play: vi.fn(async () => {}), pause: vi.fn(), stop: vi.fn(), dispose: vi.fn(), setRate: vi.fn(), setVolume: vi.fn() };
+    const audio = new AudioCoordinator({ requestSpeech: vi.fn(), onChange: vi.fn(), onError: vi.fn(), playbackAdapter: { create: () => lateHandle.promise } });
+    audio.load(target, envelope, 'demo');
+    const pending = audio.play();
+    const lease = audio.claimExternalOutput(vi.fn());
+    lateHandle.resolve(handle);
+    await pending;
+    expect(handle.play).not.toHaveBeenCalled();
+    expect(handle.stop).toHaveBeenCalledOnce();
+    expect(handle.dispose).toHaveBeenCalledOnce();
+    expect(lease.isCurrent()).toBe(true);
+    audio.dispose();
+  });
+
+  it('revokes a previous lease before returning another and ignores stale release callbacks', () => {
+    const h = harness();
+    const stops: string[] = [];
+    const first = h.audio.claimExternalOutput(() => { stops.push('first'); first.release(); });
+    const second = h.audio.claimExternalOutput(() => { stops.push('second'); second.release(); });
+    expect(stops).toEqual(['first']);
+    expect(first.isCurrent()).toBe(false);
+    expect(second.isCurrent()).toBe(true);
+    first.release();
+    expect(second.isCurrent()).toBe(true);
+    expect(stops).toEqual(['first']);
+    second.release();
+    second.release();
+    expect(stops).toEqual(['first', 'second']);
+    expect(h.audio.getSnapshot()).toMatchObject({ outputOwner: 'local', status: 'silent' });
+    expect(h.handles).toHaveLength(0);
+    h.audio.dispose();
+  });
+
+  it.each(['pause', 'stop', 'interrupt', 'reset', 'dispose', 'previous', 'next'] as const)('%s immediately revokes external output without autoplay', async action => {
+    const h = harness();
+    await h.audio.play();
+    const bookmark = h.audio.getBookmark();
+    const stopRemote = vi.fn();
+    const lease = h.audio.claimExternalOutput(stopRemote);
+    const requests = h.requestSpeech.mock.calls.length;
+    h.audio[action]();
+    expect(lease.isCurrent()).toBe(false);
+    expect(stopRemote).toHaveBeenCalledOnce();
+    expect(h.audible()).toBe(0);
+    expect(h.requestSpeech).toHaveBeenCalledTimes(requests);
+    expect(h.audio.getSnapshot().outputOwner).toBe('local');
+    if (action === 'pause' || action === 'stop' || action === 'interrupt') expect(h.audio.getBookmark()).toEqual(bookmark);
+    lease.release();
+    expect(stopRemote).toHaveBeenCalledOnce();
+    h.audio.dispose();
+  });
+
+  it.each(['play', 'resume', 'resumeSource'] as const)('%s explicitly takes ownership and restarts the original unfinished sentence', async action => {
+    const h = harness();
+    await h.audio.play();
+    h.handles[0].input.onEnded();
+    await tick();
+    const stopRemote = vi.fn();
+    const lease = h.audio.claimExternalOutput(stopRemote);
+    if (action === 'resumeSource') await h.audio.resumeSource(envelope, 'live');
+    else await h.audio[action]();
+    expect(stopRemote).toHaveBeenCalledOnce();
+    expect(lease.isCurrent()).toBe(false);
+    expect(h.audible()).toBe(1);
+    expect(h.requestSpeech).toHaveBeenLastCalledWith('第二句。', envelope, 1, expect.any(AbortSignal));
+    h.audio.dispose();
+  });
+
+  it('load, explanation load and rebind revoke external output while retaining the source anchor', async () => {
+    const h = harness();
+    await h.audio.play();
+    const bookmark = h.audio.getBookmark();
+    for (const change of [
+      () => h.audio.load(target, envelope, 'live'),
+      () => h.audio.loadExplanation(target, explanationStep, envelope, 'live'),
+      () => h.audio.rebind(envelope),
+    ]) {
+      const stopRemote = vi.fn();
+      const lease = h.audio.claimExternalOutput(stopRemote);
+      change();
+      expect(stopRemote).toHaveBeenCalledOnce();
+      expect(lease.isCurrent()).toBe(false);
+      expect(h.audio.getBookmark()).toEqual(bookmark);
+      expect(h.audible()).toBe(0);
+    }
+    h.audio.dispose();
+  });
+
+  it('pause revokes the transport instead of resuming remote output through the local player', async () => {
+    const h = harness();
+    await h.audio.play();
+    const stopRemote = vi.fn();
+    const lease = h.audio.claimExternalOutput(stopRemote);
+    h.audio.pause();
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'paused', outputOwner: 'local' });
+    expect(lease.isCurrent()).toBe(false);
+    await h.audio.resume();
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'speaking', outputOwner: 'local' });
+    expect(stopRemote).toHaveBeenCalledOnce();
+    expect(h.handles).toHaveLength(2);
+    expect(h.requestSpeech).toHaveBeenLastCalledWith('第一句。', envelope, 1, expect.any(AbortSignal));
+    h.audio.dispose();
+  });
+
+  it('cannot grant an output lease after disposal or revive one from a change callback', () => {
+    const audio: AudioCoordinator = new AudioCoordinator({ requestSpeech: vi.fn(), onError: vi.fn(), onChange: state => { if (state.outputOwner === 'realtime') audio.dispose(); } });
+    const firstStop = vi.fn();
+    const lease = audio.claimExternalOutput(firstStop);
+    expect(lease.isCurrent()).toBe(false);
+    expect(firstStop).toHaveBeenCalledOnce();
+    const lateStop = vi.fn();
+    const late = audio.claimExternalOutput(lateStop);
+    expect(late.isCurrent()).toBe(false);
+    late.release();
+    lease.release();
+    expect(lateStop).toHaveBeenCalledOnce();
+    expect(firstStop).toHaveBeenCalledOnce();
+    expect(audio.getSnapshot()).toMatchObject({ outputOwner: 'local', status: 'silent' });
+  });
+});

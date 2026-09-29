@@ -7,6 +7,8 @@ export type { PlaybackAdapter, PlaybackHandle, PlaybackInput } from './playback'
 export type AudioChannel = 'source' | 'explanation';
 export type AudioState = {
   status: 'silent' | 'buffering' | 'speaking' | 'paused';
+  /** Ownership is separate from local playback status and microphone input. */
+  outputOwner?: 'local' | 'realtime';
   channel: AudioChannel;
   teachingStepId: string | null;
   error: string | null;
@@ -20,6 +22,13 @@ export type AudioState = {
   rate: number;
   volume: number;
 };
+
+/** The transport must check isCurrent() before unmuting any late remote output. */
+export interface ExternalOutputLease {
+  isCurrent(): boolean;
+  /** Revoke this lease and synchronously stop its output; never resumes local audio. */
+  release(): void;
+}
 
 export type ReadingBookmark = { target: PdfTarget; cursor: ReadingCursor };
 export type ExplanationBookmark = { target: PdfTarget; stepId: string; speechText: string; sentenceId: string; textVersion: string; sentenceIndex: number };
@@ -61,6 +70,7 @@ export class AudioCoordinator {
   private explanationText = '';
   private envelope: Envelope | null = null;
   private active: PlaybackHandle | null = null;
+  private externalOutput: { stop: () => void } | null = null;
   private request: AbortController | null = null;
   private epoch = 0;
   private playbackAttempt = 0;
@@ -72,7 +82,39 @@ export class AudioCoordinator {
   }
 
   getSnapshot(): AudioState {
-    return { ...this.state, sentences: this.state.sentences.map(sentence => ({ ...sentence })), cursor: this.sourceBookmark ? { ...this.sourceBookmark.cursor } : null };
+    return { ...this.state, outputOwner: this.externalOutput ? 'realtime' : 'local', sentences: this.state.sentences.map(sentence => ({ ...sentence })), cursor: this.sourceBookmark ? { ...this.sourceBookmark.cursor } : null };
+  }
+
+  /**
+   * Transfers the only output slot to a transport without owning its microphone,
+   * connection, or remote playback status. Pending local TTS is cancelled and
+   * both local bookmarks remain unchanged. The caller unmutes only if current.
+   *
+   * stop must synchronously silence output, must not throw, and may release this
+   * lease during cleanup. All local playback/stop/pause operations revoke it;
+   * release is idempotent and an old lease cannot release a newer owner.
+   */
+  claimExternalOutput(stop: () => void): ExternalOutputLease {
+    const inactive: ExternalOutputLease = { isCurrent: () => false, release: () => {} };
+    if (this.disposed) { stop(); return inactive; }
+    this.cancel();
+    // Cleanup may synchronously dispose this coordinator or start another owner.
+    if (this.disposed || this.externalOutput || this.active || this.request) { stop(); return inactive; }
+    const owner = { stop };
+    this.externalOutput = owner;
+    this.state.status = 'silent';
+    this.state.error = null;
+    const lease: ExternalOutputLease = {
+      isCurrent: () => !this.disposed && this.externalOutput === owner,
+      release: () => {
+        if (this.externalOutput !== owner) return;
+        this.cancel();
+        this.state.status = 'silent';
+        this.emit();
+      },
+    };
+    this.emit();
+    return lease;
   }
 
   getBookmark(): ReadingBookmark | null {
@@ -104,9 +146,13 @@ export class AudioCoordinator {
     this.request?.abort();
     this.request = null;
     const previous = this.active;
+    const external = this.externalOutput;
     this.active = null;
+    this.externalOutput = null;
     previous?.stop();
     previous?.dispose();
+    // Detach before calling transport cleanup: it may synchronously release.
+    external?.stop();
   }
 
   load(target: PdfTarget, envelope: Envelope, mode: 'demo' | 'live'): void {
@@ -170,15 +216,17 @@ export class AudioCoordinator {
   }
 
   async resumeSource(envelope: Envelope, mode: 'demo' | 'live'): Promise<void> {
+    if (this.disposed) return;
+    if (this.externalOutput) this.stop();
     const bookmark = this.getBookmark();
-    if (!bookmark || this.disposed) return;
+    if (!bookmark) return;
     if (this.state.channel === 'source' && sameTarget(this.target, bookmark.target) && this.envelope && sameEnvelope(this.envelope, envelope) && this.state.mode === mode) return this.resume();
     if (this.restoreBookmark(bookmark, envelope, mode)) await this.resume();
   }
 
   /** New question/revision keeps both anchors while invalidating old network/audio work. */
   rebind(envelope: Envelope): void {
-    if (this.disposed || (this.envelope && sameEnvelope(this.envelope, envelope))) return;
+    if (this.disposed || (!this.externalOutput && this.envelope && sameEnvelope(this.envelope, envelope))) return;
     this.cancel();
     this.envelope = { ...envelope };
     this.state.status = 'silent';
@@ -270,6 +318,13 @@ export class AudioCoordinator {
   }
 
   pause(): void {
+    // External pause revokes output; resume explicitly restarts the local sentence.
+    if (!this.disposed && this.externalOutput) {
+      this.cancel();
+      this.state.status = 'paused';
+      this.emit();
+      return;
+    }
     if (this.disposed || (this.state.status !== 'speaking' && this.state.status !== 'buffering')) return;
     if (this.active) {
       this.playbackAttempt += 1;
@@ -316,7 +371,9 @@ export class AudioCoordinator {
   }
 
   private move(delta: number) {
-    if (this.disposed || !this.state.sentences.length) return;
+    if (this.disposed) return;
+    if (this.externalOutput) this.stop();
+    if (!this.state.sentences.length) return;
     const continuePlaying = this.state.status === 'speaking' || this.state.status === 'buffering';
     this.cancel();
     this.state.sentenceIndex = Math.max(0, Math.min(this.state.sentences.length - 1, this.state.sentenceIndex + delta));
