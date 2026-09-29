@@ -210,13 +210,19 @@ export function PdfReader(props: PdfReaderProps) {
       const context = canvas.getContext('2d');
       if (!context) throw new Error('PDF：浏览器无法创建画布，请使用最新 Edge 或 Chrome。');
       renderTask = page.render({ canvas, canvasContext: context, viewport, transform: pixelRatio === 1 ? undefined : [pixelRatio, 0, 0, pixelRatio, 0, 0], annotationMode: AnnotationMode.DISABLE });
-      const [, textContent] = await Promise.all([renderTask.promise, loaded.canCopy ? page.getTextContent() : Promise.resolve({ items: [], styles: {}, lang: null })]);
+      const [, extractedContent] = await Promise.all([renderTask.promise, loaded.canCopy ? page.getTextContent().catch(() => null) : Promise.resolve(null)]);
+      const textContent = extractedContent ?? { items: [], styles: {}, lang: null };
       if (cancelled) return;
       const runs: TextRun[] = [];
       for (const item of textContent.items) if ('str' in item) runs.push(item);
       const extraction = extractPageText(runs);
+      if (!extractedContent && loaded.canCopy) extraction.warning = '本页文本提取失败。原页仍可查看和框选，请勿依赖逐字朗读。';
       textLayer = new TextLayer({ textContentSource: textContent, container: textContainer, viewport });
-      await textLayer.render();
+      try { await textLayer.render(); } catch {
+        if (cancelled) return;
+        textContainer.replaceChildren();
+        extraction.warning = '文本选区层未能显示，请尝试重新打开，或框选需要讲解的区域。';
+      }
       if (cancelled) return;
       setRendered({ viewport, extraction, pageIndex, documentId: loaded.record.documentId });
       setRendering(false);
@@ -247,7 +253,7 @@ export function PdfReader(props: PdfReaderProps) {
   }
 
   function selectionTarget() {
-    if (mode !== 'text' || rendering || !rendered || !loaded?.canCopy || !pageRef.current || !textLayerRef.current) return;
+    if (mode !== 'text' || rendering || !rendered || rendered.pageIndex !== pageIndex || !loaded?.canCopy || rendered.documentId !== loaded.record.documentId || !pageRef.current || !textLayerRef.current) return;
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.rangeCount) return;
     const range = selection.getRangeAt(0);
@@ -276,7 +282,7 @@ export function PdfReader(props: PdfReaderProps) {
   }, []);
 
   function selectCurrentPage() {
-    if (!loaded?.canCopy || !rendered || !rendered.extraction.hasText) return;
+    if (!loaded?.canCopy || !rendered || rendered.pageIndex !== pageIndex || rendered.documentId !== loaded.record.documentId || !rendered.extraction.hasText) return;
     const sourceText = rendered.extraction.readingText;
     if (sourceText.length > 12000) { report('本页文字超过 12,000 字符，请在页上分段选择。'); return; }
     const rect: Rect = [0, 0, 1, 1];
@@ -290,7 +296,7 @@ export function PdfReader(props: PdfReaderProps) {
   }
 
   function startRegion(event: PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 || mode !== 'region' || !loaded?.canCopy || !rendered || rendering) return;
+    if (event.button !== 0 || mode !== 'region' || !loaded?.canCopy || !rendered || rendered.pageIndex !== pageIndex || rendered.documentId !== loaded.record.documentId || rendering) return;
     event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);
     const start = point(event); dragOrigin.current = start; setDragRect([...start, ...start]);
     window.getSelection()?.removeAllRanges();
@@ -302,7 +308,7 @@ export function PdfReader(props: PdfReaderProps) {
   }
 
   function finishRegion(event: PointerEvent<HTMLDivElement>) {
-    if (!dragOrigin.current || !loaded || !rendered || !canvasRef.current) return;
+    if (!dragOrigin.current || !loaded || !rendered || rendered.pageIndex !== pageIndex || rendered.documentId !== loaded.record.documentId || !canvasRef.current) return;
     const rect = orderedRect([...dragOrigin.current, ...point(event)]);
     dragOrigin.current = null; setDragRect(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
