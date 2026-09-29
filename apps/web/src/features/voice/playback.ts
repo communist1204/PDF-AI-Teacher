@@ -15,6 +15,7 @@ export interface PlaybackHandle {
   pause(): void;
   stop(): void;
   dispose(): void;
+  /** Applied before play; the coordinator recreates an active sentence when its rate changes. */
   setRate(rate: number): void;
   setVolume(volume: number): void;
 }
@@ -127,7 +128,8 @@ export const browserPlaybackAdapter: PlaybackAdapter = {
       pause() { clearWatchdog(); synth.pause(); },
       stop,
       dispose: stop,
-      // Some OS engines apply rate/volume changes only from the next sentence.
+      // Rate is set before play; changing an active sentence is handled by the coordinator.
+      // Some OS engines apply volume changes only from the next sentence.
       setRate(rate) { utterance.rate = rate; },
       setVolume(volume) { utterance.volume = volume; },
     };

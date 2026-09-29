@@ -1,5 +1,6 @@
 import { sameEnvelope, SourceSchema, type Envelope, type PdfTarget, type ReadingCursor, type Sentence, type TeachingStep } from '../../../../../packages/shared/protocol';
 import { browserPlaybackAdapter, type PlaybackAdapter, type PlaybackHandle } from './playback';
+import { MAX_SPEECH_RATE, MIN_SPEECH_RATE } from '../../../../../packages/shared/speechRate';
 import { splitSentences, textVersion } from './sentences';
 export { splitSentences, toSpeechText, requiresFormulaConfirmation } from './sentences';
 export type { PlaybackAdapter, PlaybackHandle, PlaybackInput } from './playback';
@@ -390,9 +391,17 @@ export class AudioCoordinator {
 
   setRate(rate: number): void {
     if (this.disposed || !Number.isFinite(rate)) return;
-    this.state.rate = Math.max(0.5, Math.min(2, rate));
-    this.active?.setRate(this.state.rate);
-    this.emit();
+    const nextRate = Math.max(MIN_SPEECH_RATE, Math.min(MAX_SPEECH_RATE, rate));
+    if (nextRate === this.state.rate) return;
+    this.state.rate = nextRate;
+    // Browser speech engines may ignore a changed active utterance.rate. A clip
+    // generated at 2x also cannot safely be slowed to 0.25x by every media engine.
+    // Restart this unfinished sentence at the requested synthesis rate instead.
+    // cancel() invalidates its callbacks before it can end or overlap a new voice.
+    const restart = this.state.status === 'speaking' || this.state.status === 'buffering';
+    if (this.active || this.request) this.cancel();
+    if (restart) void this.startSentence();
+    else this.emit(); // A paused sentence stays paused until the user resumes.
   }
 
   setVolume(volume: number): void {

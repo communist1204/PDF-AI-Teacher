@@ -1,5 +1,6 @@
 ﻿import type { AppConfig, Envelope, TeachingPlan } from '../../../../../packages/shared/protocol';
 import { sameEnvelope } from '../../../../../packages/shared/protocol';
+import { MAX_REALTIME_RATE, MIN_SPEECH_RATE } from '../../../../../packages/shared/speechRate';
 import { REALTIME_TOOLS, RealtimeTools, type RealtimeContext, type ToolCallbacks } from './tools';
 
 export type RealtimeState={connection:'off'|'connecting'|'connected'|'error';mode:'live'|'local';input:'off'|'listening'|'speaking';output:'silent'|'thinking'|'speaking';level:number;caption:string;notice:string;error:string;canContinue:boolean;seconds:number;clearPending:boolean;inputTokens:number|null;outputTokens:number|null;responses:number};
@@ -90,6 +91,7 @@ export class RealtimeController {
       analyser.getFloatTimeDomainData(data);const rms=Math.sqrt(data.reduce((sum,value)=>sum+value*value,0)/data.length);const now=Date.now();this.state.level=Math.min(1,rms*12);this.state.seconds=Math.floor((now-this.startedAt)/1000);
       if(rms>0.028){this.quietSince=0;this.loudSince||=now;if(!this.localSpeaking&&now-this.loudSince>=120){this.localSpeaking=true;this.lastActivity=now;this.state.input='speaking';this.options.pauseLocal();this.interrupt('检测到声音，当前输出已暂停；等待确认有效问题。',false);}}
       else {this.loudSince=0;this.quietSince||=now;if(this.localSpeaking&&now-this.quietSince>450){this.localSpeaking=false;this.state.input='listening';if(this.state.mode==='local')this.state.notice='检测到声音并暂停了朗读。演练不识别内容；可点击原文继续，不会编造提问。';}}
+      if(this.state.output!=='silent')this.lastActivity=now;
       if(now-this.lastActivity>120000){this.stop('两分钟没有有效交互，实时语音已自动关闭。');return;}
       if(now-this.startedAt>(this.options.config.realtime?.maxSessionSeconds??600)*1000){this.stop('已达到本次语音时长上限，设备已释放。需要时请手动重连。');return;}this.emit();
     },100);
@@ -157,10 +159,13 @@ export class RealtimeController {
     if(event.type==='response.output_audio_transcript.delta'&&response&&this.valid(response)){if(typeof event.delta==='string'&&response.transcript.length<12000){response.transcript+=event.delta;this.state.caption=response.transcript;this.emit();}return;}
     if(event.type==='output_audio_buffer.started'){
       if(!response||!this.valid(response)||response.kind!=='audio'||this.barrier||!this.lease?.isCurrent()){if(this.remote)this.remote.muted=true;this.safeSend({type:'output_audio_buffer.clear'});return;}
+      // A slow, audible answer is not inactivity. Keep first-audio waiting bounded,
+      // then scale the playback watchdog without changing the total session limit.
+      clearTimeout(this.responseTimer??undefined);this.responseTimer=setTimeout(()=>this.fail('本步骤播放超时，声音和麦克风已关闭；可以从未完成步骤重试。'),120000/Math.min(1,this.outputSpeed));
       response.started=true;this.state.output='speaking';if(this.remote)this.remote.muted=false;this.emit();return;
     }
     if(event.type==='output_audio_buffer.stopped'&&response){
-      if(this.valid(response)){clearTimeout(this.responseTimer??undefined);this.responseTimer=null;}
+      if(this.valid(response)){clearTimeout(this.responseTimer??undefined);this.responseTimer=null;this.lastActivity=Date.now();}
       if(this.valid(response)&&response.kind==='audio'&&response.started){response.completed=true;const audible=this.remotePlaying&&this.lease?.isCurrent();this.report(response,audible?'spoken':'unconfirmed');if(this.teaching&&audible&&response.binding?.entryId===this.teaching.entryId&&response.binding?.index===this.teaching.index){this.teaching.completed=true;this.options.onStepComplete(response.binding.entryId,response.binding.index);}this.state.output='silent';this.state.canContinue=!!this.teaching;this.state.notice='本步骤播放结束。可追问、继续讲解或回原文。';this.response=null;const lease=this.lease;this.lease=null;lease?.release();this.emit();}return;
     }
     if(event.type==='response.done'){
@@ -192,7 +197,7 @@ export class RealtimeController {
   private async speak(text:string,envelope:Envelope){
     const intent=this.turn;const epoch=this.epoch;
     if(this.barrierPromise)await this.barrierPromise;if(!this.isLive()||intent!==this.turn||epoch!==this.epoch||!sameEnvelope(envelope,this.options.current()))return;
-    const speed=Math.max(0.75,Math.min(1.5,this.options.rate()));
+    const speed=Math.max(MIN_SPEECH_RATE,Math.min(MAX_REALTIME_RATE,this.options.rate()));
     if(speed!==this.outputSpeed){const applied=await new Promise<boolean>(resolve=>{const timer=setTimeout(()=>{this.speedUpdate=null;resolve(false);this.fail('服务端未确认语速设置，已停止连接，请重试。');},5000);this.speedUpdate={speed,resolve,timer};this.send({type:'session.update',session:{type:'realtime',audio:{output:{speed}}}});});if(!applied||intent!==this.turn||epoch!==this.epoch||!sameEnvelope(envelope,this.options.current()))return;}
     this.lease=this.options.claimOutput(()=>{if(this.remote)this.remote.muted=true;if(this.response?.kind==='audio'&&!this.response.completed)this.interrupt('输出已交给原文朗读；实时输入仍可用。');});
     this.state.output='thinking';this.state.caption='';this.emit();

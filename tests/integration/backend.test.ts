@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import OpenAI from 'openai';
+import { AudioCoordinator } from '../../apps/web/src/features/voice/AudioCoordinator';
 import { zodTextFormat } from 'openai/helpers/zod';
 import { TeachingPlanSchema, type AppConfig, type AskRequest } from '../../packages/shared/protocol';
 import { createApp } from '../../apps/server/src/app';
@@ -481,5 +482,55 @@ describe('M2 transcription (mocked provider, no paid calls)', () => {
     expect(sent.has('prompt')).toBe(false); expect(sent.has('store')).toBe(false);
     const file = sent.get('file') as File; expect(file.name).toBe('question.webm'); expect(file.type).toBe('audio/webm'); expect(Buffer.from(await file.arrayBuffer())).toEqual(audio);
     expect(sentSignal).toBeInstanceOf(AbortSignal); expect(result).toMatchObject({ text: 'AdamW 为什么这样更新？', requestId: 'req_transcribe_sdk', inputTokens: 12, outputTokens: 8 }); expect(fetchMock.mock.calls.filter(call => String(call[0]).startsWith('https://'))).toHaveLength(1);
+  });
+});
+
+
+describe('slow speech contract across coordinator, API, SDK and media adapter (provider/audio mocked)', () => {
+  it('preserves 0.25x through the full request path and uses normal media playback for the already-slow clip', async () => {
+    const sent: Array<{ speed: number; input: string }> = [];
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      sent.push(JSON.parse(init?.body as string) as (typeof sent)[number]);
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'audio/mpeg' } });
+    });
+    const config = liveConfig();
+    const provider = new OpenAITeachingProvider(config, new OpenAI({ apiKey: 'mock-only', fetch: fetchMock as typeof fetch, maxRetries: 0 }));
+    const app = createApp({ config, provider }); const client = await browser(app);
+    const clips: Array<{ playbackRate: number; pause: ReturnType<typeof vi.fn> }> = [];
+    vi.stubGlobal('Audio', class {
+      volume = 1; playbackRate = 1;
+      onplaying: (() => void) | null = null; onended: (() => void) | null = null; onerror: (() => void) | null = null;
+      pause = vi.fn(); removeAttribute = vi.fn(); load = vi.fn();
+      constructor() { clips.push(this); }
+      async play() { this.onplaying?.(); }
+    });
+    const onError = vi.fn();
+    const audio = new AudioCoordinator({ onChange: vi.fn(), onError, requestSpeech: async (text, envelope, speed) => {
+      const response = await post(app, client, '/api/tts', { ...envelope, text, speed }).expect(200);
+      return new Blob([new Uint8Array(response.body as Buffer)]);
+    } });
+    try {
+      audio.load({ sourceId: 'selected', documentId: 'book', pageIndex: 0, pageLabel: null, blockId: 'paragraph', rect: null, sourceText: '所选第一句。所选第二句。' }, { sessionId: client.config.sessionId, generationId: 1, contextRevision: 1 }, 'live');
+      audio.setRate(2); await audio.play(); const bookmark = audio.getBookmark();
+      audio.setRate(0.25);
+      await vi.waitFor(() => expect(audio.getSnapshot().status).toBe('speaking'));
+      expect(clips[0].pause).toHaveBeenCalledOnce();
+      expect(sent.map(value => value.speed)).toEqual([2, 0.25]);
+      expect(sent.every(value => value.input === '所选第一句。')).toBe(true);
+      expect(clips.map(value => value.playbackRate)).toEqual([1, 1]);
+      expect(audio.getBookmark()).toEqual(bookmark);
+      audio.stop(); await audio.resume();
+      expect(fetchMock).toHaveBeenCalledTimes(2); // Reuses the exact 0.25x clip.
+      audio.setRate(0.35); await vi.waitFor(() => expect(audio.getSnapshot().status).toBe('speaking'));
+      expect(sent.map(value => value.speed)).toEqual([2, 0.25, 0.35]);
+      expect(clips.every(value => value.playbackRate === 1)).toBe(true);
+      expect(audio.getBookmark()).toEqual(bookmark); expect(onError).not.toHaveBeenCalled();
+    } finally { audio.dispose(); vi.unstubAllGlobals(); }
+  });
+
+  it.each([0.249, 2.01, 0, -1])('rejects out-of-range rate %s before the provider is called', async speed => {
+    const provider = mockProvider(); const app = createApp({ config: liveConfig(), provider }); const client = await browser(app);
+    const response = await post(app, client, '/api/tts', { text: '所选原文', speed }).expect(400);
+    expect(response.body.message).toContain('0.25 到 2'); expect(provider.speak).not.toHaveBeenCalled();
   });
 });

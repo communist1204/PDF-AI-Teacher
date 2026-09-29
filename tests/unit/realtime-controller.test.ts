@@ -151,13 +151,13 @@ describe('Realtime controller protocol regressions', () => {
 describe('Realtime output speed acknowledgment gate', () => {
   const audioRequests = (events: SentEvent[]) => events.filter(event => event.type === 'response.create' && event.response?.output_modalities[0] === 'audio');
 
-  it('waits for the matching session speed acknowledgment before creating audio', async () => {
-    const f = setup(0.75, false); const { handling } = await f.prepareTeaching(); await f.waitForSpeedUpdate();
-    expect(f.sent.find(event => event.type === 'session.update')?.session).toEqual({ type: 'realtime', audio: { output: { speed: 0.75 } } });
+  it.each([0.25, 0.35, 0.5, 0.75])('waits for the matching %sx session speed acknowledgment before creating audio', async speed => {
+    const f = setup(speed, false); const { handling } = await f.prepareTeaching(); await f.waitForSpeedUpdate();
+    expect(f.sent.find(event => event.type === 'session.update')?.session).toEqual({ type: 'realtime', audio: { output: { speed } } });
     expect(audioRequests(f.sent)).toHaveLength(0); expect(f.audio.muted).toBe(true);
     await f.acknowledgeSpeed(1);
     expect(audioRequests(f.sent)).toHaveLength(0);
-    await f.acknowledgeSpeed(0.75); await handling;
+    await f.acknowledgeSpeed(speed); await handling;
     expect(audioRequests(f.sent)).toHaveLength(1); expect(f.latestResponse().audio).toBeUndefined();
     expect(f.trace.indexOf('ack')).toBeLessThan(f.trace.indexOf('session.update'));
     expect(f.trace.indexOf('session.update')).toBeLessThan(f.trace.indexOf('request:audio'));
@@ -292,5 +292,26 @@ describe('Realtime remote audio callbacks across reconnection', () => {
     expect(f.onStepComplete).not.toHaveBeenCalled();
     expect(f.onMessage).toHaveBeenCalledWith('assistant', '已经开始讲解。', 'unconfirmed');
     expect(request.mock.calls.every(([path]) => path.startsWith('/api/realtime/'))).toBe(true);
+  });
+});
+
+describe('Realtime slow playback watchdog (simulated transport)', () => {
+  it.each([0.25, 0.5])('does not cut an active %sx step at two minutes but still closes a stalled playback', async speed => {
+    vi.useFakeTimers(); const f = setup(speed); await f.teach();
+    await f.controller.receive({ type: 'response.done', response: { id: 'audio-a', status: 'completed' } });
+    await vi.advanceTimersByTimeAsync(120001);
+    expect(f.controller.getSnapshot()).toMatchObject({ connection: 'connected', output: 'speaking' });
+    expect(f.onStepComplete).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(120000 / speed - 120001);
+    expect(f.controller.getSnapshot()).toMatchObject({ connection: 'error', input: 'off', output: 'silent' });
+    expect(f.audio.muted).toBe(true); expect(f.channel.close).toHaveBeenCalled();
+    expect(f.onStepComplete).not.toHaveBeenCalled();
+  });
+
+  it('keeps the first-audio deadline unchanged at 0.25x when no playback starts', async () => {
+    vi.useFakeTimers(); const f = setup(0.25); const { handling } = await f.prepareTeaching(); await handling;
+    await f.accept('silent-audio', 'audio'); await vi.advanceTimersByTimeAsync(120000);
+    expect(f.controller.getSnapshot()).toMatchObject({ connection: 'error', input: 'off', output: 'silent' });
+    expect(f.audio.muted).toBe(true); expect(f.onStepComplete).not.toHaveBeenCalled();
   });
 });

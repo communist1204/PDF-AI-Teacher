@@ -194,8 +194,8 @@ describe('AudioCoordinator (mock playback; no hardware audio claims)', () => {
   it('uses no paid request in demo and only clears bookmarks after all sentences ended', async () => {
     const h = harness();
     h.audio.load(target, envelope, 'demo');
-    await h.audio.play();
     h.audio.setRate(1.5);
+    await h.audio.play();
     h.audio.setVolume(0.4);
     for (let index = 0; index < 3; index += 1) { h.handles[index].input.onEnded(); await tick(); }
     expect(h.requestSpeech).not.toHaveBeenCalled();
@@ -691,5 +691,79 @@ describe('M3 external output ownership (mock transport; no realtime API)', () =>
     expect(lateStop).toHaveBeenCalledOnce();
     expect(firstStop).toHaveBeenCalledOnce();
     expect(audio.getSnapshot()).toMatchObject({ outputOwner: 'local', status: 'silent' });
+  });
+});
+
+
+describe('slow speech and rate changes (simulated playback)', () => {
+  it.each(['demo', 'live'] as const)('starts %s at 0.25x and restarts only the unfinished sentence on a rate change', async mode => {
+    const h = harness(); h.audio.load(target, envelope, mode); h.audio.setRate(0.25);
+    await h.audio.play(); h.handles[0].input.onEnded(); await tick();
+    const old = h.handles[1]; const bookmark = h.audio.getBookmark();
+    expect(old.input.rate).toBe(0.25);
+    h.audio.setRate(0.35);
+    expect(old.stopped).toBe(true); expect(h.audible()).toBe(0);
+    old.input.onEnded(); old.input.onError('late end from old rate'); await tick();
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'speaking', sentenceIndex: 1, rate: 0.35 });
+    expect(h.audio.getBookmark()).toEqual(bookmark);
+    expect(h.handles[2].input).toMatchObject({ text: '第二句。', rate: 0.35 });
+    expect(h.onComplete).not.toHaveBeenCalled(); expect(h.onError).not.toHaveBeenCalled();
+    expect(h.maxAudible()).toBe(1);
+    if (mode === 'demo') expect(h.requestSpeech).not.toHaveBeenCalled();
+    else expect(h.requestSpeech).toHaveBeenLastCalledWith('第二句。', envelope, 0.35, expect.any(AbortSignal));
+    h.audio.dispose();
+  });
+
+  it('keeps paused audio silent on a slow rate change and resumes its current sentence', async () => {
+    const h = harness(); await h.audio.play(); h.audio.next(); await tick(); h.audio.pause();
+    const old = h.handles[1]; const bookmark = h.audio.getBookmark();
+    h.audio.setRate(0.25); await tick();
+    expect(old.stopped).toBe(true); expect(h.audible()).toBe(0);
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'paused', rate: 0.25 });
+    expect(h.requestSpeech).toHaveBeenCalledTimes(2);
+    await h.audio.resume();
+    expect(h.audio.getBookmark()).toEqual(bookmark);
+    expect(h.handles[2].input).toMatchObject({ text: '第二句。', rate: 0.25 });
+    expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it('cancels a buffering sentence before requesting its new rate and rejects the old audio', async () => {
+    const pending = deferred<Blob>(); const requestSpeech = vi.fn().mockImplementationOnce(() => pending.promise).mockResolvedValue(new Blob(['slow']));
+    const h = harness(requestSpeech); const playing = h.audio.play();
+    const oldSignal = requestSpeech.mock.calls[0][3] as AbortSignal;
+    h.audio.setRate(0.25); await tick();
+    expect(oldSignal.aborted).toBe(true);
+    pending.resolve(new Blob(['stale normal-speed audio'])); await playing;
+    expect(h.handles).toHaveLength(1); expect(h.handles[0].input.rate).toBe(0.25);
+    expect(requestSpeech).toHaveBeenLastCalledWith('第一句。', envelope, 0.25, expect.any(AbortSignal));
+    expect(h.audio.getSnapshot().sentenceIndex).toBe(0); expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it('does not replay for the same rate or steal the realtime output lease when updating preferences', async () => {
+    const h = harness(); h.audio.setRate(0.25); await h.audio.play(); h.audio.setRate(0.25); await tick();
+    expect(h.requestSpeech).toHaveBeenCalledOnce();
+    const stopRemote = vi.fn(); const lease = h.audio.claimExternalOutput(stopRemote); const bookmark = h.audio.getBookmark();
+    h.audio.setRate(0.35);
+    expect(lease.isCurrent()).toBe(true); expect(stopRemote).not.toHaveBeenCalled();
+    expect(h.audio.getBookmark()).toEqual(bookmark); expect(h.audible()).toBe(0); h.audio.dispose();
+  });
+
+  it('passes a 0.25x rate to a local utterance instead of relying on changing an active utterance', async () => {
+    const events = new EventTarget(); const spoken: Array<{ text: string; rate: number; onstart?: () => void }> = [];
+    const synth = { getVoices: () => [{ localService: true, lang: 'zh-CN', name: 'local' }],
+      addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events),
+      speak: vi.fn((value: (typeof spoken)[number]) => { spoken.push(value); value.onstart?.(); }), resume: vi.fn(), pause: vi.fn(), cancel: vi.fn(),
+    };
+    vi.stubGlobal('window', { speechSynthesis: synth });
+    vi.stubGlobal('SpeechSynthesisUtterance', class { constructor(public text: string) {} });
+    const audio = new AudioCoordinator({ requestSpeech: vi.fn(), onChange: vi.fn(), onError: vi.fn() });
+    try {
+      audio.load(target, envelope, 'demo'); audio.setRate(0.25); await audio.play();
+      expect(spoken[0]).toMatchObject({ text: '第一句。', rate: 0.25 });
+      audio.setRate(0.35); await tick(); await tick();
+      expect(synth.cancel).toHaveBeenCalledOnce();
+      expect(spoken[1]).toMatchObject({ text: '第一句。', rate: 0.35 });
+      expect(spoken[1]).not.toBe(spoken[0]); expect(audio.getSnapshot().sentenceIndex).toBe(0);
+    } finally { audio.dispose(); vi.unstubAllGlobals(); }
   });
 });

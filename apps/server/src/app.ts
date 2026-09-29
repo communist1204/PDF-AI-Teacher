@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { MAX_SPEECH_RATE, MIN_SPEECH_RATE } from '../../../packages/shared/speechRate';
 import express, { type ErrorRequestHandler, type Request, type Response } from 'express';
 import { AskRequestSchema, EnvelopeSchema, TtsRequestSchema, TranscriptionRequestSchema, TranscriptionResponseSchema, validatePlan, type AppConfig, type AskResponse, type Envelope, type UsageRecord } from '../../../packages/shared/protocol';
 import { REALTIME_IDLE_SECONDS, REALTIME_MAX_SESSION_SECONDS, RealtimeConnectRequestSchema, RealtimeConnectionRequestSchema, type RealtimeConnectResponse } from '../../../packages/shared/realtime';
@@ -201,7 +202,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
   app.post('/api/tts', async (req, res) => {
     const session = requireMutation(req);
     const parsed = TtsRequestSchema.safeParse(req.body);
-    if (!parsed.success) throw new HttpError(400, 'invalid_request', '朗读文本不能为空或超过 1600 字，语速范围为 0.5 到 2。');
+    if (!parsed.success) throw new HttpError(400, 'invalid_request', `朗读文本不能为空或超过 1600 字，语速范围为 ${MIN_SPEECH_RATE} 到 ${MAX_SPEECH_RATE}。`);
     const request = parsed.data;
     checkFresh(session, request);
     setEnvelope(res, request);
