@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import express, { type ErrorRequestHandler, type Request, type Response } from 'express';
-import { AskRequestSchema, EnvelopeSchema, TtsRequestSchema, validatePlan, type AppConfig, type AskResponse, type Envelope, type UsageRecord } from '../../../packages/shared/protocol';
+import { AskRequestSchema, EnvelopeSchema, TtsRequestSchema, TranscriptionRequestSchema, TranscriptionResponseSchema, validatePlan, type AppConfig, type AskResponse, type Envelope, type UsageRecord } from '../../../packages/shared/protocol';
+import { validateRecording } from './recording';
 import { AudioCache } from './cache';
 import { DEFAULT_TTS_STYLE, readConfig, TTS_SOURCE_FIDELITY, type ServerConfig } from './config';
 import { makeDemoPlan } from './demo';
@@ -10,7 +11,7 @@ import { OpenAITeachingProvider, speechRequest, type TeachingProvider } from './
 type Job = { envelope: Envelope; controller: AbortController };
 type Session = {
   id: string; csrf: string; touchedAt: number; generation: number; revision: number; cancelledThrough: number;
-  requests: number; recentRequests: number[]; usage: UsageRecord[]; jobs: Set<Job>;
+  transcribedGenerations: Set<number>; requests: number; recentRequests: number[]; usage: UsageRecord[]; jobs: Set<Job>;
 };
 const SESSION_COOKIE = 'pdf_teacher_session';
 const SESSION_TTL = 6 * 60 * 60 * 1000;
@@ -41,9 +42,9 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     vision: !config.demoMode && config.apiKey && config.visionModel ? 'untested' : 'unconfigured',
     structuredOutput: !config.demoMode && config.apiKey && (config.chatModel || config.visionModel) ? 'untested' : 'unconfigured',
     tts: !config.demoMode && config.apiKey && config.ttsModel ? 'untested' : 'unconfigured',
-    transcription: 'unsupported', realtimeAudio: 'unsupported', realtimeTools: 'unsupported', interruption: 'unsupported',
+    transcription: !config.demoMode && config.apiKey && config.transcriptionModel ? 'untested' : 'unconfigured', realtimeAudio: 'unsupported', realtimeTools: 'unsupported', interruption: 'unsupported',
   };
-  const mode: AppConfig['mode'] = config.demoMode ? 'demo' : config.apiKey && (config.chatModel || config.visionModel || config.ttsModel) ? 'live' : 'unconfigured';
+  const mode: AppConfig['mode'] = config.demoMode ? 'demo' : config.apiKey && (config.chatModel || config.visionModel || config.ttsModel || config.transcriptionModel) ? 'live' : 'unconfigured';
   const allowedHosts = new Set([`127.0.0.1:${config.port}`, `localhost:${config.port}`]);
 
   app.use((req, res, next) => {
@@ -54,6 +55,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
     next();
   });
+  app.use('/api/transcribe', express.json({ limit: '5600kb', strict: true }));
   app.use(express.json({ limit: '3500kb', strict: true }));
 
   function expireSessions() {
@@ -133,12 +135,12 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     let session = sessions.get(cookieSession(req) ?? '');
     if (!session) {
       if (sessions.size >= 128) throw new HttpError(429, 'session_capacity', '本地会话数达到上限，请关闭闲置页面后重启本项目。');
-      session = { id: randomUUID(), csrf: randomBytes(32).toString('hex'), touchedAt: now(), generation: 0, revision: 0, cancelledThrough: -1, requests: 0, recentRequests: [], usage: [], jobs: new Set() };
+      session = { id: randomUUID(), csrf: randomBytes(32).toString('hex'), touchedAt: now(), generation: 0, revision: 0, cancelledThrough: -1, transcribedGenerations: new Set(), requests: 0, recentRequests: [], usage: [], jobs: new Set() };
       sessions.set(session.id, session);
     }
     session.touchedAt = now();
     res.cookie(SESSION_COOKIE, session.id, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: SESSION_TTL });
-    const body: AppConfig = { mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel }, speech: {
+    const body: AppConfig = { mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel, transcription: config.transcriptionModel }, speech: {
       voice: config.ttsVoice,
       style: !config.ttsInstructionsSupported ? '使用模型默认语气' : config.ttsInstructions === [DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') ? '自然温和，按语义停顿' : '本机自定义语气',
       instructionsSupported: config.ttsInstructionsSupported,
@@ -210,6 +212,40 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     res.set({ 'x-audio-cache': 'miss', 'x-request-id': usage.requestId }).type('audio/mpeg').send(result.audio);
   });
 
+  app.post('/api/transcribe', async (req, res) => {
+    const session = requireMutation(req);
+    const parsed = TranscriptionRequestSchema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, 'invalid_recording', '录音格式无效；请录制 0.3 到 60 秒、4 MB 以内的语音。');
+    const request = parsed.data;
+    const audio = validateRecording(request.audioBase64, request.mimeType);
+    checkFresh(session, request);
+    setEnvelope(res, request);
+    if (config.demoMode) throw new HttpError(409, 'demo_transcription', '演示模式不上传录音，也不提供模拟转写。请直接输入文字，或在本机配置转写模型。');
+    if (!config.apiKey || !config.transcriptionModel || !provider) throw new HttpError(503, 'not_configured', '转写模型或 API Key 未配置；请在本机 .env 设置 TRANSCRIPTION_MODEL 后重启，或直接输入文字。');
+    // One recording per generation. A repeat cannot start another paid transcription.
+    if (session.transcribedGenerations.has(request.generationId)) throw new HttpError(409, 'duplicate_transcription', '这段录音已经提交，请重新录音后再试。');
+    consumeRequest(session);
+    session.transcribedGenerations.add(request.generationId);
+    const usage = newUsage(session, config.transcriptionModel, 'transcription');
+    usage.audioSeconds = null;
+    try {
+      const result = await runJob(session, request, req, res, usage, signal => provider.transcribe(audio, request.mimeType, signal));
+      usage.requestId = safeRequestId(result.requestId) ?? usage.requestId;
+      usage.inputTokens = Number.isFinite(result.inputTokens) ? result.inputTokens! : null;
+      usage.outputTokens = Number.isFinite(result.outputTokens) ? result.outputTokens! : null;
+      usage.audioSeconds = Number.isFinite(result.audioSeconds) ? result.audioSeconds! : null;
+      const response = TranscriptionResponseSchema.safeParse({ sessionId: request.sessionId, generationId: request.generationId, contextRevision: request.contextRevision, mode: 'live', text: result.text });
+      if (!response.success) throw new HttpError(502, 'empty_transcription', '没有得到有效的转写文字，或文字超过 2000 字。请靠近麦克风、缩短问题后重录，或直接输入文字。');
+      capabilities.transcription = 'supported';
+      res.json({ ...response.data, usage });
+    } catch (error) {
+      if (!(error instanceof HttpError) || !['cancelled', 'stale_request'].includes(error.code)) capabilities.transcription = 'error';
+      throw error;
+    } finally {
+      audio.fill(0);
+    }
+  });
+
   app.post('/api/cancel', (req, res) => {
     const session = requireMutation(req);
     const parsed = EnvelopeSchema.safeParse(req.body);
@@ -230,11 +266,11 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     const session = sessionFor(req);
     res.json({ records: session.usage, requestCount: session.requests, maxRequests: config.maxRequests, cache: cache.stats(session.id), estimatedCost: null });
   });
-  app.use('/api', (_req, _res, next) => next(new HttpError(404, 'unknown_endpoint', '此接口未实现；M2/M3 语音能力仍待后续开发。')));
+  app.use('/api', (_req, _res, next) => next(new HttpError(404, 'unknown_endpoint', '此接口未实现；实时语音会话属于后续 M3。')));
 
   const errorHandler: ErrorRequestHandler = (error: unknown, req, res, _next) => {
     const details = typeof error === 'object' && error ? error as Record<string, unknown> : {};
-    const safe = error instanceof HttpError ? error : details.type === 'entity.too.large' ? new HttpError(413, 'payload_too_large', '请求过大，请缩小选区或截图。') : details.type === 'entity.parse.failed' ? new HttpError(400, 'invalid_json', '请求格式不是有效 JSON。') : new HttpError(500, 'internal_error', '本地服务处理失败，请重试；未输出敏感诊断内容。');
+    const safe = error instanceof HttpError ? error : details.type === 'entity.too.large' ? new HttpError(413, 'payload_too_large', '请求过大，请缩小选区、截图或录音。') : details.type === 'entity.parse.failed' ? new HttpError(400, 'invalid_json', '请求格式不是有效 JSON。') : new HttpError(500, 'internal_error', '本地服务处理失败，请重试；未输出敏感诊断内容。');
     if (res.headersSent || res.destroyed) return;
     const envelope = EnvelopeSchema.safeParse(req.body);
     if (envelope.success) setEnvelope(res, envelope.data);

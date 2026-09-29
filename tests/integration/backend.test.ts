@@ -12,9 +12,9 @@ import { OpenAITeachingProvider, TEACHER_INSTRUCTIONS, type TeachingProvider } f
 
 const HOST = '127.0.0.1:4317';
 const ORIGIN = `http://${HOST}`;
-const liveConfig = (): ServerConfig => ({ ...readConfig({}), demoMode: false, apiKey: 'mock-key-never-used', chatModel: 'mock-chat', visionModel: 'mock-vision', ttsModel: 'mock-tts' });
+const liveConfig = (): ServerConfig => ({ ...readConfig({}), demoMode: false, apiKey: 'mock-key-never-used', chatModel: 'mock-chat', visionModel: 'mock-vision', ttsModel: 'mock-tts', transcriptionModel: 'mock-transcription' });
 function mockProvider(): TeachingProvider {
-  return { ask: vi.fn(async (body: AskRequest) => ({ plan: makeDemoPlan(body), requestId: 'req_mock' })), speak: vi.fn(async () => ({ audio: Buffer.from('mock mp3 bytes'), requestId: 'req_speech' })) };
+  return { transcribe: vi.fn(async () => ({ text: '为什么 beta 要取 t 次方？', requestId: 'req_transcription' })), ask: vi.fn(async (body: AskRequest) => ({ plan: makeDemoPlan(body), requestId: 'req_mock' })), speak: vi.fn(async () => ({ audio: Buffer.from('mock mp3 bytes'), requestId: 'req_speech' })) };
 }
 type Browser = { config: AppConfig; cookie: string };
 async function browser(app: Express): Promise<Browser> {
@@ -389,5 +389,97 @@ describe('provider protocol and bounded cache', () => {
     expect(cache.stats('a').entries).toBe(2);
     cache.clear('a');
     expect(cache.stats('a').bytes).toBe(0);
+  });
+});
+
+function recordingBody() {
+  const audio = Buffer.alloc(100); Buffer.from('1a45dfa3', 'hex').copy(audio); audio.write('webm', 8);
+  return { mimeType: 'audio/webm', audioBase64: audio.toString('base64'), durationMs: 1200 };
+}
+describe('M2 transcription (mocked provider, no paid calls)', () => {
+  it('keeps transcription capability independent and rejects demo without a provider call', async () => {
+    const provider = mockProvider(); const demo = createApp({ provider }); const client = await browser(demo);
+    expect(client.config.capabilities.transcription).toBe('unconfigured');
+    expect((await post(demo, client, '/api/transcribe', recordingBody()).expect(409)).body.error).toBe('demo_transcription');
+    expect(provider.transcribe).not.toHaveBeenCalled();
+    const missing = createApp({ config: { ...liveConfig(), transcriptionModel: '' }, provider }); const other = await browser(missing);
+    expect(other.config.capabilities.text).toBe('untested'); expect(other.config.capabilities.transcription).toBe('unconfigured');
+    await post(missing, other, '/api/transcribe', recordingBody()).expect(503); expect(provider.transcribe).not.toHaveBeenCalled();
+    const only = await browser(createApp({ config: { ...liveConfig(), chatModel: '', visionModel: '', ttsModel: '' }, provider }));
+    expect(only.config.mode).toBe('live'); expect(only.config.models.transcription).toBe('mock-transcription'); expect(only.config.capabilities.transcription).toBe('untested');
+  });
+  it('returns editable exact text with envelope, records honest usage and prevents duplicate paid submissions', async () => {
+    const provider = mockProvider(); const app = createApp({ config: liveConfig(), provider }); const client = await browser(app);
+    const response = await post(app, client, '/api/transcribe', recordingBody()).expect(200);
+    expect(response.body.text).toBe('为什么 beta 要取 t 次方？'); expect(response.body.sessionId).toBe(client.config.sessionId);
+    expect(response.headers['x-generation-id']).toBe('1'); expect(response.body.mode).toBe('live');
+    expect(response.body.usage).toMatchObject({ category: 'transcription', inputTokens: null, outputTokens: null, estimatedCost: null, audioSeconds: null });
+    expect(provider.ask).not.toHaveBeenCalled(); expect(provider.speak).not.toHaveBeenCalled();
+    await post(app, client, '/api/transcribe', recordingBody()).expect(409); expect(provider.transcribe).toHaveBeenCalledOnce();
+    expect((await browser(app)).config.capabilities.transcription).toBe('supported');
+    expect((await usage(app, client).expect(200)).body.requestCount).toBe(1);
+  });
+  it('rejects wrong format, canonical base64, size and duration before provider invocation', async () => {
+    const provider = mockProvider(); const app = createApp({ config: liveConfig(), provider }); const client = await browser(app);
+    for (const change of [
+      { mimeType: 'text/html' }, { mimeType: 'audio/mp4' }, { mimeType: 'audio/ogg' }, { audioBase64: Buffer.from('<script>bad()</script>').toString('base64') },
+      { audioBase64: 'Zm8=' }, { audioBase64: '====' }, { audioBase64: recordingBody().audioBase64 + ' ' },
+      { durationMs: 0 }, { durationMs: 299 }, { durationMs: 60001 }, { durationMs: Infinity },
+      { audioBase64: Buffer.alloc(4 * 1024 * 1024 + 1).toString('base64') },
+    ]) await post(app, client, '/api/transcribe', { ...recordingBody(), ...change }).expect(400);
+    await post(app, client, '/api/transcribe', { ...recordingBody(), extra: 'x'.repeat(6000000) }).expect(413);
+    expect(provider.transcribe).not.toHaveBeenCalled(); expect((await usage(app, client).expect(200)).body.requestCount).toBe(0);
+  });
+  it('requires same-origin cookie, CSRF and matching session for transcription', async () => {
+    const app = createApp({ config: liveConfig(), provider: mockProvider() }); const client = await browser(app);
+    await post(app, client, '/api/transcribe', recordingBody()).set('Origin', 'https://evil.example').expect(403);
+    await post(app, client, '/api/transcribe', recordingBody()).set('x-csrf-token', '').expect(403);
+    await post(app, client, '/api/transcribe', { ...recordingBody(), sessionId: 'other' }).expect(403);
+    await post(app, client, '/api/transcribe', recordingBody()).set('Cookie', '').expect(401);
+  });
+  it('remembers cancellation before upload arrives and preserves zero request use', async () => {
+    const provider = mockProvider(); const app = createApp({ config: liveConfig(), provider }); const client = await browser(app);
+    await post(app, client, '/api/cancel', { generationId: 4 }).expect(200);
+    await post(app, client, '/api/transcribe', { ...recordingBody(), generationId: 4 }).expect(409);
+    expect(provider.transcribe).not.toHaveBeenCalled(); expect((await usage(app, client).expect(200)).body.requestCount).toBe(0);
+  });
+  it('aborts transcription and rejects a late provider result after context change', async () => {
+    const provider = mockProvider(); let started!: () => void; const start = new Promise<void>(r => { started = r; });
+    let resolveLate!: (value: { text: string }) => void; let signal!: AbortSignal;
+    vi.mocked(provider.transcribe).mockImplementation((_audio, _mime, active) => { signal = active; started(); return new Promise(resolve => { resolveLate = resolve; }); });
+    const app = createApp({ config: liveConfig(), provider }); const client = await browser(app);
+    const pending = post(app, client, '/api/transcribe', recordingBody()).then(value => value); await start;
+    await post(app, client, '/api/ask', { ...askBody(), generationId: 2, contextRevision: 2 }).expect(200);
+    expect(signal.aborted).toBe(true); expect((await pending).status).toBe(409); resolveLate({ text: '迟到文字' });
+    expect((await usage(app, client).expect(200)).body.records[0].cancelled).toBe(true);
+  });
+  it('handles timeout, sanitized errors, empty results and local quota without automatic retries', async () => {
+    const provider = mockProvider(); vi.mocked(provider.transcribe).mockImplementationOnce(() => new Promise(() => undefined));
+    const app = createApp({ config: { ...liveConfig(), requestTimeoutMs: 40 }, provider }); const client = await browser(app);
+    expect((await post(app, client, '/api/transcribe', recordingBody()).expect(504)).body.error).toBe('provider_timeout');
+    vi.mocked(provider.transcribe).mockRejectedValueOnce({ status: 401, message: 'secret-key', request_id: 'req_failure' });
+    const failure = await post(app, client, '/api/transcribe', { ...recordingBody(), generationId: 2 }).expect(502);
+    expect(failure.body.error).toBe('provider_authentication'); expect(failure.text).not.toContain('secret-key');
+    vi.mocked(provider.transcribe).mockResolvedValueOnce({ text: '   ' });
+    expect((await post(app, client, '/api/transcribe', { ...recordingBody(), generationId: 3 }).expect(502)).body.error).toBe('empty_transcription');
+    expect(provider.transcribe).toHaveBeenCalledTimes(3);
+    const limited = createApp({ config: { ...liveConfig(), maxRequests: 1 }, provider }); const other = await browser(limited);
+    await post(limited, other, '/api/transcribe', recordingBody()).expect(200);
+    await post(limited, other, '/api/transcribe', { ...recordingBody(), generationId: 2 }).expect(429);
+  });
+  it('uses the installed SDK multipart transcription endpoint and exact recording bytes', async () => {
+    let sent!: FormData; let url = ''; let sentSignal: AbortSignal | null | undefined;
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (String(input) === 'data:,') return new Response(''); // SDK FormData support probe, no provider call.
+      url = String(input); sent = init?.body as FormData; sentSignal = init?.signal;
+      return new Response(JSON.stringify({ text: 'AdamW 为什么这样更新？', usage: { type: 'tokens', input_tokens: 12, output_tokens: 8, total_tokens: 20 } }), { headers: { 'content-type': 'application/json', 'x-request-id': 'req_transcribe_sdk' } });
+    });
+    const client = new OpenAI({ apiKey: 'dummy', fetch: fetchMock as typeof fetch, maxRetries: 0 });
+    const adapter = new OpenAITeachingProvider(liveConfig(), client); const signal = new AbortController().signal;
+    const audio = Buffer.from(recordingBody().audioBase64, 'base64'); const result = await adapter.transcribe(audio, 'audio/webm', signal);
+    expect(url).toBe('https://api.openai.com/v1/audio/transcriptions'); expect(sent.get('model')).toBe('mock-transcription'); expect(sent.get('response_format')).toBe('json');
+    expect(sent.has('prompt')).toBe(false); expect(sent.has('store')).toBe(false);
+    const file = sent.get('file') as File; expect(file.name).toBe('question.webm'); expect(file.type).toBe('audio/webm'); expect(Buffer.from(await file.arrayBuffer())).toEqual(audio);
+    expect(sentSignal).toBeInstanceOf(AbortSignal); expect(result).toMatchObject({ text: 'AdamW 为什么这样更新？', requestId: 'req_transcribe_sdk', inputTokens: 12, outputTokens: 8 }); expect(fetchMock.mock.calls.filter(call => String(call[0]).startsWith('https://'))).toHaveLength(1);
   });
 });

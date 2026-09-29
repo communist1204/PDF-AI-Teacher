@@ -7,6 +7,7 @@ export interface ServerConfig {
   chatModel: string;
   visionModel: string;
   ttsModel: string;
+  transcriptionModel: string;
   ttsVoice: string;
   ttsInstructions: string;
   ttsInstructionsSupported: boolean;
@@ -57,6 +58,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     chatModel: env.CHAT_MODEL?.trim() || '',
     visionModel: env.VISION_MODEL?.trim() || '',
     ttsModel,
+    transcriptionModel: env.TRANSCRIPTION_MODEL?.trim() || '',
     ttsVoice: env.TTS_VOICE?.trim() || 'coral',
     ttsInstructions: ttsInstructionsSupported ? [customInstructions || DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') : '',
     ttsInstructionsSupported,

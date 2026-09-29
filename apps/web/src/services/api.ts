@@ -1,5 +1,5 @@
-import type { AppConfig, AskRequest, AskResponse, Envelope } from '../../../../packages/shared/protocol';
-import { sameEnvelope, validatePlan } from '../../../../packages/shared/protocol';
+import type { AppConfig, AskRequest, AskResponse, Envelope, TranscriptionRequest, TranscriptionResponse } from '../../../../packages/shared/protocol';
+import { sameEnvelope, TranscriptionResponseSchema, validatePlan } from '../../../../packages/shared/protocol';
 
 export async function getConfig(): Promise<AppConfig> {
   const response = await fetch('/api/config');
@@ -27,6 +27,13 @@ export function apiClient(config: AppConfig) {
       const response = await post('/api/tts', { ...envelope, text, speed }, signal);
       if (response.headers.get('x-session-id') !== envelope.sessionId || Number(response.headers.get('x-generation-id')) !== envelope.generationId || Number(response.headers.get('x-context-revision')) !== envelope.contextRevision) throw new Error('已丢弃过期音频');
       return response.blob();
+    },
+    async transcribe(request: TranscriptionRequest, signal: AbortSignal): Promise<TranscriptionResponse> {
+      const response = await post('/api/transcribe', request, signal);
+      const result: TranscriptionResponse = await response.json();
+      TranscriptionResponseSchema.parse(result);
+      if (!sameEnvelope(request, result)) throw new Error('已丢弃过期转写');
+      return result;
     },
     cancel(envelope: Envelope) { return post('/api/cancel', envelope).catch(() => undefined); },
     clearCache() { return post('/api/cache/clear', { sessionId: config.sessionId }); }
