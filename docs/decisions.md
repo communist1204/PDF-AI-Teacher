@@ -110,3 +110,41 @@ IndexedDB 不能保证刷新前的异步写入完成，因此将同一白名单�
 140 项单元/模拟接口和 28 项 Edge 场景通过，包括真实 MediaRecorder 管线的合成音/静音输入与 20 次模拟输出打断。合成输入不等于真人麦克风，20 次循环不等于 20 分钟学习，SpeechSynthesis 事件不等于中文听感通过。真实模型、转写、TTS 与真人长时验收仍待完成；保留 M3 全双工、直接开口打断、回声和未播内容修剪目标。
 
 最终记录边界修正：替换记录的操作锁由 App 持有，关闭/重开设置不会解除；忙碌期间禁用重复删除和重新开启保存。JSON 保存/导入/导出维持 8 MiB 上限；Markdown 不包含图像，沿用结构/来源/未知字段校验但不受 JSON 总字节限制，用于截图累计超限时保留文字笔记和板书，不声称它能完整还原图像记录。
+
+## M3：Realtime、打断和可确认板书（2026-09-29）
+
+用户明确要求继续下一阶段后实施 M3。本节取代前文“仅保留 M3 接口”的历史状态；需求文档原样保留。后端、音频协调器与协议测试在独立 worktree 完成并 cherry-pick，主目录负责集成。
+
+### 接口选择与核验
+
+应用 openai-docs 技能，先核对本地 OpenAI SDK 7.23.0，随后实际打开官方文档。使用 [Realtime WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc) 的 POST /v1/realtime/calls：后端提交 multipart sdp/session，session.type=realtime，保留 Location 中供应商 call ID。前端只得到 SDP 和本应用随机 connectionId；通过后端 [hangup](https://developers.openai.com/api/reference/typescript/resources/realtime/subresources/calls/methods/hangup) 关闭。模板 gpt-realtime-2.1、marin 为文档样例，不是账号可用性或实际质量保证。
+
+[Realtime transcription](https://developers.openai.com/api/docs/guides/realtime-transcription) 的 WebRTC 输入转写独立配置，示例 gpt-4o-mini-transcribe；不复用 M2 录音文件的 gpt-transcribe。后者当前文档的实时模式要求 WebSocket committed-turn 接口。本版只支持已核对的 WebRTC 转写模型与官方地址，兼容文字服务不推断为支持实时音频。
+
+[Live conversations](https://developers.openai.com/api/docs/guides/live-conversations) 与 [Live server controls](https://developers.openai.com/api/docs/guides/voice-server-controls?api=live) 是不同协议。GPT-Live 偏连续全双工，未提供与本版 Realtime 输出清除/未听历史修剪完全对应的保证。当前优先落实 PRD 的板书成功回执、逐步讲解、未播上下文修剪，选 OpenAI Realtime；不把不同接口包装成已接通 GPT-Live。自然语气只写为提示目标，不声称效果已达真人水平。
+
+### 输入、声音所有权和取消
+
+依据 [Realtime VAD](https://developers.openai.com/api/docs/guides/realtime-vad)，server_vad 配置 create_response=false / interrupt_response=true，应用收到有效转写才自行 response.create。另用浏览器 AudioContext RMS 作本机快速停音，不把有声音直接当成有问题；本地检测不递增语义轮次，避免和服务端重复检测互相作废。有效转写长度/重复 item/上下文/轮次均校验，不能保证真实 ASR 从不把噪声转成文字，需真人实测。
+
+AudioCoordinator 拥有唯一输出，实时声音通过外部 lease 互斥。交接同步停原文，释放旧 lease 不影响新音源；不删除独立原文书签。不用新服务挂断结果覆盖重连会话。音频元素事件、play Promise、数据通道异步错误同时校验 epoch 与元素身份，避免停止后的旧回调关闭新会话。
+
+按 [Realtime conversations](https://developers.openai.com/api/docs/guides/realtime-conversations) 和 [client events](https://developers.openai.com/api/reference/resources/realtime/client-events)，打断先本机静音，再 response.cancel + output_audio_buffer.clear；等待匹配 cleared 回执，2.5 秒未确认关闭连接。WebRTC 清除会由服务端处理未播放历史的截断；不使用 HTMLAudio.currentTime 伪造 audio_end_ms。取消最终状态是 response.done 的 cancelled，而非依赖不存在的 response.cancelled。真实服务的修剪效果仍待真实接口验收。
+
+response.done 只代表生成结束。步骤完成需当前响应的 output_audio_buffer.started/stopped、浏览器 playing 与有效输出 lease 同时成立；这证明播放器事件链，不证明人耳已听到。被打断/播放未确认的转写明确标记，不放入后续普通文字问答的已听历史。中断实时步骤从该步骤重播，不承诺逐词续播；原文维持独立句级锚点。
+
+### 教案和工具确认
+
+实时 response.metadata 携带本应用 sessionId/generationId/contextRevision/turn；所有迟到回复拒绝。仅接受 present_teaching_plan、focus_board_step、control_reading、get_learning_context；每次一个工具、最多三个短教学步骤、限定参数大小/来源/操作数量，无文件系统、网络或任意执行权限。PDF 与板书始终是数据。
+
+response.function_call_arguments.done 可能来自取消/不完整的响应，因此等 response.done completed 后才验证并执行；React 实际提交板书后返回 function_call_output 成功回执，再单独生成同一 TeachingPlan 当前步骤的语音。opId 幂等，冲突参数拒绝，过期重放不能返回成功；工具超时不确认执行。定位只允许实际已展示的步骤，不猜未显示的“第二行”。
+
+放慢通过全局语速偏好控制下一步骤，先 session.update.session.audio.output.speed，等匹配 session.updated，再请求音频；不发送无效的 response.audio.output.speed。停止、新问题和五秒超时都会取消旧设置等待。原文恢复工具回执代表播放队列已接收，播放器失败另行反馈，不表示已经听完。
+
+### 会话寿命、数据与用量
+
+后端复用 Host/Origin、CSRF、会话所有权、版本和限流。每个本地会话最多一个待连/活动实时连接，SDP 上限 64 KiB，连接交换与 hangup 有界；迟到交换成功也清理。前端每十秒心跳，后端三十秒没有心跳关闭、最多十分钟；前端两分钟无交互关闭。页面隐藏/失焦/离线/换目标/停止释放 tracks、RTCPeerConnection、AudioContext、播放器和定时器，不自动重连。
+
+这些是本机策略，不能当作服务商计费硬上限。hangup 超时/网络失败/进程退出无法确认时显示未确认；连接时长只是本机时长，tokens/audio/费用未知就保留未知。前端实时面板仅累计供应商实际返回的 response.usage，不推算音频账单。未上传真实录音，未调用付费接口。
+
+每 100ms 音量状态更新不应无限推迟记录保存，因此自动保存依据记录内容变化调度，不按每次渲染重置计时。持久化保留对话的播放状态；不保存 realtime call ID、凭证、原始音频或麦克风流。未完成/中断语音在导出中仍有标记。

@@ -51,7 +51,7 @@ export const LearningRecordSchema = z.object({
   document: DocumentRecordSchema,
   pageIndex: z.number().int().nonnegative(),
   target: SavedTargetSchema.nullable(),
-  messages: z.array(z.object({ id: z.string().min(1).max(200), role: z.enum(['user', 'assistant']), text: z.string().max(24000), demo: z.boolean().optional() }).strict()).max(500),
+  messages: z.array(z.object({ id: z.string().min(1).max(200), role: z.enum(['user', 'assistant']), text: z.string().max(24000), demo: z.boolean().optional(), delivery:z.enum(['text','spoken','interrupted','unconfirmed']).optional() }).strict()).max(500),
   entries: z.array(z.object({ id: z.string().min(1).max(200), plan: TeachingPlanSchema, context: ContextSchema, mode: z.enum(['demo', 'live']) }).strict()).max(200),
   activeStep: z.number().int().nonnegative(),
   activeEntryId: z.string().min(1).max(200).nullable().optional(),

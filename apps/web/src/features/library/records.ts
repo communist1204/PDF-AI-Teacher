@@ -108,7 +108,7 @@ export function markdownExport(input: LearningRecord): string {
   // Markdown omits images: keep all schema/source checks, but allow rescue of oversized JSON records.
   const record = validateRecordContent(input, undefined, false);
   const lines = [`# ${markdownText(record.document.fileName)} · 学习记录`, '', `更新：${record.updatedAt}`, `PDF 第 ${record.pageIndex + 1} / ${record.document.pageCount} 页`, '', '## 我的笔记', '', markdownText(record.note) || '（暂无）', '', '## 对话', ''];
-  for (const message of record.messages) lines.push(`### ${message.role === 'user' ? '我' : message.demo ? '老师（演示内容）' : '老师'}`, '', markdownText(message.text), '');
+  for (const message of record.messages) lines.push(`### ${message.role === 'user' ? '我' : message.demo ? '老师（演示内容）' : '老师'}`, '', ...(message.delivery==='interrupted'||message.delivery==='unconfirmed'?['语音播放未完成或未确认；转写不代表已经听到的内容。','']:[]), markdownText(message.text), '');
   lines.push('## 黑板', '');
   for (const entry of record.entries) {
     lines.push(`### 教案 ${markdownText(entry.id)}${entry.mode === 'demo' ? '（演示内容）' : ''}`, '');

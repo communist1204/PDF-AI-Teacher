@@ -337,6 +337,8 @@ test('声音设置明确区分本机演示和自然语音模型',async({page})=>
   const dialog=page.getByRole('dialog');
   await expect(dialog).toContainText('自然语音模型尚未连接');
   await expect(dialog).toContainText('TTS_MODEL=gpt-4o-mini-tts');
-  await expect(dialog).toContainText('实时插话尚未接入');
+  await expect(dialog).toContainText('OpenAI Realtime / WebRTC 适配');
+  await expect(dialog).toContainText('Realtime：未配置');
+  await expect(dialog).toContainText('实际语音效果待真人验收');
   await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);
 });

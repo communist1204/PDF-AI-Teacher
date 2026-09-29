@@ -122,5 +122,10 @@ export class ClassroomController {
     this.state={...structuredClone(initial),units:progress.units,unitIndex:progress.unitIndex,mode:progress.mode,entry,stepIndex:progress.stepIndex,completedStepIds:progress.completedStepIds,phase:progress.phase==='waiting'?'waiting':'interrupted',interruptedPhase:progress.phase};
     this.emit();
   }
+  confirmExternalStep(entryId:string,index:number){
+    if(this.state.entry?.id!==entryId||this.state.stepIndex!==index)return;
+    const step=this.state.entry.plan.steps[index];if(!step)return;
+    this.state.completedStepIds=[...new Set([...this.state.completedStepIds,step.stepId])];this.state.phase='waiting';this.emit();
+  }
   private fail(error:unknown){this.interrupt();this.options.onError(error instanceof Error?error.message:'陪读暂时中断，请重试。');}
 }
