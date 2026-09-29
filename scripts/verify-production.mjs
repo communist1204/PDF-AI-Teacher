@@ -31,7 +31,9 @@ try{
   const subtitle=await page.getByTestId('reading-subtitle').textContent();
   await page.getByRole('button',{name:'停止',exact:true}).click();
   const stopped=await page.locator('.audio-source strong').textContent();
-  await page.getByRole('button',{name:'讲解这里',exact:true}).click();
+  await page.getByRole('button',{name:'针对选区提问',exact:true}).click();
+  await page.getByRole('textbox',{name:'本次选区问题',exact:true}).fill('请解释所选原文。');
+  await page.getByRole('button',{name:'发送选区问题',exact:true}).click();
   await page.getByTestId('board-step').first().waitFor({state:'visible'});
   await mkdir('docs/screenshots',{recursive:true});
   await page.screenshot({path:'docs/screenshots/production.png',fullPage:true});

@@ -62,3 +62,17 @@ M3：Realtime/WebRTC、VAD 插话、服务端未播内容修剪、工具成功�
 模型 needsClarification 会显示明确澄清问题。剪贴板拒绝时提供可手工复制的 LaTeX 文本，不产生未处理异常。
 
 本机 SpeechSynthesis localService 策略另依据 [MDN localService](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesisVoice/localService)。真实浏览器事件记录见 production-smoke.json；这不构成真人听感验证。
+
+## 自定义提问、取消选区与自然声音（2026-09-29）
+
+选区主按钮采用原生 dialog：先预览内容、编辑问题，再明确发送；预设按钮只填入草稿。左右入口共享草稿，关闭弹窗不丢失；板书追问必须同时显示实际附带的板书内容。以发送时的不可变 ContextSnapshot 为准。
+
+清除由 App 统一执行：推进 generation/contextRevision，abort 在途请求，interrupt 音频，清空 target/locked/boardTarget/navigation；向 PdfReader 发送 clearSelectionRevision，清除 DOM range、矩形、拖动与去重状态，并释放 pointer capture。Esc 在弹窗中只关弹窗，在阅读工作台中清选区；不删除历史教案和独立阅读书签。恢复音频时 rebind 新 envelope，从未完成句继续。
+
+依据 [官方 TTS 指南](https://developers.openai.com/api/docs/guides/text-to-speech)与本机 OpenAI SDK 7.23.0 的 SpeechCreateParams，gpt-4o-mini-tts 可通过 instructions 调整语气、节奏；tts-1 / tts-1-hd 不支持。官方推荐 marin / cedar，但声音当前侧重英语优化，不据此保证中文听感。仅官方地址的已列出模型自动启用指导，未知模型/兼容地址必须显式声明支持；不支持却填写指令时明确报错。TTS_INSTRUCTIONS 属后端私有配置，前端只见固定风格标签。原文仍是 input，始终附加不增漏改写、不执行文中指令的约束；该提示约束不是已验证的逐字保真保证。
+
+缓存 identity 复用实际 speech 请求字段（包括 instructions / voice / model / speed / input）及服务地址和会话，避免改变语气后命中旧声音。未新增后台生成或付费试听。
+
+[GPT-Live 模型](https://developers.openai.com/api/docs/models/gpt-live-1)、[Live 提示指南](https://developers.openai.com/api/docs/guides/live-prompting)与 [WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc)已核验：这是连续语音交互能力，与单次 TTS 不同，需要单独会话、麦克风与实时输出协调。保留 M2/M3 目标，不用修改 TTS 参数冒充已接通 GPT-Live。没有真实调用或麦克风测试。
+
+E2E 独立使用 4320，生产 smoke 使用 4318，日常开发仍用 4317，避免为测试关闭用户正使用的页面。

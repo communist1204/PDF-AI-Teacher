@@ -10,16 +10,16 @@
 | npm.cmd run fixtures | 通过 | 生成 public/sample.pdf，两页自制中文材料，可选择文字；未打包商业教材 |
 | npm.cmd run typecheck | 通过 | tsc --noEmit，退出 0 |
 | npm.cmd run lint | 通过 | ESLint，退出 0 |
-| npm.cmd test | 通过 | 4 test files / **61 tests passed**，约 594ms |
+| npm.cmd test | 通过 | 4 test files / **69 tests passed**，约 632ms |
 | npm.cmd run build | 通过 | Vite 生产构建；存在 >500kB chunk 体积提示，不是编译错误 |
-| npm.cmd run test:e2e | 通过 | **10 passed (15.8s)**，单个本机 Edge worker |
+| npm.cmd run test:e2e | 通过 | **15 passed (23.4s)**，单个本机 Edge worker |
 | node scripts/verify-production.mjs | 通过 | 独立回环 4318 启动生产构建、打开 PDF、选区、演示教案；0 pageErrors；只关闭该脚本启动的进程 |
 | npm 安装审计 | 通过 | 初次安装报告 0 vulnerabilities；只装项目局部依赖 |
 | Git diff / 凭证检查 | 通过 | 自有代码 diff --check 通过；原需求未修改；.env 忽略；前端 bundle 无凭证模式命中 |
 
-单元测试组成：PDF/坐标/提取 17，音频与竞态 15，会话/教案 3，后端 mock 集成 26。没有任何测试依赖真实 Key。
+单元测试组成：PDF/坐标/提取 17，音频与竞态 15，会话/教案 3，后端 mock 集成 34。没有任何测试依赖真实 Key。
 
-最后一次端到端测试原始摘要：
+基础场景端到端测试摘要（本次新增项另见文末）：
 
 ```text
 中文 PDF 真实鼠标选区 → 演示教案 → 公式表格及来源: passed
@@ -105,3 +105,25 @@ PDF 内嵌 JavaScript 保持不执行: passed
 ## 网页无法打开的排查（2026-09-29）
 
 初查：4317 无监听，HTTP 连接失败。启动本项目服务后：127.0.0.1:4317 监听正常，首页/API 均 HTTP 200，DEMO 模式。独立 Edge 检查 title="PDF AI Teacher · 学习工作台"、appVisible=true、pageErrors=[]；服务在检查结束后继续运行。初次检查脚本受 PowerShell 内联引号影响而语法失败，改用项目内临时脚本后通过；不是应用错误。
+
+## 用户反馈回归（2026-09-29 19:08）
+
+在实际 Edge 中执行 15 项 e2e，全通过；开发服务隔离到 4320，未中断日常 4317 服务。最终 typecheck / lint / build 通过，单元与模拟后端 69/69；生产 smoke 于 19:08 使用独立 4318，全程 DEMO，0 pageErrors、0 providerCalls。构建仍有 PDF.js / KaTeX 大 chunk 提示。
+
+本轮新增或强化的实际浏览器验证：
+
+- 点选区提问先弹窗；空问题不可发；选提示词、改草稿、关闭弹窗均不调用 ask；自定义文本在两次请求中逐字匹配。
+- 文字与框选的原文/PNG 来自真实 PDF；自定义问题与正确选区一起发送。板书追问弹窗同时显示板书目标。
+- 取消按钮、阅读器工具栏按钮与 Esc 清除高亮、DOM 选择、截图、锁定目标和右侧目标标签；无目标时不会继续发旧选区。历史板书保留，同一处重新选择成功。
+- 在途请求取消后未出现迟到板书；旧响应版本拒绝另有 SessionGuard 单元测试。该浏览器场景主要验证 abort，不声称模拟了无法取消的真实服务。
+- 框选拖动中 Esc 后放开鼠标，不生成新截图。
+- 音频 mock：暂停/继续保持同段，文字打断后句首续读；第二句取消选区后目标消失、继续按钮可用，继续仍播放第二句且不重新锁定提问目标。
+- 设置页明确显示本机语音未接通自然模型；不把语气配置或构建通过标为真实听感通过。
+
+新增后端模拟覆盖：官方 mini-TTS 的 instructions、tts-1 无 instructions、未知/兼容端点能力声明、配置冲突错误、安全元数据、语气变化隔离缓存；没有真实请求。
+
+已实际查看 [问题编辑弹窗](screenshots/selection-question.png)、[720p 工作台](screenshots/workspace-1280.png)和[清除后的页面](screenshots/cleared-selection.png)。弹窗有预览、编辑框、发送按钮与演示说明；720p 操作没有被底部朗读栏遮挡。
+
+真人中文听感、gpt-4o-mini-tts 实际逐字保真、账号模型权限、GPT-Live / 麦克风 / 实时插话均未测。不能承诺声音与真人完全相同。无 .env / Key，未执行任何付费调用。
+
+本轮结束时仅重启已核实的本项目旧服务，新的后台开发服务继续监听 127.0.0.1:4317；首页 HTTP 200，/api/config 返回 demo 且含新增语音元数据。未创建真实 .env、未调用付费 API。用户需刷新页面并重新导入 PDF；电脑重启后仍使用 npm.cmd run dev 启动。
