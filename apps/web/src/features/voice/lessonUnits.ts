@@ -44,7 +44,7 @@ export function createLessonUnits(target: PdfTarget, unit: LessonUnit): PdfTarge
     ...target,
     // The rectangle remains the honest parent selection, never an invented line box.
     rect: target.rect ? [...target.rect] : null,
-    sourceId: `lesson:${identity}:${version}:${unit}:${index}`,
+    sourceId: `${target.documentId}:lesson:${identity}:${version}:${unit}:${index}`,
     blockId: `lesson:${textVersion(target.blockId)}:${version}:${unit}:${index}`,
     sourceText,
   }));

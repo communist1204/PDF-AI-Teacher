@@ -76,3 +76,37 @@ M3：Realtime/WebRTC、VAD 插话、服务端未播内容修剪、工具成功�
 [GPT-Live 模型](https://developers.openai.com/api/docs/models/gpt-live-1)、[Live 提示指南](https://developers.openai.com/api/docs/guides/live-prompting)与 [WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc)已核验：这是连续语音交互能力，与单次 TTS 不同，需要单独会话、麦克风与实时输出协调。保留 M2/M3 目标，不用修改 TTS 参数冒充已接通 GPT-Live。没有真实调用或麦克风测试。
 
 E2E 独立使用 4320，生产 smoke 使用 4318，日常开发仍用 4317，避免为测试关闭用户正使用的页面。
+
+## M2：课堂、转写与学习记录（2026-09-29）
+
+用户明确要求进入下一阶段后实施 M2；此前章节描述的是 M1 当时状态。未改 PRD 完成标准，未提前启用 M3 Realtime。后端转写、输出音频、记录存储分别在项目内独立 worktree 开发，合并后统一集成与验证，没有并行修改同一文件。
+
+### 课堂与声音
+
+ClassroomController 只处理用户所选的逐句/逐段单元。只朗读、读并讲、只讲解使用同一 AudioCoordinator；原文书签独立于解释队列。原文结束才申请本单元教案，提交当前板书后播放同一 TeachingPlan 的 speechText，每步后等待继续，不预生成整章。只有收到当前 envelope 的真实播放开始/结束事件才确认步骤完成。新问题与模式切换同时取消输出及上游请求，拒绝旧 generation。
+
+同会话恢复可保留解释中的句位置；持久化恢复解释到未完成步骤开头，原文则恢复经文本版本/句 ID 核对的句书签，不伪装逐词精度。手动继续为默认；自动恢复是明确可选项。朗读校对生成新版本，不修改 PDF 原文或既有教案。重复 stepId 必须同时核对来源和 speechText，不能串用另一回答的音频。
+
+图示限定为最多 8 节点、12 边的 schema，校验唯一 ID 与边端点，用固定 SVG 组件和普通文本显示。模型不提供任意 SVG/HTML/JS。清空黑板只隐藏当前内容，删除历史从学习记录入口单独确认。
+
+### 转写接口核验与输入边界
+
+2026-09-29 实际打开 [官方 Speech-to-text 指南](https://developers.openai.com/api/docs/guides/speech-to-text)和 [TypeScript 转写接口](https://developers.openai.com/api/reference/typescript/resources/audio/subresources/transcriptions/methods/create)，并核对本机 OpenAI SDK 7.23.0。完成录音使用 audio.transcriptions.create，经 /v1/audio/transcriptions 发送 multipart file/model，解析 JSON text；SDK toFile 保留文件名与 MIME。官方指南当前推荐 gpt-transcribe 作为录音文件转写起点，模板只作注释示例，TRANSCRIPTION_MODEL 默认留空，不声称账号已可用。可选供应商字段未纳入未经验证的假设。
+
+浏览器独立 MediaRecorder 输入状态，点击录音立即取消输出但保留阅读位置。最长 60 秒/4 MiB，20 秒权限等待，静音/空录音/格式检查；取消、隐藏、离线、卸载释放设备。权限请求不能强制取消时，迟到设备仍立即停止。DEMO 录音只本地体验后丢弃，不上传、不编造文本；API 模式结束录音才上传转写，结果只填可编辑草稿，发送问答仍需用户动作。
+
+前后端转写能力与文字/TTS 独立。复用回环、Host/Origin、CSRF、会话、限额和请求版本校验；重入 generation 拒绝，无自动重试。前端以有界 JSON 传音频，后端检查字节/MIME/文件头再调用 SDK。取消不代表免除已产生费用。客户端录音时长不是供应商计费用量；仅显示上游实际返回的 audioSeconds，无价格时显示无法估算。未调用任何真实收费接口。
+
+### 本地记录与恢复
+
+采用 IndexedDB 按 PDF 内容指纹隔离的 version 1 白名单记录，保存页码、真实目标、问答、教案、笔记、原文句书签与教学步骤/偏好。文件指纹、页数、解析版本、来源与文本版本均校验；导入未知字段拒绝。最多 50 本、单条最多 8 MiB，达到限制报错且保留内存，不静默淘汰其他书。PDF blob、原始录音、API Key、CSRF/服务会话凭证不进入记录。
+
+IndexedDB 不能保证刷新前的异步写入完成，因此将同一白名单快照同步暂存 localStorage，再串行入库；仅在确认写入的是同一快照后清除。刷新时取匹配本书的较新有效快照，不自动播放。localStorage 也有容量限制，失败提示先导出，不能保证绕过浏览器配额。加载期间暂时禁止编辑，防止迟到的旧记录覆盖新操作。
+
+导入与删除先暂停自动保存并排空队列，异步结果再核对当前文档；成功持久化后清理恢复快照。删除仅作用于本书、清空对应当前状态并暂停自动保存，用户可明确重启保存；其他书保留。JSON/Markdown 均从校验后的记录导出。刷新/浏览器重启后需要重新选择原 PDF，不承诺跨设备、端口或浏览器共享。
+
+### 验收界限
+
+140 项单元/模拟接口和 28 项 Edge 场景通过，包括真实 MediaRecorder 管线的合成音/静音输入与 20 次模拟输出打断。合成输入不等于真人麦克风，20 次循环不等于 20 分钟学习，SpeechSynthesis 事件不等于中文听感通过。真实模型、转写、TTS 与真人长时验收仍待完成；保留 M3 全双工、直接开口打断、回声和未播内容修剪目标。
+
+最终记录边界修正：替换记录的操作锁由 App 持有，关闭/重开设置不会解除；忙碌期间禁用重复删除和重新开启保存。JSON 保存/导入/导出维持 8 MiB 上限；Markdown 不包含图像，沿用结构/来源/未知字段校验但不受 JSON 总字节限制，用于截图累计超限时保留文字笔记和板书，不声称它能完整还原图像记录。

@@ -101,8 +101,9 @@ export class QuestionRecorder {
         const level = this.meter?.peak() ?? 0;
         const blob = new Blob(this.chunks, { type: mime.split(';')[0] });
         this.recorder = null; this.release(); this.chunks = []; this.bytes = 0; this.emit('idle');
-        if (durationMs < 300 || blob.size < 32) { this.callbacks.onError('录音太短或没有内容，请说完一个问题后再结束录音。'); return; }
+        if (durationMs < 300) { this.callbacks.onError('录音太短或没有内容，请说完一个问题后再结束录音。'); return; }
         if (level < 0.003) { this.callbacks.onError('录音音量过低或没有声音，未上传。请靠近麦克风并检查输入音量后重录。'); return; }
+        if (blob.size < 32) { this.callbacks.onError('录音太短或没有内容，请说完一个问题后再结束录音。'); return; }
         this.callbacks.onComplete({ blob, mimeType: mime.split(';')[0] as AudioMime, durationMs });
       };
       for (const track of stream.getTracks()) track.addEventListener('ended', () => { if (epoch === this.epoch && this.state === 'recording') this.fail('麦克风已断开，录音已取消。请重新连接设备后重试。'); }, { once: true });

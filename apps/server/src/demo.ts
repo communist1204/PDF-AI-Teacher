@@ -22,6 +22,7 @@ export function makeDemoPlan(request: AskRequest): TeachingPlan {
         explanationMarkdown: '令初值 M₀ = 0、β = 0.9，三次输入梯度都为 10。Mₜ 是指数移动平均，β 是历史权重系数，t 是步数。零初始化使前几步的权重和小于 1。',
         speechText: '自制例子：初值为零，贝塔等于零点九，每次梯度都为十。历史平均乘贝塔，加上当前梯度乘一减贝塔。',
         boardBlocks: [
+          { id:'ema-flow',type:'diagram',nodes:[{id:'history',label:'历史平均 × β'},{id:'input',label:'当前梯度 × (1 − β)'},{id:'sum',label:'相加得到 Mₜ'},{id:'correct',label:'除以权重总和'}],edges:[{from:'history',to:'sum',label:null},{from:'input',to:'sum',label:null},{from:'sum',to:'correct',label:'零初始化修正'}]},
           { id: 'ema-definition', type: 'math', latex: 'M_t = \\beta M_{t-1} + (1-\\beta)g_t, \\quad M_0=0', label: '指数移动平均' },
           { id: 'ema-correction', type: 'math', latex: '\\widehat{M}_t=\\frac{M_t}{1-\\beta^t}', label: '零初始化偏差修正；β 的 t 次方不是 β 乘 t' },
         ], sourceIds: [], exampleOrigin: 'teacher_created',

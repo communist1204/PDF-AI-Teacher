@@ -162,6 +162,19 @@ describe('versioned learning record import/export', () => {
     expect(markdown).toContain('选段第 2 句');
   });
 
+  it('rescues text and boards as Markdown when accumulated images exceed the JSON limit, retaining whitelist checks', () => {
+    const record = fixture();
+    record.entries = Array.from({length:5}, (_, index) => ({...structuredClone(record.entries[0]), id: index === 0 ? 'entry1' : `entry${index+1}`}));
+    record.entries.forEach(entry => { entry.context.imageDataUrl = 'data:image/png;base64,' + 'A'.repeat(2000000); });
+    expect(() => exportRecord(record)).toThrow('8 MiB');
+    expect(() => validateRecord(record)).toThrow('8 MiB');
+    const markdown = markdownExport(record);
+    expect(markdown).toContain('记住偏差修正');
+    expect(markdown).toContain('latex');
+    expect(markdown).not.toContain('data:image');
+    expect(() => markdownExport({...record, apiKey: 'not-a-key'} as LearningRecord)).toThrow();
+  });
+
   it('reports an actionable storage error when IndexedDB is unavailable, preserving the caller record', async () => {
     const record = fixture();
     await expect(saveRecord(record)).rejects.toThrow('本次内容仍保留');

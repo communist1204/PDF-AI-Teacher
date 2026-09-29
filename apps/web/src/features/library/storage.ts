@@ -57,7 +57,8 @@ export async function saveRecord(value: LearningRecord): Promise<void> {
   const record = validateRecord(value);
   await transaction<void>('readwrite', (store, done, fail) => {
     const put = () => {
-      const request = store.put(record);
+      let request:IDBRequest;
+      try { request=store.put(record); } catch(error) { fail(storageError(error)); return; }
       request.onsuccess = () => done(undefined);
     };
     const count = store.count();

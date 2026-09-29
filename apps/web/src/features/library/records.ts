@@ -21,6 +21,10 @@ function unique(values: string[], label: string): void {
 
 /** Validates cross-book integrity and returns a detached, whitelisted copy. */
 export function validateRecord(value: unknown, expectedDocument?: DocumentRecord): LearningRecord {
+  return validateRecordContent(value, expectedDocument);
+}
+
+function validateRecordContent(value: unknown, expectedDocument?: DocumentRecord, enforceBytes = true): LearningRecord {
   const result = LearningRecordSchema.safeParse(value);
   if (!result.success) {
     const unknown = value as { version?: unknown } | null;
@@ -29,8 +33,7 @@ export function validateRecord(value: unknown, expectedDocument?: DocumentRecord
   }
   const record = result.data;
   rejectUnknownProperties(value, record);
-  const bytes = new TextEncoder().encode(JSON.stringify(record, null, 2)).byteLength;
-  if (bytes > MAX_RECORD_BYTES) fail('单本记录超过 8 MiB，请先减少截图或历史内容再导出。');
+  if (enforceBytes && new TextEncoder().encode(JSON.stringify(record, null, 2)).byteLength > MAX_RECORD_BYTES) fail('单本记录超过 8 MiB，请先导出不含截图的 Markdown 保留笔记与板书，再清理本书历史。');
   const document = record.document;
   if (expectedDocument && (document.documentId !== expectedDocument.documentId || document.pageCount !== expectedDocument.pageCount)) fail('记录与当前 PDF 的内容指纹或页数不同，不能跨书恢复。');
   if (expectedDocument && document.extractionVersion !== expectedDocument.extractionVersion) fail('PDF 文本解析版本已变化，旧位置不能直接恢复。请保留导出文件并重新选择原文。');
@@ -102,7 +105,8 @@ function fenced(text: string, language: string): string {
 }
 
 export function markdownExport(input: LearningRecord): string {
-  const record = validateRecord(input);
+  // Markdown omits images: keep all schema/source checks, but allow rescue of oversized JSON records.
+  const record = validateRecordContent(input, undefined, false);
   const lines = [`# ${markdownText(record.document.fileName)} · 学习记录`, '', `更新：${record.updatedAt}`, `PDF 第 ${record.pageIndex + 1} / ${record.document.pageCount} 页`, '', '## 我的笔记', '', markdownText(record.note) || '（暂无）', '', '## 对话', ''];
   for (const message of record.messages) lines.push(`### ${message.role === 'user' ? '我' : message.demo ? '老师（演示内容）' : '老师'}`, '', markdownText(message.text), '');
   lines.push('## 黑板', '');
