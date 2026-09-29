@@ -1,3 +1,5 @@
+import { REASONING_EFFORTS, type TeachingReasoningEffort } from '../../../packages/shared/protocol';
+
 export interface ServerConfig {
   host: '127.0.0.1';
   port: number;
@@ -6,6 +8,10 @@ export interface ServerConfig {
   baseUrl: string;
   chatModel: string;
   visionModel: string;
+  chatReasoningEffort: TeachingReasoningEffort | null;
+  visionReasoningEffort: TeachingReasoningEffort | null;
+  teachingMaxOutputTokens: number;
+  teachingTimeoutMs: number;
   ttsModel: string;
   transcriptionModel: string;
   realtimeModel: string;
@@ -27,11 +33,18 @@ export const TTS_SOURCE_FIDELITY = '只朗读 input 中提供的文字，保持�
 // Compatible endpoints or unlisted models need the operator's explicit declaration.
 const INSTRUCTION_MODELS = new Set(['gpt-4o-mini-tts', 'gpt-4o-mini-tts-2025-12-15']);
 
-function integer(value: string | undefined, fallback: number, min: number, max: number) {
+function integer(value: string | undefined, fallback: number, min: number, max: number, field = '本地配置中的数字') {
   if (!value?.trim()) return fallback;
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < min || parsed > max) throw new Error('本地配置中的数字超出允许范围。');
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) throw new Error(`${field} 必须是 ${min} 到 ${max} 之间的整数。`);
   return parsed;
+}
+
+function reasoningEffort(value: string | undefined, field: string): TeachingReasoningEffort | null {
+  const parsed = value?.trim();
+  if (!parsed) return null;
+  if (!(REASONING_EFFORTS as readonly string[]).includes(parsed)) throw new Error(`${field} 必须为 ${REASONING_EFFORTS.join(' / ')}，或留空不发送推理设置。请核对所选模型支持的档位。`);
+  return parsed as TeachingReasoningEffort;
 }
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -60,12 +73,16 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     baseUrl,
     chatModel: env.CHAT_MODEL?.trim() || '',
     visionModel: env.VISION_MODEL?.trim() || '',
+    chatReasoningEffort: reasoningEffort(env.CHAT_REASONING_EFFORT, 'CHAT_REASONING_EFFORT'),
+    visionReasoningEffort: reasoningEffort(env.VISION_REASONING_EFFORT, 'VISION_REASONING_EFFORT'),
+    teachingMaxOutputTokens: integer(env.TEACHING_MAX_OUTPUT_TOKENS, 16000, 1024, 128000, 'TEACHING_MAX_OUTPUT_TOKENS'),
+    teachingTimeoutMs: integer(env.TEACHING_TIMEOUT_MS, 180000, 1000, 600000, 'TEACHING_TIMEOUT_MS'),
     ttsModel,
     transcriptionModel: env.TRANSCRIPTION_MODEL?.trim() || '',
     realtimeModel: env.REALTIME_MODEL?.trim() || '',
     realtimeVoice: env.REALTIME_VOICE?.trim() || 'marin',
     realtimeTranscriptionModel: env.REALTIME_TRANSCRIPTION_MODEL?.trim() || '',
-    ttsVoice: env.TTS_VOICE?.trim() || 'coral',
+    ttsVoice: env.TTS_VOICE?.trim() || 'marin',
     ttsInstructions: ttsInstructionsSupported ? [customInstructions || DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') : '',
     ttsInstructionsSupported,
     requestTimeoutMs: integer(env.REQUEST_TIMEOUT_MS, 45000, 1000, 120000),

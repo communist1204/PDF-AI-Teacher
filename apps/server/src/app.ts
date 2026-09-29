@@ -109,7 +109,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     session.usage.push(record);
     return record;
   }
-  async function runJob<T>(session: Session, envelope: Envelope, req: Request, res: Response, usage: UsageRecord, action: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  async function runJob<T>(session: Session, envelope: Envelope, req: Request, res: Response, usage: UsageRecord, action: (signal: AbortSignal) => Promise<T>, timeoutMs = config.requestTimeoutMs): Promise<T> {
     if ([...session.jobs].some(job => !job.controller.signal.aborted)) throw new HttpError(409, 'request_in_progress', '已有任务正在生成，请等待完成或先停止。');
     const controller = new AbortController();
     const job: Job = { envelope, controller };
@@ -117,7 +117,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     const stopForDisconnect = () => { if (!res.writableEnded) controller.abort(cancelledError()); };
     req.once('aborted', stopForDisconnect);
     res.once('close', stopForDisconnect);
-    const timer = setTimeout(() => controller.abort(new HttpError(504, 'provider_timeout', '模型服务超时；已取消本地等待，可能已有用量。请手动重试。')), config.requestTimeoutMs);
+    const timer = setTimeout(() => controller.abort(new HttpError(504, 'provider_timeout', '模型服务超时；已取消本地等待，可能已有用量。请手动重试。')), timeoutMs);
     timer.unref();
     try {
       const result = await new Promise<T>((resolve, reject) => {
@@ -149,7 +149,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     }
     session.touchedAt = now();
     res.cookie(SESSION_COOKIE, session.id, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: SESSION_TTL });
-    const body: AppConfig = { mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel, transcription: config.transcriptionModel, realtime: config.realtimeModel }, realtime: { provider: 'openai-realtime', voice: config.realtimeVoice, maxSessionSeconds: REALTIME_MAX_SESSION_SECONDS, idleSeconds: REALTIME_IDLE_SECONDS, inputTranscriptionModel: config.realtimeTranscriptionModel }, speech: {
+    const body: AppConfig = { mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel, transcription: config.transcriptionModel, realtime: config.realtimeModel }, realtime: { provider: 'openai-realtime', voice: config.realtimeVoice, maxSessionSeconds: REALTIME_MAX_SESSION_SECONDS, idleSeconds: REALTIME_IDLE_SECONDS, inputTranscriptionModel: config.realtimeTranscriptionModel }, teaching: { chatReasoningEffort: config.chatReasoningEffort, visionReasoningEffort: config.visionReasoningEffort, maxOutputTokens: config.teachingMaxOutputTokens, timeoutMs: config.teachingTimeoutMs }, speech: {
       voice: config.ttsVoice,
       style: !config.ttsInstructionsSupported ? '使用模型默认语气' : config.ttsInstructions === [DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') ? '自然温和，按语义停顿' : '本机自定义语气',
       instructionsSupported: config.ttsInstructionsSupported,
@@ -180,10 +180,16 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     if (!config.apiKey || !model || !provider) throw new HttpError(503, 'not_configured', request.context.imageDataUrl ? '视觉模型或 API Key 未配置。截图保留在本机，未假装识别。' : '文字模型或 API Key 未配置。请在本机 .env 中配置后重启。');
     consumeRequest(session);
     const usage = newUsage(session, model, 'text');
-    const result = await runJob(session, request, req, res, usage, signal => provider.ask(request, model, signal));
+    const result = await runJob(session, request, req, res, usage, signal => provider.ask(request, model, signal), config.teachingTimeoutMs);
     usage.requestId = safeRequestId(result.requestId) ?? usage.requestId;
     usage.inputTokens = Number.isFinite(result.inputTokens) ? result.inputTokens! : null;
     usage.outputTokens = Number.isFinite(result.outputTokens) ? result.outputTokens! : null;
+    if (result.incompleteReason) {
+      capabilities.structuredOutput = 'error';
+      throw new HttpError(502, 'incomplete_model_output', result.incompleteReason === 'max_output_tokens'
+        ? '本次回答达到输出上限，推理过程也计入该上限；未显示不完整教案。请缩小问题，或在本机提高 TEACHING_MAX_OUTPUT_TOKENS 后手动重试。未自动切换模型；本次可能已有用量。'
+        : '模型未完成本次回答，未显示不完整教案。请核对服务状态后手动重试；未自动切换模型，本次可能已有用量。', safeRequestId(result.requestId));
+    }
     let plan;
     try { plan = validatePlan(result.plan, request.context, request.contextRevision); }
     catch {

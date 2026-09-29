@@ -270,7 +270,7 @@ describe('mocked live provider lifecycle (no paid calls)', () => {
   });
   it('times out once even when a provider ignores AbortSignal', async () => {
     const provider = mockProvider(); vi.mocked(provider.ask).mockImplementation(() => new Promise(() => undefined));
-    const app = createApp({ config: { ...liveConfig(), requestTimeoutMs: 40 }, provider }); const client = await browser(app);
+    const app = createApp({ config: { ...liveConfig(), teachingTimeoutMs: 40 }, provider }); const client = await browser(app);
     const result = await post(app, client, '/api/ask', askBody()).expect(504);
     expect(result.body.error).toBe('provider_timeout');
     expect(provider.ask).toHaveBeenCalledOnce();
@@ -332,7 +332,7 @@ describe('provider protocol and bounded cache', () => {
     const client = new OpenAI({ apiKey: 'dummy', fetch: fetchMock as typeof fetch, maxRetries: 0 });
     const adapter = new OpenAITeachingProvider(liveConfig(), client);
     const result = await adapter.speak('这是所选原文，β 是参数。', 1.25, new AbortController().signal);
-    expect(sent).toEqual({ model: 'mock-tts', voice: 'coral', input: '这是所选原文，β 是参数。', speed: 1.25, response_format: 'mp3' });
+    expect(sent).toEqual({ model: 'mock-tts', voice: 'marin', input: '这是所选原文，β 是参数。', speed: 1.25, response_format: 'mp3' });
     expect(result.audio.length).toBe(3);
     expect(result.requestId).toBe('req_tts_mock');
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -532,5 +532,84 @@ describe('slow speech contract across coordinator, API, SDK and media adapter (p
     const provider = mockProvider(); const app = createApp({ config: liveConfig(), provider }); const client = await browser(app);
     const response = await post(app, client, '/api/tts', { text: '所选原文', speed }).expect(400);
     expect(response.body.message).toContain('0.25 到 2'); expect(provider.speak).not.toHaveBeenCalled();
+  });
+});
+
+describe('independent theory reasoning and speech settings (mocked API)', () => {
+  it('keeps effort opt-in, gives teaching its own budget, and defaults only the speech voice', () => {
+    const defaults = readConfig({});
+    expect(defaults).toMatchObject({ demoMode: true, chatModel: '', visionModel: '', chatReasoningEffort: null, visionReasoningEffort: null, teachingMaxOutputTokens: 16000, teachingTimeoutMs: 180000, requestTimeoutMs: 45000, ttsVoice: 'marin' });
+    expect(readConfig({ CHAT_REASONING_EFFORT: ' xhigh ', VISION_REASONING_EFFORT: 'max', TEACHING_MAX_OUTPUT_TOKENS: '32000', TEACHING_TIMEOUT_MS: '300000', TTS_VOICE: 'cedar' })).toMatchObject({ chatReasoningEffort: 'xhigh', visionReasoningEffort: 'max', teachingMaxOutputTokens: 32000, teachingTimeoutMs: 300000, ttsVoice: 'cedar' });
+  });
+
+  it.each([
+    ['CHAT_REASONING_EFFORT', 'secret-unsupported'], ['VISION_REASONING_EFFORT', 'HIGH'],
+    ['TEACHING_MAX_OUTPUT_TOKENS', '1023'], ['TEACHING_MAX_OUTPUT_TOKENS', '128001'],
+    ['TEACHING_MAX_OUTPUT_TOKENS', '1.5'], ['TEACHING_MAX_OUTPUT_TOKENS', 'Infinity'],
+    ['TEACHING_TIMEOUT_MS', '999'], ['TEACHING_TIMEOUT_MS', '600001'],
+  ])('rejects invalid %s without exposing its value', (field, value) => {
+    expect(() => readConfig({ [field]: value })).toThrow(field);
+    if (value === 'secret-unsupported') expect(() => readConfig({ [field]: value })).not.toThrow(value);
+  });
+
+  it('exposes configured theory settings honestly and keeps credentials and style private', async () => {
+    const config = readConfig({ DEMO_MODE: 'false', OPENAI_API_KEY: 'private-api-value', CHAT_MODEL: 'configured-theory-model', VISION_MODEL: 'configured-vision-model', CHAT_REASONING_EFFORT: 'xhigh', VISION_REASONING_EFFORT: 'high', TEACHING_MAX_OUTPUT_TOKENS: '32000', TEACHING_TIMEOUT_MS: '300000' });
+    const response = await request(createApp({ config, provider: mockProvider() })).get('/api/config').set('Host', HOST).expect(200);
+    expect(response.body.teaching).toEqual({ chatReasoningEffort: 'xhigh', visionReasoningEffort: 'high', maxOutputTokens: 32000, timeoutMs: 300000 });
+    expect(response.body.models).toMatchObject({ chat: 'configured-theory-model', vision: 'configured-vision-model' });
+    expect(response.body.capabilities).toMatchObject({ text: 'untested', vision: 'untested', tts: 'unconfigured' });
+    expect(response.text).not.toContain('private-api-value');
+  });
+
+  it.each([
+    { image: false, chatEffort: 'xhigh', visionEffort: 'high', expected: 'xhigh' },
+    { image: true, chatEffort: 'xhigh', visionEffort: 'high', expected: 'high' },
+    { image: true, chatEffort: 'xhigh', visionEffort: '', expected: null },
+    { image: false, chatEffort: '', visionEffort: 'high', expected: null },
+  ])('uses only the selected route effort, preserves its model and dedicated SDK timeout: $image / $expected', async ({ image, chatEffort, visionEffort, expected }) => {
+    const body: AskRequest = { sessionId: 'mock-session', generationId: 1, contextRevision: 1, ...askBody() };
+    if (image) body.context.imageDataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+    const config = readConfig({ CHAT_REASONING_EFFORT: chatEffort, VISION_REASONING_EFFORT: visionEffort, TEACHING_MAX_OUTPUT_TOKENS: '32000', TEACHING_TIMEOUT_MS: '300000' });
+    let sent!: Record<string, unknown>;
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      sent = JSON.parse(init?.body as string) as Record<string, unknown>;
+      return new Response(JSON.stringify({ id: 'resp_theory', object: 'response', created_at: 0, status: 'completed', model: 'selected-expert-model', output: [{ type: 'message', id: 'msg_theory', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify(makeDemoPlan(body)), annotations: [] }] }] }), { headers: { 'content-type': 'application/json' } });
+    });
+    const client = new OpenAI({ apiKey: 'mock-only', fetch: fetchMock as typeof fetch, maxRetries: 0, timeout: 45000 });
+    const parse = vi.spyOn(client.responses, 'parse');
+    await new OpenAITeachingProvider(config, client).ask(body, 'selected-expert-model', new AbortController().signal);
+    expect(sent.model).toBe('selected-expert-model');
+    expect(sent.max_output_tokens).toBe(32000);
+    if (expected) expect(sent.reasoning).toEqual({ effort: expected });
+    else expect(sent).not.toHaveProperty('reasoning');
+    expect(parse.mock.calls[0][1]).toMatchObject({ timeout: 300000, maxRetries: 0 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it.each(['max_output_tokens', 'content_filter'])('rejects %s incomplete SDK output before rendering and retains known usage', async reason => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 'resp_partial', object: 'response', created_at: 0, status: 'incomplete', incomplete_details: { reason }, model: 'mock-chat', output: [{ type: 'message', id: 'msg_partial', role: 'assistant', status: 'incomplete', content: [{ type: 'output_text', text: '{"partial-private-output":', annotations: [] }] }], usage: { input_tokens: 5, output_tokens: 32000, total_tokens: 32005 } }), { headers: { 'content-type': 'application/json', 'x-request-id': 'req_incomplete_test' } }));
+    const config = liveConfig();
+    const adapter = new OpenAITeachingProvider(config, new OpenAI({ apiKey: 'mock-only', fetch: fetchMock as typeof fetch, maxRetries: 0 }));
+    const app = createApp({ config, provider: adapter }); const client = await browser(app);
+    const response = await post(app, client, '/api/ask', askBody()).expect(502);
+    expect(response.body).toMatchObject({ error: 'incomplete_model_output', requestId: 'req_incomplete_test' });
+    expect(response.body.plan).toBeUndefined();
+    expect(response.text).not.toContain('partial-private-output');
+    if (reason === 'max_output_tokens') expect(response.body.message).toContain('TEACHING_MAX_OUTPUT_TOKENS');
+    const records = (await usage(app, client).expect(200)).body.records;
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ model: 'mock-chat', inputTokens: 5, outputTokens: 32000, estimatedCost: null });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect((await browser(app)).config.capabilities.structuredOutput).toBe('error');
+  });
+
+  it('allows a longer theory answer without stretching TTS waiting or retrying either request', async () => {
+    const provider = mockProvider();
+    vi.mocked(provider.ask).mockImplementation(body => new Promise(resolve => { setTimeout(() => resolve({ plan: makeDemoPlan(body) }), 100); }));
+    vi.mocked(provider.speak).mockImplementation(() => new Promise(() => undefined));
+    const app = createApp({ config: { ...liveConfig(), requestTimeoutMs: 40, teachingTimeoutMs: 2000 }, provider }); const client = await browser(app);
+    await post(app, client, '/api/ask', askBody()).expect(200);
+    expect((await post(app, client, '/api/tts', { text: '只朗读已确定的解释。', speed: 1, generationId: 2 }).expect(504)).body.error).toBe('provider_timeout');
+    expect(provider.ask).toHaveBeenCalledOnce(); expect(provider.speak).toHaveBeenCalledOnce();
   });
 });
