@@ -7,11 +7,11 @@ const source: PdfTarget = { documentId: 'doc', sourceId: 'doc:source', blockId: 
 function plan(revision: number, prefix = 'a'): TeachingPlan {
   return { schemaVersion: '1', contextRevision: revision, answer: '逐步解释。', needsClarification: false, clarificationQuestion: null, checkQuestion: '理解了吗？', steps: [1, 2].map(index => ({ stepId: `${prefix}${index}`, title: `步骤${index}`, speechText: `${prefix} 的第 ${index} 步。`, explanationMarkdown: '解释。', boardBlocks: [], sourceIds: [source.sourceId], exampleOrigin: 'none' })) };
 }
-type SentEvent = { type: string; response_id?: string; response?: { metadata: Record<string, string>; output_modalities: string[]; instructions: string; audio?: { output: { speed: number } } }; item?: { type: string; call_id?: string; output?: string; content?: Array<{ type: string; text?: string }> } };
+type SentEvent = { type: string; response_id?: string; session?: { type: string; audio: { output: { speed: number } } }; response?: { metadata: Record<string, string>; output_modalities: string[]; instructions: string; audio?: { output: { speed: number } } }; item?: { type: string; call_id?: string; output?: string; content?: Array<{ type: string; text?: string }> } };
 // Inject a connected transport only: all turns, tools and playback transitions use public methods.
 type TestConnection = { state: RealtimeState; channel: RTCDataChannel | null; remote: HTMLAudioElement | null; remotePlaying: boolean };
 const controllers: RealtimeController[] = [];
-function setup() {
+function setup(rate = 0.9, autoAcknowledgeSpeed = true) {
   let envelope: Envelope = { sessionId: 'session', generationId: 0, contextRevision: 0 };
   const sent: SentEvent[] = []; const trace: string[] = [];
   const context: RealtimeContext = { context: { documentId: source.documentId, sources: [source], selectedBoardText: null, imageDataUrl: null }, board: [{ entryId: 'entry-b', stepId: 'b2', title: '步骤2', number: 2, summary: '解释。', sourceIds: [source.sourceId] }] };
@@ -21,25 +21,32 @@ function setup() {
   const focus = vi.fn(async (_entryId: string, _stepId: string, valid: () => boolean) => { if (!valid()) throw Error('stale'); trace.push('focus'); const focused = plan(envelope.contextRevision, 'b'); return { speechText: focused.steps[1].speechText, stepIndex: 1, plan: focused }; });
   const control = vi.fn(async () => {});
   const showStep = vi.fn(async () => {}); const onStepComplete = vi.fn(); const onMessage = vi.fn();
-  const options: RealtimeOptions = { config, current: () => envelope, begin, context: () => structuredClone(context), onChange: vi.fn(), pauseLocal: vi.fn(), onMessage, tools: { present, focus, control }, showStep, rate: () => 0.75, volume: () => 0.8, onStepComplete,
+  const options: RealtimeOptions = { config, current: () => envelope, begin, context: () => structuredClone(context), onChange: vi.fn(), pauseLocal: vi.fn(), onMessage, tools: { present, focus, control }, showStep, rate: () => rate, volume: () => 0.8, onStepComplete,
     claimOutput: stop => { let current = true; return { isCurrent: () => current, release: () => { if (current) { current = false; stop(); } } }; },
   };
   const controller = new RealtimeController(options);
   const internal = controller as unknown as TestConnection;
-  const channel = { readyState: 'open', send: vi.fn((raw: string) => { const event = JSON.parse(raw) as SentEvent; sent.push(event); trace.push(event.type === 'conversation.item.create' && event.item?.type === 'function_call_output' ? 'ack' : event.type === 'response.create' ? `request:${event.response?.output_modalities[0]}` : event.type); }), close: vi.fn() };
+  const channel = { readyState: 'open', send: vi.fn((raw: string) => { const event = JSON.parse(raw) as SentEvent; sent.push(event); if (autoAcknowledgeSpeed && event.type === 'session.update') queueMicrotask(() => { void controller.receive({ type: 'session.updated', session: event.session }); }); trace.push(event.type === 'conversation.item.create' && event.item?.type === 'function_call_output' ? 'ack' : event.type === 'response.create' ? `request:${event.response?.output_modalities[0]}` : event.type); }), close: vi.fn() };
   const audio = { muted: true, srcObject: null, pause: vi.fn() };
   const connect = () => { internal.state = { ...initialRealtime, connection: 'connected', input: 'listening' }; internal.channel = channel as unknown as RTCDataChannel; internal.remote = audio as unknown as HTMLAudioElement; internal.remotePlaying = true; };
   connect();
   const latestResponse = () => { const event = sent.filter(item => item.type === 'response.create').at(-1); if (!event?.response) throw Error('No response request'); return event.response; };
   const accept = async (id: string, modality: 'text' | 'audio') => { const response = latestResponse(); expect(response.output_modalities).toEqual([modality]); await controller.receive({ type: 'response.created', response: { id, metadata: response.metadata } }); };
-  const teach = async () => {
+  const prepareTeaching = async () => {
     await controller.ask('解释原文'); await accept('tools-a', 'text');
-    await controller.receive({ type: 'response.done', response: { id: 'tools-a', status: 'completed', output: [{ type: 'function_call', name: 'present_teaching_plan', call_id: 'call-a', arguments: JSON.stringify({ opId: 'present-a', plan: plan(envelope.contextRevision) }) }] } });
+    const handling = controller.receive({ type: 'response.done', response: { id: 'tools-a', status: 'completed', output: [{ type: 'function_call', name: 'present_teaching_plan', call_id: 'call-a', arguments: JSON.stringify({ opId: 'present-a', plan: plan(envelope.contextRevision) }) }] } });
+    return { handling };
+  };
+  const waitForSpeedUpdate = async () => { await vi.waitFor(() => expect(sent.some(event => event.type === 'session.update')).toBe(true)); };
+  const acknowledgeSpeed = async (speed: number) => { await controller.receive({ type: 'session.updated', session: { type: 'realtime', audio: { output: { speed } } } }); };
+  const teach = async () => {
+    const { handling } = await prepareTeaching();
+    await handling;
     await accept('audio-a', 'audio');
     await controller.receive({ type: 'output_audio_buffer.started', response_id: 'audio-a' });
     await controller.receive({ type: 'response.output_audio_transcript.delta', response_id: 'audio-a', delta: '已经开始讲解。' });
   };
-  const fixture = { controller, sent, trace, options, begin, present, focus, showStep, onMessage, onStepComplete, accept, teach, latestResponse, connect, channel, audio };
+  const fixture = { controller, sent, trace, options, begin, present, focus, showStep, onMessage, onStepComplete, accept, teach, prepareTeaching, waitForSpeedUpdate, acknowledgeSpeed, latestResponse, connect, channel, audio };
   controllers.push(controller); return fixture;
 }
 afterEach(() => { controllers.splice(0).forEach(controller => controller.stop()); vi.unstubAllGlobals(); vi.useRealTimers(); });
@@ -76,11 +83,12 @@ describe('Realtime controller protocol regressions', () => {
   });
 
   it('renders and acknowledges a tool before requesting matching speech, and completes only after playback stops', async () => {
-    const f = setup(); await f.teach();
+    const f = setup(0.75); await f.teach();
     expect(f.trace.indexOf('board')).toBeLessThan(f.trace.indexOf('ack'));
     expect(f.trace.indexOf('ack')).toBeLessThan(f.trace.indexOf('request:audio'));
     expect(f.latestResponse().instructions).toContain('a 的第 1 步。');
-    expect(f.latestResponse().audio?.output.speed).toBe(0.75);
+    expect(f.sent.find(event => event.type === 'session.update')?.session?.audio.output.speed).toBe(0.75);
+    expect(f.latestResponse().audio).toBeUndefined();
     await f.controller.receive({ type: 'response.done', response: { id: 'audio-a', status: 'completed' } });
     expect(f.onStepComplete).not.toHaveBeenCalled();
     await f.controller.receive({ type: 'output_audio_buffer.stopped', response_id: 'audio-a' });
@@ -136,6 +144,47 @@ describe('Realtime controller protocol regressions', () => {
     await vi.advanceTimersByTimeAsync(2501);
     expect(f.controller.getSnapshot()).toMatchObject({ connection: 'error', input: 'off', output: 'silent' });
     expect(f.audio.muted).toBe(true); expect(f.channel.close).toHaveBeenCalled(); expect(f.onStepComplete).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('Realtime output speed acknowledgment gate', () => {
+  const audioRequests = (events: SentEvent[]) => events.filter(event => event.type === 'response.create' && event.response?.output_modalities[0] === 'audio');
+
+  it('waits for the matching session speed acknowledgment before creating audio', async () => {
+    const f = setup(0.75, false); const { handling } = await f.prepareTeaching(); await f.waitForSpeedUpdate();
+    expect(f.sent.find(event => event.type === 'session.update')?.session).toEqual({ type: 'realtime', audio: { output: { speed: 0.75 } } });
+    expect(audioRequests(f.sent)).toHaveLength(0); expect(f.audio.muted).toBe(true);
+    await f.acknowledgeSpeed(1);
+    expect(audioRequests(f.sent)).toHaveLength(0);
+    await f.acknowledgeSpeed(0.75); await handling;
+    expect(audioRequests(f.sent)).toHaveLength(1); expect(f.latestResponse().audio).toBeUndefined();
+    expect(f.trace.indexOf('ack')).toBeLessThan(f.trace.indexOf('session.update'));
+    expect(f.trace.indexOf('session.update')).toBeLessThan(f.trace.indexOf('request:audio'));
+  });
+
+  it('cancels a pending speed acknowledgment on stop and ignores a late acknowledgment', async () => {
+    const f = setup(0.75, false); const { handling } = await f.prepareTeaching(); await f.waitForSpeedUpdate();
+    f.controller.stop(); await handling; await f.acknowledgeSpeed(0.75);
+    expect(audioRequests(f.sent)).toHaveLength(0); expect(f.channel.close).toHaveBeenCalled();
+    expect(f.controller.getSnapshot()).toMatchObject({ connection: 'off', input: 'off', output: 'silent' });
+  });
+
+  it('keeps a new question current when an old speed acknowledgment arrives', async () => {
+    const f = setup(0.75, false); const { handling } = await f.prepareTeaching(); await f.waitForSpeedUpdate();
+    await f.controller.ask('先解释 beta 的含义'); await handling; await f.acknowledgeSpeed(0.75);
+    expect(audioRequests(f.sent)).toHaveLength(0); expect(f.begin).toHaveBeenCalledTimes(2);
+    expect(f.latestResponse().output_modalities).toEqual(['text']);
+    expect(f.onMessage).toHaveBeenLastCalledWith('user', '先解释 beta 的含义', 'text');
+    expect(f.controller.getSnapshot()).toMatchObject({ connection: 'connected', output: 'thinking' });
+  });
+
+  it('closes the connection when the speed update remains unacknowledged', async () => {
+    vi.useFakeTimers(); const f = setup(0.75, false); const { handling } = await f.prepareTeaching(); await f.waitForSpeedUpdate();
+    await vi.advanceTimersByTimeAsync(5000); await handling;
+    expect(audioRequests(f.sent)).toHaveLength(0); expect(f.audio.muted).toBe(true); expect(f.channel.close).toHaveBeenCalled();
+    expect(f.controller.getSnapshot()).toMatchObject({ connection: 'error', input: 'off', output: 'silent', error: expect.stringContaining('未确认语速') });
+    await f.acknowledgeSpeed(0.75); expect(audioRequests(f.sent)).toHaveLength(0);
   });
 });
 
