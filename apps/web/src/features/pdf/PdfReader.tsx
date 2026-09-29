@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, FileUp, RotateCw, Scan, TextCursor, ZoomIn, ZoomOut, BookOpen, Maximize2, X } from 'lucide-react';
 import { AnnotationMode, getDocument, GlobalWorkerOptions, PasswordResponses, PermissionFlag, TextLayer, type PDFDocumentLoadingTask, type PDFDocumentProxy, type PDFPageProxy, type PageViewport, type RenderTask } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -18,6 +18,8 @@ export type PdfReaderProps = {
   onPage: (pageIndex: number) => void;
   navigation?: { pageIndex: number; rect?: Rect; nonce: number };
   readingText?: string;
+  clearSelectionRevision?: number;
+  onClearSelection?: () => void;
   onError?: (message: string) => void;
 };
 
@@ -84,6 +86,8 @@ export function PdfReader(props: PdfReaderProps) {
   const lastTextSelection = useRef('');
   const passwordUpdater = useRef<((password: string) => void) | null>(null);
   const dragOrigin = useRef<[number, number] | null>(null);
+  const regionPointer = useRef<{ element: HTMLDivElement; pointerId: number } | null>(null);
+  const clearRevision = useRef(props.clearSelectionRevision ?? 0);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [rendered, setRendered] = useState<Rendered | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
@@ -104,11 +108,48 @@ export function PdfReader(props: PdfReaderProps) {
   const [selected, setSelected] = useState<{ documentId: string; pageIndex: number; rects: Rect[] } | null>(null);
   const [highlightRects, setHighlightRects] = useState<Rect[]>([]);
 
+  const cancelRegion = useCallback(() => {
+    dragOrigin.current = null;
+    const pointer = regionPointer.current;
+    regionPointer.current = null;
+    if (pointer?.element.hasPointerCapture(pointer.pointerId)) pointer.element.releasePointerCapture(pointer.pointerId);
+    setDragRect(null);
+  }, []);
+
+  const clearLocalSelection = useCallback(() => {
+    cancelRegion();
+    window.getSelection()?.removeAllRanges();
+    lastTextSelection.current = '';
+    setSelected(null);
+    setHighlightRects([]);
+  }, [cancelRegion]);
+
+  useEffect(() => {
+    const revision = props.clearSelectionRevision ?? 0;
+    if (clearRevision.current === revision) return;
+    clearRevision.current = revision;
+    clearLocalSelection();
+  }, [props.clearSelectionRevision, clearLocalSelection]);
+
+  function clearSelection() {
+    clearLocalSelection();
+    if (callbacks.current.onClearSelection) callbacks.current.onClearSelection();
+    else callbacks.current.onTarget(null);
+  }
+
+  function changeMode(next: 'text' | 'region') {
+    if (mode === next) return;
+    cancelRegion();
+    window.getSelection()?.removeAllRanges();
+    lastTextSelection.current = '';
+    setMode(next);
+  }
+
   function report(message: string) { setError(message); callbacks.current.onError?.(message); }
 
   async function openPdf(source: () => Promise<{ blob: Blob; fileName: string }>) {
     const ticket = ++loadTicket.current;
-    lastTextSelection.current = '';
+    clearLocalSelection();
     callbacks.current.onDocument(null);
     callbacks.current.onTarget(null);
     setLoaded(null); setRendered(null); setOutline([]); setSelected(null); setError(''); setLoading(true);
@@ -186,6 +227,7 @@ export function PdfReader(props: PdfReaderProps) {
     let renderTask: RenderTask | undefined;
     let textLayer: TextLayer | undefined;
     let page: PDFPageProxy | undefined;
+    cancelRegion();
     setRendering(true); setRendered(null); setHighlightRects([]);
     canvasRef.current = null; textLayerRef.current = null;
     canvasHost.current?.replaceChildren(); textHost.current?.replaceChildren();
@@ -228,7 +270,7 @@ export function PdfReader(props: PdfReaderProps) {
       setRendering(false);
     })().catch(failure => { if (!cancelled) { setRendering(false); report(errorMessage(failure)); } });
     return () => { cancelled = true; renderTask?.cancel(); textLayer?.cancel(); if (page) void renderTask?.promise.catch(() => undefined).then(() => page?.cleanup()); };
-  }, [loaded, pageIndex, rotation, zoom, width]);
+  }, [loaded, pageIndex, rotation, zoom, width, cancelRegion]);
 
   useEffect(() => {
     const nav = props.navigation;
@@ -247,6 +289,7 @@ export function PdfReader(props: PdfReaderProps) {
   function goToPage(next: number) {
     if (!loaded || !Number.isInteger(next)) return;
     const index = clamp(next, 0, loaded.record.pageCount - 1);
+    cancelRegion(); window.getSelection()?.removeAllRanges();
     lastTextSelection.current = ''; setPageIndex(index); setPageEntry(String(pdfPageNumber(index))); setError(''); setDragRect(null);
     callbacks.current.onPage(index);
     scrollRef.current?.scrollTo({ top: 0, left: 0 });
@@ -297,21 +340,24 @@ export function PdfReader(props: PdfReaderProps) {
 
   function startRegion(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0 || mode !== 'region' || !loaded?.canCopy || !rendered || rendered.pageIndex !== pageIndex || rendered.documentId !== loaded.record.documentId || rendering) return;
-    event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault(); cancelRegion();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    regionPointer.current = { element: event.currentTarget, pointerId: event.pointerId };
     const start = point(event); dragOrigin.current = start; setDragRect([...start, ...start]);
     window.getSelection()?.removeAllRanges();
   }
 
   function moveRegion(event: PointerEvent<HTMLDivElement>) {
-    if (!dragOrigin.current) return;
+    if (!dragOrigin.current || regionPointer.current?.pointerId !== event.pointerId) return;
     setDragRect(orderedRect([...dragOrigin.current, ...point(event)]));
   }
 
   function finishRegion(event: PointerEvent<HTMLDivElement>) {
-    if (!dragOrigin.current || !loaded || !rendered || rendered.pageIndex !== pageIndex || rendered.documentId !== loaded.record.documentId || !canvasRef.current) return;
-    const rect = orderedRect([...dragOrigin.current, ...point(event)]);
-    dragOrigin.current = null; setDragRect(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (regionPointer.current?.pointerId !== event.pointerId) return;
+    const start = dragOrigin.current;
+    cancelRegion();
+    if (!start || !loaded || !rendered || rendered.pageIndex !== pageIndex || rendered.documentId !== loaded.record.documentId || !canvasRef.current) return;
+    const rect = orderedRect([...start, ...point(event)]);
     if (rect[2] - rect[0] < 8 || rect[3] - rect[1] < 8) { report('框选范围太小，请拖出一个清晰的公式或图表区域。'); return; }
     const source = canvasRef.current;
     const crop = document.createElement('canvas');
@@ -378,8 +424,11 @@ export function PdfReader(props: PdfReaderProps) {
         <button type="button" title="顺时针旋转 90°" aria-label="旋转页面" onClick={() => setRotation(value => (value + 90) % 360)}><RotateCw size={16} /></button>
       </div>
       <div className="pdf-selection-toolbar">
-        <div className="pdf-mode-buttons"><button type="button" aria-pressed={mode === 'text'} disabled={!loaded.canCopy} onClick={() => setMode('text')}><TextCursor size={14} />选文字</button><button type="button" aria-pressed={mode === 'region'} disabled={!loaded.canCopy} onClick={() => setMode('region')}><Scan size={14} />框选区域</button></div>
-        <button type="button" className="pdf-page-text" disabled={rendering || !rendered?.extraction.hasText || !loaded.canCopy} onClick={selectCurrentPage}>选本页文字</button>
+        <div className="pdf-mode-buttons"><button type="button" aria-pressed={mode === 'text'} disabled={!loaded.canCopy} onClick={() => changeMode('text')}><TextCursor size={14} />选文字</button><button type="button" aria-pressed={mode === 'region'} disabled={!loaded.canCopy} onClick={() => changeMode('region')}><Scan size={14} />框选区域</button></div>
+        <div className="pdf-selection-actions">
+          <button type="button" className="pdf-clear-selection" title="取消选中（Esc）" disabled={!selected && !dragRect && !highlightRects.length} onClick={clearSelection}><X size={13} />取消选中</button>
+          <button type="button" className="pdf-page-text" disabled={rendering || !rendered?.extraction.hasText || !loaded.canCopy} onClick={selectCurrentPage}>选本页文字</button>
+        </div>
       </div>
     </>}
     {error && <div className="pdf-error" role="alert"><span>{error}</span><button type="button" aria-label="关闭 PDF 错误提示" onClick={() => setError('')}><X size={14} /></button></div>}
@@ -394,7 +443,7 @@ export function PdfReader(props: PdfReaderProps) {
         <div className="pdf-page-center">
           <div ref={pageRef} className={`pdf-page ${mode === 'region' ? 'region-mode' : ''}`} data-page-index={pageIndex}
             onPointerDown={startRegion} onPointerMove={moveRegion} onPointerUp={event => { if (mode === 'region') finishRegion(event); }}
-            onPointerCancel={() => { dragOrigin.current = null; setDragRect(null); }}>
+            onPointerCancel={cancelRegion} onLostPointerCapture={cancelRegion}>
             <div ref={canvasHost} className="pdf-canvas-host" />
             <div ref={textHost} className="pdf-text-host" />
             <div className="pdf-highlight-layer" aria-hidden="true">{activeRects.map((rect, index) => <span className="pdf-selected-highlight" key={`s-${index}`} style={overlayStyle(rect)} />)}{highlightRects.map((rect, index) => <span className="pdf-reading-highlight" key={`r-${index}`} style={overlayStyle(rect)} />)}{dragRect && <span className="pdf-drag-highlight" style={overlayStyle(dragRect)} />}</div>

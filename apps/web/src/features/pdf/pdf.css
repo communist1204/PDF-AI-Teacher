@@ -17,7 +17,9 @@
 .pdf-page-form input { -moz-appearance: textfield; width: 38px; height: 26px; text-align: center; font: inherit; color: #324e45; border: 1px solid #dfe5de; border-radius: 4px; background: white; }
 .pdf-page-form input::-webkit-inner-spin-button, .pdf-page-form input::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .pdf-zoom-value { font-size: 10px; min-width: 31px; text-align: center; font-variant-numeric: tabular-nums; }
-.pdf-selection-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 3px 15px 10px; gap: 8px; }
+.pdf-selection-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; padding: 3px 15px 10px; gap: 8px; }
+.pdf-selection-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.pdf-reader .pdf-clear-selection { font-size: 10px; white-space: nowrap; padding: 5px 6px; border-color: #d8e2db; }
 .pdf-mode-buttons { display: flex; padding: 2px; gap: 2px; border: 1px solid #e2e8e0; border-radius: 7px; background: #f3f6f1; }
 .pdf-mode-buttons button { padding: 5px 7px; font-size: 11px; white-space: nowrap; }
 .pdf-reader .pdf-page-text { font-size: 10px; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
