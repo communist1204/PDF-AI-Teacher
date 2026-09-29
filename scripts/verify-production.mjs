@@ -20,14 +20,18 @@ try{
   await page.mouse.move(box.x+1,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width-1,box.y+box.height/2,{steps:12});await page.mouse.up();
   await page.waitForFunction(()=>document.querySelector('.selection-preview')?.textContent?.includes('自制练习'));
   await page.evaluate(()=>{
-    const events=[];
+    const events=[];const rates=[];
+    const realSpeak=speechSynthesis.speak.bind(speechSynthesis);speechSynthesis.speak=utterance=>{rates.push(utterance.rate);realSpeak(utterance);};
+    Object.defineProperty(window,'__submittedRates',{value:rates});
     Object.defineProperty(window,'__audioEvents',{value:events});
     new MutationObserver(()=>events.push(document.querySelector('.audio-source strong')?.textContent)).observe(document.querySelector('.audio-source'),{childList:true,subtree:true,characterData:true});
   });
+  await page.getByRole('combobox',{name:'语速',exact:true}).selectOption('0.25');
   await page.getByRole('button',{name:'朗读所选',exact:true}).click();
-  await page.waitForTimeout(2200);
+  await page.waitForFunction(()=>document.querySelector('.audio-source strong')?.textContent?.includes('正在朗读'),{},{timeout:10000});
   const voices=await page.evaluate(()=>speechSynthesis.getVoices().filter(v=>v.localService).map(v=>({name:v.name,lang:v.lang})));
   const events=await page.evaluate(()=>window.__audioEvents);
+  const submittedRates=await page.evaluate(()=>window.__submittedRates);
   const subtitle=await page.getByTestId('reading-subtitle').textContent();
   await page.getByRole('button',{name:'停止',exact:true}).click();
   const stopped=await page.locator('.audio-source strong').textContent();
@@ -37,9 +41,9 @@ try{
   await page.getByTestId('board-step').first().waitFor({state:'visible'});
   await mkdir('docs/screenshots',{recursive:true});
   await page.screenshot({path:'docs/screenshots/production.png',fullPage:true});
-  const result={date:new Date().toISOString(),browser:await browser.version(),productionPort:port,mode:'demo',pdfPages:2,realBrowserSpeech:{mock:false,localVoices:voices,selectedText:subtitle,observedStates:events,stoppedState:stopped,humanListening:'未测，事件不代表实际听感'},pageErrors:errors,providerCalls:0};
+  const result={date:new Date().toISOString(),browser:await browser.version(),productionPort:port,mode:'demo',pdfPages:2,realBrowserSpeech:{mock:false,submittedRates,localVoices:voices,selectedText:subtitle,observedStates:events,stoppedState:stopped,humanListening:'未测，事件不代表实际听感'},pageErrors:errors,providerCalls:0};
   await writeFile('docs/production-smoke.json',JSON.stringify(result,null,2));
   console.log(JSON.stringify(result,null,2));
-  if(errors.length)process.exitCode=1;
+  if(errors.length||!events.some(value=>value?.includes('正在朗读'))||!stopped.includes('待机')||!submittedRates.length||submittedRates.some(value=>value!==0.25))process.exitCode=1;
 }catch(error){console.error(startup);console.error(error);process.exitCode=1;}
 finally{await browser?.close();child.kill();}

@@ -148,3 +148,17 @@ response.function_call_arguments.done 可能来自取消/不完整的响应，�
 这些是本机策略，不能当作服务商计费硬上限。hangup 超时/网络失败/进程退出无法确认时显示未确认；连接时长只是本机时长，tokens/audio/费用未知就保留未知。前端实时面板仅累计供应商实际返回的 response.usage，不推算音频账单。未上传真实录音，未调用付费接口。
 
 每 100ms 音量状态更新不应无限推迟记录保存，因此自动保存依据记录内容变化调度，不按每次渲染重置计时。持久化保留对话的播放状态；不保存 realtime call ID、凭证、原始音频或麦克风流。未完成/中断语音在导出中仍有标记。
+
+## 慢速朗读与可操作体验（2026-09-29）
+
+按用户“语速还要慢一些、看不出功能”的反馈，先完善 M3 可体验性，不把缺 Key 的真实模型验收跳过后转做 M4。保留 PRD 的真实状态、演示标识和句级恢复要求。
+
+语速范围再次核对本机 SDK 7.23.0，并实际打开 [TTS create](https://developers.openai.com/api/reference/typescript/resources/audio/subresources/speech/methods/create) 与 [Realtime client events](https://developers.openai.com/api/reference/resources/realtime/client-events)：TTS 支持 0.25–4，项目保持上限 2；Realtime session.audio.output.speed 支持 0.25–1.5 且轮次间应用。shared/speechRate.ts 集中下限 0.25，UI、后端 schema、AudioCoordinator 和实时语速一致，不在隐藏层钳回 0.5/0.75。界面上限仍是 1.5，额外提供 0.35/0.5/0.6 档。
+
+运行中的 Windows SpeechSynthesis 不保证接受直接修改 utterance.rate；把 2 倍生成音频再以 playbackRate=0.125 播放也可能遇到浏览器范围/静音限制。因此改速时同步撤销旧输出，从当前未完成句按新速度重新合成；paused 状态不自动发声，继续时才生成。缓存包含速度，重复低速句可以复用。API 模式新速度可能产生新的 TTS 请求，既有费用不能撤销。语速偏好仅存本机 localStorage，不含凭证；存储不可用时当前播放仍可用。
+
+Realtime 的首音等待仍有固定上限；开始播放后的看门狗按速度放宽，0.25× 最多 480 秒，仍受十分钟总会话限制。活跃输出不计两分钟闲置，播放结束重新计时；不取消清除回执/心跳/资源释放限制。
+
+体验入口包含明确动作而非功能罗列。试用选段通过实际 PDF.js 文本层 DOM Range 生成文本、坐标和 sourceId，找不到合适文字时提示手选；打开说明不自动开麦、发声或调用模型。引导只有观察到同来源原文播放、暂停/打断、同 sentenceId 恢复才显示完成；自然读完回到可重播状态，不误报完成。分步板书在 DEMO 明说固定 EMA，API 模式明说会发送选区并计费。图片没有可靠文字时不提供不可完成的朗读打断路径。
+
+顶栏麦克风在等待权限/建立连接时显示“语音准备中”，不将 connecting 当作已经监听。功能说明的 Esc 只关闭弹窗，不清选区。调用分步讲解时关闭原文试用引导，重启试用重新观察真实状态。已有 PDF、笔记、音频书签、课堂与真实 API 适配继续走原实现。

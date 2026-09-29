@@ -12,7 +12,9 @@ const MAX_FILE_BYTES = 100 * 1024 * 1024;
 type Outline = NonNullable<Awaited<ReturnType<PDFDocumentProxy['getOutline']>>>;
 type Loaded = { pdf: PDFDocumentProxy; record: DocumentRecord; canCopy: boolean };
 type Rendered = { viewport: PageViewport; extraction: ExtractedPage; pageIndex: number; documentId: string };
+export type ReaderAction = {type:'open-sample'|'select-excerpt';nonce:number};
 export type PdfReaderProps = {
+  action?: ReaderAction;
   onDocument: (document: DocumentRecord | null) => void;
   onTarget: (target: PdfTarget | null) => void;
   onPage: (pageIndex: number) => void;
@@ -295,8 +297,8 @@ export function PdfReader(props: PdfReaderProps) {
     scrollRef.current?.scrollTo({ top: 0, left: 0 });
   }
 
-  function selectionTarget() {
-    if (mode !== 'text' || rendering || !rendered || rendered.pageIndex !== pageIndex || !loaded?.canCopy || rendered.documentId !== loaded.record.documentId || !pageRef.current || !textLayerRef.current) return;
+  function selectionTarget(ignoreMode=false) {
+    if (!ignoreMode && mode !== 'text' || rendering || !rendered || rendered.pageIndex !== pageIndex || !loaded?.canCopy || rendered.documentId !== loaded.record.documentId || !pageRef.current || !textLayerRef.current) return;
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.rangeCount) return;
     const range = selection.getRangeAt(0);
@@ -394,6 +396,19 @@ export function PdfReader(props: PdfReaderProps) {
       {item.items.length > 0 && <ul>{outlineItems(item.items, depth + 1)}</ul>}
     </li>);
   }
+
+
+  function selectExcerpt(){
+    if(rendering||!rendered||!loaded?.canCopy||!textLayerRef.current){report('请等页面显示后再选段；扫描页可以手动框选。');return;}
+    const spans=[...textLayerRef.current.querySelectorAll('span')].filter(span=>span.textContent?.trim());
+    const candidate=spans.find(span=>(span.textContent?.trim().length??0)>=32)??spans.find(span=>(span.textContent?.trim().length??0)>=10);
+    if(!candidate){report('本页没有适合快速试读的文本，请在 PDF 上手动选择并核对。');return;}
+    const range=document.createRange();range.selectNodeContents(candidate);const selection=window.getSelection();selection?.removeAllRanges();selection?.addRange(range);
+    setMode('text');selectionTarget(true);candidate.scrollIntoView({block:'nearest'});
+  }
+  const actionHandler=useRef<(action:ReaderAction)=>void>(()=>{});
+  actionHandler.current=action=>{if(action.type==='open-sample')void openSample();else selectExcerpt();};
+  useEffect(()=>{if(props.action)actionHandler.current(props.action);},[props.action]);
 
   const activeRects = rendered && selected?.documentId === rendered.documentId && selected.pageIndex === pageIndex ? selected.rects.map(rect => pageToDisplayRect(rect, rendered.viewport)) : [];
   const overlayStyle = (rect: Rect): CSSProperties => ({ left: rect[0], top: rect[1], width: rect[2] - rect[0], height: rect[3] - rect[1] });

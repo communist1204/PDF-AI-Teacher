@@ -1,11 +1,14 @@
 {
-  "date": "2026-09-29T13:11:49.067Z",
+  "date": "2026-09-29T13:55:40.241Z",
   "browser": "154.0.4258.37",
   "productionPort": 4318,
   "mode": "demo",
   "pdfPages": 2,
   "realBrowserSpeech": {
     "mock": false,
+    "submittedRates": [
+      0.25
+    ],
     "localVoices": [
       {
         "name": "Microsoft Huihui - Chinese (Simplified, PRC)",

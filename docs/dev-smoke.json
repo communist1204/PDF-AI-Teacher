@@ -1,9 +1,10 @@
 {
-  "date": "2026-09-29T13:14:40.847Z",
+  "date": "2026-09-29T13:58:48.967Z",
   "port": 4317,
   "title": "PDF AI Teacher · 学习工作台",
-  "stage": "学习空间\n/\nM3 · 实时互动",
-  "liveDisabled": true,
-  "localRehearsalVisible": true,
+  "featureGuide": true,
+  "minimumRate": "0.25",
+  "selectedText": "指数移动平均将过去的梯度按权重累积。初始值为零时，早期估计会偏小。偏差修正通过除以权重",
+  "audioState": "待机本机合成语音 · 演示",
   "pageErrors": []
 }
