@@ -8,6 +8,9 @@ export interface ServerConfig {
   visionModel: string;
   ttsModel: string;
   transcriptionModel: string;
+  realtimeModel: string;
+  realtimeVoice: string;
+  realtimeTranscriptionModel: string;
   ttsVoice: string;
   ttsInstructions: string;
   ttsInstructionsSupported: boolean;
@@ -59,6 +62,9 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     visionModel: env.VISION_MODEL?.trim() || '',
     ttsModel,
     transcriptionModel: env.TRANSCRIPTION_MODEL?.trim() || '',
+    realtimeModel: env.REALTIME_MODEL?.trim() || '',
+    realtimeVoice: env.REALTIME_VOICE?.trim() || 'marin',
+    realtimeTranscriptionModel: env.REALTIME_TRANSCRIPTION_MODEL?.trim() || '',
     ttsVoice: env.TTS_VOICE?.trim() || 'coral',
     ttsInstructions: ttsInstructionsSupported ? [customInstructions || DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') : '',
     ttsInstructionsSupported,

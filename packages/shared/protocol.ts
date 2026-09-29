@@ -24,7 +24,7 @@ export type TeachingStep = z.infer<typeof TeachingStepSchema>;
 export const AskRequestSchema = EnvelopeSchema.extend({ question: z.string().trim().min(1).max(2000), context: ContextSchema, history: z.array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(4000) })).max(6) });
 export type AskRequest = z.infer<typeof AskRequestSchema>;
 export type AskResponse = Envelope & { plan: TeachingPlan; mode: 'demo' | 'live'; usage: UsageRecord };
-export type UsageRecord = { requestId: string; model: string; category: 'text' | 'tts' | 'transcription'; audioSeconds?: number | null; inputTokens: number | null; outputTokens: number | null; characters: number | null; estimatedCost: null; cancelled: boolean };
+export type UsageRecord = { requestId: string; model: string; category: 'text' | 'tts' | 'transcription' | 'realtime'; connectionSeconds?: number | null; upstreamCancellation?: 'confirmed' | 'unconfirmed'; audioSeconds?: number | null; inputTokens: number | null; outputTokens: number | null; characters: number | null; estimatedCost: null; cancelled: boolean };
 export const TtsRequestSchema = EnvelopeSchema.extend({ text: z.string().min(1).max(1600), speed: z.number().min(0.5).max(2) });
 export const MAX_RECORDING_BYTES = 4 * 1024 * 1024;
 export const MAX_RECORDING_MS = 60000;
@@ -39,7 +39,7 @@ export type TranscriptionRequest = z.infer<typeof TranscriptionRequestSchema>;
 export const TranscriptionResponseSchema = EnvelopeSchema.extend({ text: z.string().trim().min(1).max(2000), mode: z.literal('live') });
 export type TranscriptionResponse = z.infer<typeof TranscriptionResponseSchema> & { usage: UsageRecord };
 export type CapabilityState = 'unconfigured' | 'untested' | 'supported' | 'unsupported' | 'error';
-export type AppConfig = { mode: 'demo' | 'live' | 'unconfigured'; sessionId: string; generationId: number; contextRevision: number; csrfToken: string; capabilities: Record<'text' | 'vision' | 'structuredOutput' | 'tts' | 'transcription' | 'realtimeAudio' | 'realtimeTools' | 'interruption', CapabilityState>; models: { chat: string; vision: string; tts: string; transcription?: string }; speech?: { voice: string; style: string; instructionsSupported: boolean }; maxRequests: number };
+export type AppConfig = { mode: 'demo' | 'live' | 'unconfigured'; sessionId: string; generationId: number; contextRevision: number; csrfToken: string; capabilities: Record<'text' | 'vision' | 'structuredOutput' | 'tts' | 'transcription' | 'realtimeAudio' | 'realtimeTools' | 'interruption', CapabilityState>; models: { chat: string; vision: string; tts: string; transcription?: string; realtime?: string }; realtime?: { provider: 'openai-realtime'; voice: string; maxSessionSeconds: number; idleSeconds: number; inputTranscriptionModel: string }; speech?: { voice: string; style: string; instructionsSupported: boolean }; maxRequests: number };
 export type ReadingCursor = { documentId: string; pageIndex: number; blockId: string; sentenceId: string; textVersion: string; sentenceIndex: number };
 export type Sentence = { sentenceId: string; sourceText: string; speechText: string };
 export function sameEnvelope(a: Envelope, b: Envelope) { return a.sessionId === b.sessionId && a.generationId === b.generationId && a.contextRevision === b.contextRevision; }

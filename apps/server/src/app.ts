@@ -1,6 +1,8 @@
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import express, { type ErrorRequestHandler, type Request, type Response } from 'express';
 import { AskRequestSchema, EnvelopeSchema, TtsRequestSchema, TranscriptionRequestSchema, TranscriptionResponseSchema, validatePlan, type AppConfig, type AskResponse, type Envelope, type UsageRecord } from '../../../packages/shared/protocol';
+import { REALTIME_IDLE_SECONDS, REALTIME_MAX_SESSION_SECONDS, RealtimeConnectRequestSchema, RealtimeConnectionRequestSchema, type RealtimeConnectResponse } from '../../../packages/shared/realtime';
+import { OpenAIRealtimeProvider, RealtimeConnections, realtimeCapability, type RealtimeProvider } from './realtime';
 import { validateRecording } from './recording';
 import { AudioCache } from './cache';
 import { DEFAULT_TTS_STYLE, readConfig, TTS_SOURCE_FIDELITY, type ServerConfig } from './config';
@@ -28,7 +30,7 @@ function setEnvelope(res: Response, envelope: Envelope) {
 }
 function cancelledError() { return new HttpError(409, 'cancelled', '本次任务已取消，旧结果不会继续使用；已发生的服务用量可能仍会计费。'); }
 
-export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; now?: () => number } = {}) {
+export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; realtimeProvider?: RealtimeProvider; now?: () => number } = {}) {
   const config = options.config ?? readConfig();
   const now = options.now ?? Date.now;
   const app = express();
@@ -37,14 +39,17 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
   const sessions = new Map<string, Session>();
   const cache = new AudioCache(config.cacheMaxBytes);
   const provider = options.provider ?? (!config.demoMode && config.apiKey ? new OpenAITeachingProvider(config) : undefined);
+  const realtimeState = realtimeCapability(config);
+  const realtimeProvider = options.realtimeProvider ?? (realtimeState === 'untested' ? new OpenAIRealtimeProvider(config) : undefined);
+  const realtimeConnections = new RealtimeConnections(realtimeProvider, now);
   const capabilities: AppConfig['capabilities'] = {
     text: !config.demoMode && config.apiKey && config.chatModel ? 'untested' : 'unconfigured',
     vision: !config.demoMode && config.apiKey && config.visionModel ? 'untested' : 'unconfigured',
     structuredOutput: !config.demoMode && config.apiKey && (config.chatModel || config.visionModel) ? 'untested' : 'unconfigured',
     tts: !config.demoMode && config.apiKey && config.ttsModel ? 'untested' : 'unconfigured',
-    transcription: !config.demoMode && config.apiKey && config.transcriptionModel ? 'untested' : 'unconfigured', realtimeAudio: 'unsupported', realtimeTools: 'unsupported', interruption: 'unsupported',
+    transcription: !config.demoMode && config.apiKey && config.transcriptionModel ? 'untested' : 'unconfigured', realtimeAudio: realtimeState, realtimeTools: realtimeState, interruption: realtimeState,
   };
-  const mode: AppConfig['mode'] = config.demoMode ? 'demo' : config.apiKey && (config.chatModel || config.visionModel || config.ttsModel || config.transcriptionModel) ? 'live' : 'unconfigured';
+  const mode: AppConfig['mode'] = config.demoMode ? 'demo' : config.apiKey && (config.chatModel || config.visionModel || config.ttsModel || config.transcriptionModel || config.realtimeModel) ? 'live' : 'unconfigured';
   const allowedHosts = new Set([`127.0.0.1:${config.port}`, `localhost:${config.port}`]);
 
   app.use((req, res, next) => {
@@ -55,12 +60,15 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
     next();
   });
+  app.use('/api/realtime', express.json({ limit: '80kb', strict: true }));
   app.use('/api/transcribe', express.json({ limit: '5600kb', strict: true }));
   app.use(express.json({ limit: '3500kb', strict: true }));
 
   function expireSessions() {
+    realtimeConnections.expire();
     for (const [id, session] of sessions) if (session.touchedAt + SESSION_TTL < now()) {
       for (const job of session.jobs) job.controller.abort(cancelledError());
+      void realtimeConnections.disconnect(id);
       cache.clear(id); sessions.delete(id);
     }
   }
@@ -140,7 +148,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     }
     session.touchedAt = now();
     res.cookie(SESSION_COOKIE, session.id, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: SESSION_TTL });
-    const body: AppConfig = { mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel, transcription: config.transcriptionModel }, speech: {
+    const body: AppConfig = { mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel, transcription: config.transcriptionModel, realtime: config.realtimeModel }, realtime: { provider: 'openai-realtime', voice: config.realtimeVoice, maxSessionSeconds: REALTIME_MAX_SESSION_SECONDS, idleSeconds: REALTIME_IDLE_SECONDS, inputTranscriptionModel: config.realtimeTranscriptionModel }, speech: {
       voice: config.ttsVoice,
       style: !config.ttsInstructionsSupported ? '使用模型默认语气' : config.ttsInstructions === [DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') ? '自然温和，按语义停顿' : '本机自定义语气',
       instructionsSupported: config.ttsInstructionsSupported,
@@ -246,6 +254,49 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     }
   });
 
+  app.post('/api/realtime/connect', async (req, res) => {
+    const session = requireMutation(req);
+    const parsed = RealtimeConnectRequestSchema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, 'invalid_request', '实时连接请求格式不正确，SDP 不得超过 64 KiB。');
+    const request = parsed.data;
+    setEnvelope(res, request);
+    if (config.demoMode) throw new HttpError(409, 'demo_realtime', '演示模式不连接实时服务，不上传麦克风，也不模拟真人对话。');
+    if (realtimeState === 'unsupported') throw new HttpError(503, 'realtime_unsupported', '当前服务地址、实时转写模型或声音不支持本应用的官方 WebRTC 适配；文字和录音转写仍可使用。');
+    if (realtimeState === 'unconfigured' || !realtimeProvider) throw new HttpError(503, 'not_configured', '请在本机 .env 配置 API Key、REALTIME_MODEL 和 REALTIME_TRANSCRIPTION_MODEL 后重启；模型权限及费用需自行核对。');
+    // Reject a duplicate before it can abort an in-progress exchange or consume a paid request.
+    if (realtimeConnections.has(session.id)) throw new HttpError(409, 'realtime_in_progress', '此页面已有实时连接或正在连接，请先关闭。');
+    checkFresh(session, request);
+    consumeRequest(session);
+    const usage = newUsage(session, config.realtimeModel, 'realtime');
+    usage.audioSeconds = null; usage.connectionSeconds = null;
+    const lease = realtimeConnections.reserve(session.id, usage);
+    try {
+      const result = await runJob(session, request, req, res, usage, signal => realtimeConnections.exchange(lease, request.sdp, signal));
+      // SDP success alone does not verify audio, tools, VAD, or actual interruption.
+      const response: RealtimeConnectResponse = { sessionId: request.sessionId, generationId: request.generationId, contextRevision: request.contextRevision, ...result };
+      res.json(response);
+    } catch (error) {
+      await realtimeConnections.release(lease);
+      throw error;
+    }
+  });
+  app.post('/api/realtime/heartbeat', (req, res) => {
+    const session = requireMutation(req);
+    const parsed = RealtimeConnectionRequestSchema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, 'invalid_request', '实时连接续约格式不正确。');
+    setEnvelope(res, parsed.data);
+    // Connection ownership is independent of response generations and cancellation boundaries.
+    res.json({ ...parsed.data, ...realtimeConnections.heartbeat(session.id, parsed.data.connectionId) });
+  });
+  app.post('/api/realtime/disconnect', async (req, res) => {
+    const session = requireMutation(req);
+    const parsed = RealtimeConnectionRequestSchema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, 'invalid_request', '实时连接关闭格式不正确。');
+    setEnvelope(res, parsed.data);
+    const upstreamCancellation = await realtimeConnections.disconnect(session.id, parsed.data.connectionId);
+    res.json({ ...parsed.data, active: false, upstreamCancellation });
+  });
+
   app.post('/api/cancel', (req, res) => {
     const session = requireMutation(req);
     const parsed = EnvelopeSchema.safeParse(req.body);
@@ -266,7 +317,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     const session = sessionFor(req);
     res.json({ records: session.usage, requestCount: session.requests, maxRequests: config.maxRequests, cache: cache.stats(session.id), estimatedCost: null });
   });
-  app.use('/api', (_req, _res, next) => next(new HttpError(404, 'unknown_endpoint', '此接口未实现；实时语音会话属于后续 M3。')));
+  app.use('/api', (_req, _res, next) => next(new HttpError(404, 'unknown_endpoint', '此接口未实现，请刷新页面并检查应用版本。')));
 
   const errorHandler: ErrorRequestHandler = (error: unknown, req, res, _next) => {
     const details = typeof error === 'object' && error ? error as Record<string, unknown> : {};
