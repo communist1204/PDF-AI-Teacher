@@ -2,10 +2,10 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import express, { type ErrorRequestHandler, type Request, type Response } from 'express';
 import { AskRequestSchema, EnvelopeSchema, TtsRequestSchema, validatePlan, type AppConfig, type AskResponse, type Envelope, type UsageRecord } from '../../../packages/shared/protocol';
 import { AudioCache } from './cache';
-import { readConfig, type ServerConfig } from './config';
+import { DEFAULT_TTS_STYLE, readConfig, TTS_SOURCE_FIDELITY, type ServerConfig } from './config';
 import { makeDemoPlan } from './demo';
 import { HttpError, providerError, safeRequestId } from './errors';
-import { OpenAITeachingProvider, type TeachingProvider } from './provider';
+import { OpenAITeachingProvider, speechRequest, type TeachingProvider } from './provider';
 
 type Job = { envelope: Envelope; controller: AbortController };
 type Session = {
@@ -138,7 +138,11 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     }
     session.touchedAt = now();
     res.cookie(SESSION_COOKIE, session.id, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: SESSION_TTL });
-    const body: AppConfig = { mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel }, maxRequests: config.maxRequests };
+    const body: AppConfig = { mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel }, speech: {
+      voice: config.ttsVoice,
+      style: !config.ttsInstructionsSupported ? '使用模型默认语气' : config.ttsInstructions === [DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') ? '自然温和，按语义停顿' : '本机自定义语气',
+      instructionsSupported: config.ttsInstructionsSupported,
+    }, maxRequests: config.maxRequests };
     res.json(body);
   });
 
@@ -193,7 +197,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     setEnvelope(res, request);
     if (config.demoMode) throw new HttpError(409, 'demo_tts', '演示模式未调用付费 TTS。请使用明确标注的浏览器演示语音，或在本机配置真实 TTS。');
     if (!config.apiKey || !config.ttsModel || !provider) throw new HttpError(503, 'not_configured', 'TTS 模型或 API Key 未配置；未自动切换语音服务。');
-    const cacheKey = cache.key(session.id, [config.baseUrl, config.ttsModel, config.ttsVoice, request.speed, request.text]);
+    const cacheKey = cache.key(session.id, [config.baseUrl, speechRequest(config, request.text, request.speed)]);
     const cached = cache.get(cacheKey);
     if (cached) { res.set('x-audio-cache', 'hit').type('audio/mpeg').send(cached); return; }
     consumeRequest(session);
