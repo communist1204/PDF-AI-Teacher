@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AudioCoordinator, requiresFormulaConfirmation, splitSentences, toSpeechText, type PlaybackAdapter, type PlaybackHandle, type PlaybackInput } from '../../apps/web/src/features/voice/AudioCoordinator';
-import type { Envelope, PdfTarget } from '../../packages/shared/protocol';
+import type { Envelope, PdfTarget, TeachingStep } from '../../packages/shared/protocol';
 
 const envelope: Envelope = { sessionId: 'test-session', generationId: 1, contextRevision: 1 };
 const target: PdfTarget = { sourceId: 'source-one', documentId: 'book-one', pageIndex: 2, pageLabel: '1', blockId: 'block-one', rect: null, sourceText: '第一句。第二句。第三句。' };
@@ -42,9 +42,10 @@ function harness(requestSpeech = vi.fn(async () => new Blob(['mock-audio']))) {
   };
   const onError = vi.fn();
   const onChange = vi.fn();
-  const audio = new AudioCoordinator({ requestSpeech, onChange, onError, playbackAdapter: adapter });
+  const onComplete = vi.fn();
+  const audio = new AudioCoordinator({ requestSpeech, onChange, onError, onComplete, playbackAdapter: adapter });
   audio.load(target, envelope, 'live');
-  return { audio, handles, requestSpeech, onError, onChange, audible: () => audible, maxAudible: () => maxAudible };
+  return { audio, handles, requestSpeech, onError, onChange, onComplete, audible: () => audible, maxAudible: () => maxAudible };
 }
 
 describe('sentence source fidelity', () => {
@@ -325,5 +326,181 @@ describe('pause during unresolved browser play()', () => {
     expect(h.handle.dispose).not.toHaveBeenCalled();
     expect(h.handle.play).toHaveBeenCalledTimes(3);
     h.audio.dispose();
+  });
+});
+
+const explanationStep: TeachingStep = { stepId: 'step-one', title: '说明符号', speechText: '这是第一句讲解。这是第二句讲解。', explanationMarkdown: '这是补充解释。', boardBlocks: [], sourceIds: [target.sourceId], exampleOrigin: 'none' };
+
+describe('M2 separate source and explanation playback (mock audio)', () => {
+  it('preserves original reading through explanations, repeated interruptions and a question', async () => {
+    const h = harness();
+    await h.audio.play();
+    h.handles[0].input.onEnded();
+    await tick();
+    const source = h.audio.getBookmark();
+    expect(source?.cursor.sentenceIndex).toBe(1);
+    h.audio.loadExplanation(target, explanationStep, { ...envelope, generationId: 2 }, 'live');
+    expect(h.audible()).toBe(0);
+    expect(h.audio.getBookmark()).toEqual(source);
+    await h.audio.play();
+    h.handles[2].input.onEnded();
+    await tick();
+    expect(h.audio.getSnapshot()).toMatchObject({ channel: 'explanation', teachingStepId: 'step-one', sentenceIndex: 1 });
+    const explanation = h.audio.getExplanationBookmark();
+    for (let generationId = 3; generationId <= 12; generationId += 1) {
+      h.audio.interrupt();
+      h.audio.rebind({ ...envelope, generationId });
+      await h.audio.resume();
+      expect(h.requestSpeech).toHaveBeenLastCalledWith('这是第二句讲解。', { ...envelope, generationId }, 1, expect.any(AbortSignal));
+      expect(h.audio.getBookmark()).toEqual(source);
+    }
+    h.audio.interrupt();
+    h.audio.loadExplanation(target, { ...explanationStep, stepId: 'question-step', speechText: '这是追问的回答。' }, { ...envelope, generationId: 13 }, 'live');
+    await h.audio.play();
+    h.handles.at(-1)!.input.onEnded();
+    expect(h.onComplete).toHaveBeenLastCalledWith({ channel: 'explanation', stepId: 'question-step', envelope: { ...envelope, generationId: 13 } });
+    expect(h.audio.getBookmark()).toEqual(source);
+    expect(h.audio.restoreExplanationBookmark(explanation!, { ...envelope, generationId: 14 }, 'live')).toBe(true);
+    expect(h.audible()).toBe(0);
+    await h.audio.resume();
+    expect(h.requestSpeech).toHaveBeenLastCalledWith('这是第二句讲解。', { ...envelope, generationId: 14 }, 1, expect.any(AbortSignal));
+    h.handles.at(-1)!.input.onEnded();
+    expect(h.audio.getBookmark()).toEqual(source);
+    await h.audio.resumeSource({ ...envelope, generationId: 15 }, 'live');
+    expect(h.requestSpeech).toHaveBeenLastCalledWith('第二句。', { ...envelope, generationId: 15 }, 1, expect.any(AbortSignal));
+    expect(h.audio.getSnapshot()).toMatchObject({ channel: 'source', teachingStepId: null, sentenceIndex: 1 });
+    expect(h.maxAudible()).toBe(1);
+    expect(h.onComplete).toHaveBeenCalledTimes(2);
+    h.audio.dispose();
+  });
+
+  it('restores persisted original bookmarks without autoplay and checks every identity component', async () => {
+    const h = harness();
+    h.audio.next();
+    const bookmark = h.audio.getBookmark()!;
+    h.audio.reset();
+    expect(h.audio.restoreBookmark(JSON.parse(JSON.stringify(bookmark)), { ...envelope, generationId: 5 }, 'live')).toBe(true);
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'silent', sentenceIndex: 1, channel: 'source' });
+    expect(h.requestSpeech).not.toHaveBeenCalled();
+    expect(h.handles).toHaveLength(0);
+    for (const wrong of [
+      { documentId: 'another-book' }, { pageIndex: 99 }, { blockId: 'other-block' }, { sentenceId: 'unknown' }, { textVersion: 'old-segmentation' }, { sentenceIndex: 999 }, { sentenceIndex: 0.5 },
+    ]) {
+      expect(h.audio.restoreBookmark({ ...bookmark, cursor: { ...bookmark.cursor, ...wrong } }, envelope, 'live')).toBe(false);
+      expect(h.audio.getBookmark()).toEqual(bookmark);
+    }
+    expect(h.audio.restoreBookmark({ ...bookmark, target: { ...bookmark.target, sourceText: '文字已修正。' } }, envelope, 'live')).toBe(false);
+    const exposed = h.audio.getBookmark()!;
+    exposed.cursor.sentenceIndex = 0;
+    exposed.target.sourceText = '外部修改';
+    expect(h.audio.getBookmark()).toEqual(bookmark);
+    await h.audio.resumeSource({ ...envelope, generationId: 6 }, 'live');
+    expect(h.requestSpeech).toHaveBeenLastCalledWith('第二句。', { ...envelope, generationId: 6 }, 1, expect.any(AbortSignal));
+    h.audio.load({ ...target, documentId: 'same-name-different-book' }, envelope, 'live');
+    expect(h.audio.restoreBookmark(bookmark, envelope, 'live')).toBe(false);
+    expect(h.audio.getBookmark()).toBeNull();
+    h.audio.dispose();
+  });
+
+  it('keeps paused source audio at its actual position on resumeSource with the same envelope', async () => {
+    const h = harness();
+    await h.audio.play();
+    h.handles[0].position = 7.5;
+    h.audio.pause();
+    await h.audio.resumeSource(envelope, 'live');
+    expect(h.handles).toHaveLength(1);
+    expect(h.handles[0].position).toBe(7.5);
+    expect(h.handles[0].plays).toBe(2);
+    h.audio.dispose();
+  });
+
+  it('reloads the same teaching speech at the unfinished sentence and rejects changed saved speech', async () => {
+    const h = harness();
+    h.audio.loadExplanation(target, explanationStep, envelope, 'demo');
+    await h.audio.play();
+    h.handles[0].input.onEnded();
+    await tick();
+    const bookmark = h.audio.getExplanationBookmark()!;
+    h.audio.loadExplanation(target, explanationStep, { ...envelope, generationId: 2 }, 'live');
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'silent', sentenceIndex: 1, hasBookmark: true });
+    expect(h.audio.getBookmark()).toBeNull();
+    expect(h.audio.restoreExplanationBookmark({ ...bookmark, speechText: '已变更的讲解。' }, envelope, 'live')).toBe(false);
+    expect(h.audio.restoreExplanationBookmark({ ...bookmark, sentenceId: 'wrong' }, envelope, 'live')).toBe(false);
+    expect(h.audio.restoreExplanationBookmark({ ...bookmark, sentenceIndex: 99 }, envelope, 'live')).toBe(false);
+    await h.audio.play();
+    expect(h.requestSpeech).toHaveBeenLastCalledWith('这是第二句讲解。', { ...envelope, generationId: 2 }, 1, expect.any(AbortSignal));
+    expect(h.maxAudible()).toBe(1);
+    h.audio.loadExplanation(target, { ...explanationStep, speechText: '更新后的讲解。' }, envelope, 'live');
+    expect(h.audio.getSnapshot()).toMatchObject({ sentenceIndex: 0, hasBookmark: false });
+    h.audio.dispose();
+  });
+
+  it('completes a channel once, only after all actual endings, without marking original text as read', async () => {
+    const h = harness();
+    await h.audio.play();
+    const bookmark = h.audio.getBookmark();
+    h.audio.loadExplanation(target, explanationStep, envelope, 'live');
+    await h.audio.play();
+    const firstExplanation = h.handles[1];
+    firstExplanation.input.onEnded();
+    await tick();
+    expect(h.onComplete).not.toHaveBeenCalled();
+    const lastExplanation = h.handles[2];
+    lastExplanation.input.onEnded();
+    lastExplanation.input.onEnded();
+    expect(h.onComplete).toHaveBeenCalledExactlyOnceWith({ channel: 'explanation', stepId: 'step-one', envelope });
+    expect(h.audio.getBookmark()).toEqual(bookmark);
+    expect(h.audio.getExplanationBookmark()).toBeNull();
+    await h.audio.resumeSource({ ...envelope, generationId: 2 }, 'live');
+    for (let index = 3; index <= 5; index += 1) { h.handles[index].input.onEnded(); await tick(); }
+    expect(h.onComplete).toHaveBeenCalledTimes(2);
+    expect(h.onComplete).toHaveBeenLastCalledWith({ channel: 'source', stepId: null, envelope: { ...envelope, generationId: 2 } });
+    expect(h.audio.getBookmark()).toBeNull();
+    h.audio.dispose();
+  });
+
+  it('suppresses late completion after interrupt, reset, revision changes and pending channel switches', async () => {
+    const pendingSpeech = deferred<Blob>();
+    const requestSpeech = vi.fn().mockImplementationOnce(() => pendingSpeech.promise).mockResolvedValue(new Blob(['audio']));
+    const h = harness(requestSpeech);
+    const pending = h.audio.play();
+    const signal = requestSpeech.mock.calls[0][3] as AbortSignal;
+    h.audio.loadExplanation(target, { ...explanationStep, speechText: '讲解。' }, { ...envelope, generationId: 2 }, 'live');
+    await h.audio.play();
+    pendingSpeech.resolve(new Blob(['stale original']));
+    await pending;
+    expect(signal.aborted).toBe(true);
+    expect(h.handles).toHaveLength(1);
+    for (const invalidate of [() => h.audio.interrupt(), () => h.audio.rebind({ ...envelope, generationId: 3 }), () => h.audio.reset()]) {
+      const old = h.handles.at(-1)!;
+      invalidate();
+      old.input.onEnded();
+      old.input.onError('stale');
+      expect(h.onComplete).not.toHaveBeenCalled();
+      expect(h.onError).not.toHaveBeenCalled();
+      if (h.audio.getSnapshot().sentences.length) await h.audio.resume();
+    }
+    expect(h.maxAudible()).toBe(1);
+    h.audio.dispose();
+  });
+
+  it('ignores an ending before playback starts or while paused', async () => {
+    let input!: PlaybackInput;
+    const handle: PlaybackHandle = { play: vi.fn(async () => {}), pause: vi.fn(), stop: vi.fn(), dispose: vi.fn(), setRate: vi.fn(), setVolume: vi.fn() };
+    const onComplete = vi.fn();
+    const audio = new AudioCoordinator({ requestSpeech: vi.fn(), onChange: vi.fn(), onError: vi.fn(), onComplete, playbackAdapter: { create: value => { input = value; return handle; } } });
+    audio.load({ ...target, sourceText: '单句。' }, envelope, 'demo');
+    await audio.play();
+    input.onEnded();
+    expect(onComplete).not.toHaveBeenCalled();
+    input.onStarted();
+    audio.pause();
+    input.onEnded();
+    expect(onComplete).not.toHaveBeenCalled();
+    await audio.resume();
+    input.onStarted();
+    input.onEnded();
+    expect(onComplete).toHaveBeenCalledExactlyOnceWith({ channel: 'source', stepId: null, envelope });
+    audio.dispose();
   });
 });
