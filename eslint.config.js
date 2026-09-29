@@ -4,5 +4,5 @@ export default tseslint.config(
   { ignores: ['node_modules/**', 'dist/**', '.worktrees/**', '.npm-cache/**', 'test-results/**', 'playwright-report/**', 'public/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
-  { languageOptions: { globals: { console: 'readonly', process: 'readonly', Buffer: 'readonly', URL: 'readonly' } }, rules: { '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }] } }
+  { languageOptions: { globals: { window: 'readonly', MutationObserver: 'readonly', setTimeout: 'readonly', speechSynthesis: 'readonly', fetch: 'readonly', document: 'readonly', console: 'readonly', process: 'readonly', Buffer: 'readonly', URL: 'readonly' } }, rules: { '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }] } }
 );

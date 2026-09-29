@@ -1,0 +1,45 @@
+{
+  "date": "2026-09-29T10:20:07.821Z",
+  "browser": "154.0.4258.37",
+  "productionPort": 4318,
+  "mode": "demo",
+  "pdfPages": 2,
+  "realBrowserSpeech": {
+    "mock": false,
+    "localVoices": [
+      {
+        "name": "Microsoft Huihui - Chinese (Simplified, PRC)",
+        "lang": "zh-CN"
+      },
+      {
+        "name": "Microsoft Mark - English (United States)",
+        "lang": "en-US"
+      },
+      {
+        "name": "Microsoft Zira - English (United States)",
+        "lang": "en-US"
+      },
+      {
+        "name": "Microsoft David - English (United States)",
+        "lang": "en-US"
+      },
+      {
+        "name": "Microsoft Kangkang - Chinese (Simplified, PRC)",
+        "lang": "zh-CN"
+      },
+      {
+        "name": "Microsoft Yaoyao - Chinese (Simplified, PRC)",
+        "lang": "zh-CN"
+      }
+    ],
+    "selectedText": "这是一份用于测试阅读器的自制练习，不来自商业教材。",
+    "observedStates": [
+      "准备声音浏览器合成声音 · 演示",
+      "正在朗读浏览器合成声音 · 演示"
+    ],
+    "stoppedState": "待机浏览器合成声音 · 演示",
+    "humanListening": "未测，事件不代表实际听感"
+  },
+  "pageErrors": [],
+  "providerCalls": 0
+}
