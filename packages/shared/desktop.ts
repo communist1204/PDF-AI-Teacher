@@ -10,6 +10,8 @@ export interface DesktopPreferences {
   reasoningEffort: string;
   ttsEngine?: SpeechEngine;
   localTtsVoice?: string;
+  qwenTtsVoice?: string;
+  qwenTtsInstructions?: string;
   ttsModel: string;
   ttsVoice: string;
   ttsInstructions: string;
@@ -18,6 +20,7 @@ export interface DesktopPreferences {
 /** Safe public state exposed by preload; OAuth tokens and saved API keys never return to the renderer. */
 export interface DesktopSettings extends DesktopPreferences {
   localTtsReady?: boolean;
+  qwenTtsReady?: boolean;
   hasApiKey: boolean;
   encryptionAvailable: boolean;
   auth: {
