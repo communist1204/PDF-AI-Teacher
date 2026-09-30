@@ -15,6 +15,8 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
   const [pending, setPending] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [feedbackTarget, setFeedbackTarget] = useState<'account' | 'settings'>('settings');
+  const accountFeedback = useRef<HTMLDivElement>(null);
   const operation = useRef(0);
   const mounted = useRef(true);
   const onChangeRef = useRef(onChange);
@@ -29,12 +31,17 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
     return () => { mounted.current = false; operation.current++; void bridge.cancelLogin().catch(() => {}); };
   }, [bridge]);
 
+  useEffect(() => {
+    if (feedbackTarget === 'account' && (pending || error || notice)) accountFeedback.current?.scrollIntoView({ block: 'nearest' });
+  }, [feedbackTarget, pending, error, notice]);
+
   const accept = (value: DesktopSettings) => {
     setSettings(value); setDraft(preferences(value)); onChangeRef.current(value);
   };
   const run = async (kind: string, action: () => Promise<void>) => {
     if (pending) return;
     const id = ++operation.current;
+    setFeedbackTarget(['login', 'account', 'logout'].includes(kind) ? 'account' : 'settings');
     setPending(kind); setError(''); setNotice('');
     try { await action(); }
     catch (cause) { if (mounted.current && operation.current === id) setError(cause instanceof Error ? cause.message : '操作未完成，请重试。'); }
@@ -49,7 +56,7 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
   });
   const cancelLogin = async () => {
     const id = ++operation.current;
-    setPending('cancel'); setError('');
+    setFeedbackTarget('account'); setPending('cancel'); setError(''); setNotice('');
     try { await bridge.cancelLogin(); if (mounted.current && id === operation.current) setNotice('已取消本次登录，可以继续使用本地阅读功能。'); }
     catch { if (mounted.current && id === operation.current) setError('未能确认登录取消，请关闭官方登录页面。'); }
     finally { if (mounted.current && id === operation.current) setPending(''); }
@@ -81,7 +88,10 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
         <div><strong>{account?.status === 'signed_in' ? 'ChatGPT 已登录' : account?.status === 'expired' ? 'ChatGPT 登录已过期' : '尚未登录 ChatGPT'}</strong>{account?.email && <span className="desktop-account-email">{account.email}</span>}</div>
         {account?.message && <p>{account.message}</p>}
         {account?.accounts.length ? <label>本机账号<select aria-label="本机 ChatGPT 账号" value={account.activeAccountId || ''} disabled={busy} onChange={event => void run('account', async () => { onBeforeAccountChange(); accept(await bridge.selectAccount(event.target.value)); setNotice('账号已切换，点击「应用并重启」启用。'); })}><option value="" disabled>选择账号</option>{account.accounts.map(item => <option key={item.id} value={item.id}>{item.label}{item.status === 'expired' ? '（需重新登录）' : item.status === 'signed_out' ? '（已退出）' : ''}</option>)}</select></label> : null}
-        <div className="desktop-setting-actions">{pending === 'login' || pending === 'cancel' ? <><span role="status">{pending === 'cancel' ? '正在取消…' : '请在浏览器中完成登录…'}</span><button className="secondary-button" disabled={pending === 'cancel'} onClick={() => void cancelLogin()}>取消登录</button></> : <><button className="primary-button" disabled={busy || !settings.encryptionAvailable} onClick={() => login(account?.activeAccountId)}>{account?.status === 'signed_in' ? '重新授权 ChatGPT' : '使用 ChatGPT 登录'}</button>{!!account?.accounts.length && <button className="secondary-button" disabled={busy || !settings.encryptionAvailable} onClick={() => login()}>添加另一个账号</button>}{account?.status === 'signed_in' && <button className="text-button" disabled={busy} onClick={() => void run('logout', async () => { onBeforeAccountChange(); accept(await bridge.logout()); setNotice('已退出当前账号，点击「应用并重启」更新当前会话。'); })}>退出当前账号</button>}</>}</div>
+        <div className="desktop-setting-actions">{pending === 'login' || pending === 'cancel' ? <><button className="secondary-button" disabled={pending === 'cancel'} onClick={() => void cancelLogin()}>取消登录</button></> : <><button className="primary-button" disabled={busy || !settings.encryptionAvailable} onClick={() => login(account?.activeAccountId)}>{account?.status === 'signed_in' ? '重新授权 ChatGPT' : '使用 ChatGPT 登录'}</button>{!!account?.accounts.length && <button className="secondary-button" disabled={busy || !settings.encryptionAvailable} onClick={() => login()}>添加另一个账号</button>}{account?.status === 'signed_in' && <button className="text-button" disabled={busy} onClick={() => void run('logout', async () => { onBeforeAccountChange(); accept(await bridge.logout()); setNotice('已退出当前账号，点击「应用并重启」更新当前会话。'); })}>退出当前账号</button>}</>}</div>
+        <div className="desktop-account-feedback" ref={accountFeedback} aria-live="polite" aria-atomic="true">
+          {feedbackTarget === 'account' && <>{(pending === 'login' || pending === 'cancel') && <p className="desktop-account-pending" role="status">{pending === 'cancel' ? '正在取消登录…' : '正在连接官方登录服务；授权页面打开后，请在浏览器中继续。'}</p>}{error && <p className="desktop-setting-error" role="alert">{error}</p>}{notice && <p className="desktop-setting-notice" role="status">{notice}</p>}</>}
+        </div>
         <p className="desktop-setting-note">登录用于文字与看图解题，使用范围和额度由你的 ChatGPT 计划决定。模型以账号实际返回的列表为准，登录成功不代表专业解答已验证。</p>
       </div>
       {!settings.encryptionAvailable && <p className="desktop-setting-error" role="alert">本机安全加密不可用，无法保存登录或 API 凭证。可以继续使用本地演示。</p>}
@@ -100,7 +110,7 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
       </fieldset><div className="desktop-setting-actions"><button className="text-button" disabled={busy} onClick={() => void run('link', () => bridge.openAccountPage('api-keys'))}>打开官方 API Key 页面</button><button className="text-button" disabled={busy} onClick={() => void run('link', () => bridge.openAccountPage('billing'))}>查看 API 账单</button></div></details>
       {(settings.restartRequired || dirty) && <div className="desktop-restart-notice"><strong>{dirty ? '有待保存的设置' : '设置已保存，等待应用'}</strong><p>应用时会重启软件。已保存的学习记录保留；重启后重新选择同一 PDF 继续。请先保留尚未发送的问题。</p></div>}
       <div className="desktop-setting-actions desktop-save-actions"><button className="secondary-button" disabled={busy || !dirty} onClick={() => void run('save', () => save(false))}>保存设置</button><button className="primary-button" disabled={busy || (!dirty && !settings.restartRequired)} onClick={() => void run('restart', () => save(true))}>{pending === 'restart' ? '正在应用…' : '应用并重启'}</button><button className="text-button" disabled={busy} onClick={() => void run('shortcut', async () => { await bridge.createShortcut(); setNotice('桌面快捷方式已创建，下次双击图标即可打开。'); })}>创建桌面快捷方式</button></div>
-      {notice && <p className="desktop-setting-notice" role="status">{notice}</p>}{error && <p className="desktop-setting-error" role="alert">{error}</p>}
+      {feedbackTarget === 'settings' && <>{notice && <p className="desktop-setting-notice" role="status">{notice}</p>}{error && <p className="desktop-setting-error" role="alert">{error}</p>}</>}
     </>}
   </section>;
 }

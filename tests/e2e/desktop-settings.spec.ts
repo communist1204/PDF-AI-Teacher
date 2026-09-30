@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { DesktopSettings } from '../../packages/shared/desktop';
 
-type DesktopHarness = { calls: Array<{ method: string; value?: unknown }>; state: DesktopSettings; finishLogin: () => void };
+type DesktopHarness = { calls: Array<{ method: string; value?: unknown }>; state: DesktopSettings; finishLogin: () => void; failLogin: (message: string) => void };
 const initial: DesktopSettings = {
   mode: 'demo', chatModel: 'gpt-6-astra', visionModel: 'gpt-6-astra', reasoningEffort: 'xhigh',
   ttsModel: 'gpt-4o-mini-tts', ttsVoice: 'marin', ttsInstructions: '温和自然，按句意停顿。',
@@ -14,7 +14,7 @@ async function setup(page: Page, signedIn = false) {
       state.mode = 'chatgpt'; state.auth = { status: 'signed_in', email: 'reader@example.test', activeAccountId: 'account-one', accounts: [{ id: 'account-one', label: '账号一', status: 'signed_in' }, { id: 'account-two', label: '账号二', status: 'signed_in' }] };
       state.models = [{ id: 'gpt-6-astra', name: '接口模拟 Astra' }, { id: 'mock-theory-second', name: '接口模拟第二模型' }];
     }
-    const harness: DesktopHarness = { calls: [], state, finishLogin: () => {} };
+    const harness: DesktopHarness = { calls: [], state, finishLogin: () => {}, failLogin: () => {} };
     Object.defineProperty(window, '__desktopHarness', { value: harness });
     let resolveLogin: ((value: DesktopSettings) => void) | undefined;
     const record = (method: string, value?: unknown) => harness.calls.push({ method, value });
@@ -22,7 +22,8 @@ async function setup(page: Page, signedIn = false) {
       getSettings: async () => structuredClone(state),
       login: async (accountId?: string) => {
         record('login', accountId);
-        return new Promise<DesktopSettings>(resolve => {
+        return new Promise<DesktopSettings>((resolve, reject) => {
+          harness.failLogin = message => reject(new Error(message));
           resolveLogin = resolve;
           harness.finishLogin = () => {
             state.mode = 'chatgpt'; state.restartRequired = true;
@@ -59,7 +60,7 @@ test('桌面官方登录可取消，成功后仅显式应用才重启，并保�
   await expect(page.getByRole('dialog')).not.toContainText('API Key 只在后端');
   await page.screenshot({path:'test-results/desktop-settings-login.png',fullPage:true});
   await page.getByRole('button', { name: '使用 ChatGPT 登录', exact: true }).click();
-  await expect(panel).toContainText('请在浏览器中完成登录');
+  await expect(panel).toContainText('正在连接官方登录服务');
   await page.getByRole('button', { name: '取消登录', exact: true }).click();
   await expect(panel).toContainText('已取消本次登录');
   expect((await calls(page)).filter(call => call.method === 'restart')).toHaveLength(0);
@@ -109,4 +110,35 @@ test('账号切换和退出保留显式应用步骤，支持创建软件快捷�
   expect((await calls(page)).some(call => call.method === 'restart')).toBe(false);
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await expect(page.locator('.desktop-pending-banner')).toContainText('等待应用');
+});
+
+
+test('720p 登录连接失败直接显示在按钮旁，恢复可重试且不虚报浏览器已经打开', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await setup(page);
+  await page.getByRole('button', { name: '登录 ChatGPT', exact: true }).click();
+  const account = page.locator('.desktop-account-card');
+  const login = account.getByRole('button', { name: '使用 ChatGPT 登录', exact: true });
+  await login.click();
+  const waiting = account.getByRole('status');
+  await expect(waiting).toContainText('正在连接官方登录服务');
+  await expect(waiting).toContainText('授权页面打开后');
+  await expect(waiting).toBeInViewport({ ratio: 1 });
+  await expect(account.getByRole('button', { name: '取消登录', exact: true })).toBeEnabled();
+  await page.evaluate(() => (window as unknown as { __desktopHarness: DesktopHarness }).__desktopHarness.failLogin('登录服务暂不可用（HTTP 403）。请稍后重试。'));
+  const failure = account.getByRole('alert');
+  await expect(failure).toContainText('HTTP 403');
+  await expect(failure).toBeInViewport({ ratio: 1 });
+  await expect(login).toBeEnabled();
+  await expect(account.getByRole('status')).toHaveCount(0);
+  await page.screenshot({ path: 'test-results/desktop-login-failure-720.png', fullPage: true });
+  await login.click();
+  await expect(failure).toHaveCount(0);
+  await expect(waiting).toContainText('正在连接官方登录服务');
+  await finishLogin(page);
+  await expect(account.getByRole('status')).toContainText('账号已登录');
+  await expect(account.getByRole('status')).toBeInViewport({ ratio: 1 });
+  const history = await calls(page);
+  expect(history.filter(call => call.method === 'login')).toHaveLength(2);
+  expect(history.filter(call => call.method === 'restart')).toHaveLength(0);
 });
