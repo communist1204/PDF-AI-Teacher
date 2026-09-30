@@ -53,6 +53,13 @@ afterEach(() => { controllers.splice(0).forEach(controller => controller.stop())
 
 // Protocol simulation only: no provider request, WebRTC network or real microphone.
 describe('Realtime controller protocol regressions', () => {
+  it('limits a 3x reader preference to confirmed 1.5x realtime speed and explains the difference', async () => {
+    const f = setup(3); await f.teach();
+    expect(f.sent.filter(event => event.type === 'session.update').map(event => event.session?.audio.output.speed)).toEqual([1.5]);
+    expect(f.controller.getSnapshot().notice).toContain('本次按 1.5× 播放');
+    expect(f.controller.getSnapshot().notice).toContain('原文朗读仍使用 3×');
+    expect(f.options.rate()).toBe(3);
+  });
   it.each(['before', 'after'])('retains the same input when local VAD fires %s server VAD', async order => {
     const f = setup();
     if (order === 'before') f.controller.interrupt('tentative local VAD', false);

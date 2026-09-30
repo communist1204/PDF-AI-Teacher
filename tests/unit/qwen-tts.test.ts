@@ -63,8 +63,14 @@ describe('Qwen CPU child adapter (mock process, real temporary files)', () => {
     expect(() => provider({ voice: '../other' })).toThrow('音色'); expect(() => provider({ instructions: 'x'.repeat(1001) })).toThrow('1000'); expect(() => provider({ instructions: 'bad\0style' })).toThrow('1000');
     const value = provider();
     for (const text of ['', ' \n', 'x'.repeat(6001), 'a\0b']) await expect(value.speak(text, 1, new AbortController().signal)).rejects.toMatchObject({ code: 'qwen_tts_text' });
-    for (const speed of [NaN, Infinity, 0.24, 2.01]) await expect(value.speak('文本', speed, new AbortController().signal)).rejects.toMatchObject({ code: 'qwen_tts_speed' });
+    for (const speed of [NaN, Infinity, 0.24, 3.01]) await expect(value.speak('文本', speed, new AbortController().signal)).rejects.toMatchObject({ code: 'qwen_tts_speed' });
     await expect(value.speak('文本', 1, AbortSignal.abort())).rejects.toMatchObject({ code: 'qwen_tts_cancelled' }); expect(spawnMock).not.toHaveBeenCalled();
+  });
+  it('accepts 3x while leaving synthesis at its native speed for pitch-preserving playback', async () => {
+    const pending = provider().speak('三倍速朗读。', 3, new AbortController().signal);
+    await vi.waitFor(() => expect(children).toHaveLength(1));
+    expect(children[0].args).not.toContain('--speed'); await children[0].complete();
+    expect((await pending).audio).toEqual(wave());
   });
   it('sends private original text only through stdin and isolates CPU environment from credentials', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'sk-private-test'); vi.stubEnv('NODE_OPTIONS', '--inspect=secret'); vi.stubEnv('HTTPS_PROXY', 'private-proxy');

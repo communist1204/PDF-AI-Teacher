@@ -748,7 +748,7 @@ describe('slow speech and rate changes (simulated playback)', () => {
     expect(h.audio.getBookmark()).toEqual(bookmark); expect(h.audible()).toBe(0); h.audio.dispose();
   });
 
-  it('passes a 0.25x rate to a local utterance instead of relying on changing an active utterance', async () => {
+  it.each([0.25, 3])('passes %sx to a system utterance and restarts when changed', async rate => {
     const events = new EventTarget(); const spoken: Array<{ text: string; rate: number; onstart?: () => void }> = [];
     const synth = { getVoices: () => [{ localService: true, lang: 'zh-CN', name: 'local' }],
       addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events),
@@ -758,8 +758,8 @@ describe('slow speech and rate changes (simulated playback)', () => {
     vi.stubGlobal('SpeechSynthesisUtterance', class { constructor(public text: string) {} });
     const audio = new AudioCoordinator({ requestSpeech: vi.fn(), onChange: vi.fn(), onError: vi.fn() });
     try {
-      audio.load(target, envelope, 'demo'); audio.setRate(0.25); await audio.play();
-      expect(spoken[0]).toMatchObject({ text: '第一句。', rate: 0.25 });
+      audio.load(target, envelope, 'demo'); audio.setRate(rate); await audio.play();
+      expect(spoken[0]).toMatchObject({ text: '第一句。', rate });
       audio.setRate(0.35); await tick(); await tick();
       expect(synth.cancel).toHaveBeenCalledOnce();
       expect(spoken[1]).toMatchObject({ text: '第一句。', rate: 0.35 });
@@ -805,16 +805,16 @@ describe('free local speech continuity and cancellation', () => {
   it('does not prefetch paid speech by default', async () => {
     const h = harness(); await h.audio.play(); expect(h.requestSpeech).toHaveBeenCalledOnce(); h.audio.stop();
   });
-  it('applies local 0.25x once while preserving pitch, without changing cloud rate handling', async () => {
+  it.each([0.25, 3])('applies local %sx once while preserving pitch, without changing cloud rate handling', async rate => {
     const values: Array<{ playbackRate: number; preservesPitch: boolean }> = [];
     class AudioMock { playbackRate = 1; preservesPitch = false; volume = 1; onplaying = null; onended = null; onerror = null; constructor() { values.push(this); } async play() {} pause() {} load() {} removeAttribute() {} }
     vi.stubGlobal('Audio', AudioMock);
     try {
       const { browserPlaybackAdapter } = await import('../../apps/web/src/features/voice/playback');
       for (const generatedRate of [1, undefined]) {
-        const handle = await browserPlaybackAdapter.create({ mode: 'live', text: '中文', blob: new Blob(['mock']), rate: 0.25, generatedRate, volume: 1, signal: new AbortController().signal, onStarted: vi.fn(), onEnded: vi.fn(), onError: vi.fn() });
-        handle.setRate(0.25);
-        expect(values.at(-1)?.playbackRate).toBe(generatedRate === 1 ? 0.25 : 1);
+        const handle = await browserPlaybackAdapter.create({ mode: 'live', text: '中文', blob: new Blob(['mock']), rate, generatedRate, volume: 1, signal: new AbortController().signal, onStarted: vi.fn(), onEnded: vi.fn(), onError: vi.fn() });
+        handle.setRate(rate);
+        expect(values.at(-1)?.playbackRate).toBe(generatedRate === 1 ? rate : 1);
         expect(values.at(-1)?.preservesPitch).toBe(true);
         handle.dispose();
       }

@@ -3,6 +3,7 @@ import { statSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { HttpError } from './errors';
+import { MIN_SPEECH_RATE, MAX_SPEECH_RATE } from '../../../packages/shared/speechRate';
 
 export const QWEN_TALKER = 'qwen-talker-1.7b-customvoice-Q4_K_M.gguf';
 export const QWEN_CODEC = 'qwen-tokenizer-12hz-Q8_0.gguf';
@@ -50,7 +51,7 @@ export class QwenTtsProvider {
  async speak(text: string, speed: number, signal: AbortSignal): Promise<{audio:Buffer}> {
   if (this.disposed) throw new HttpError(503,'qwen_tts_closed','Qwen3 本地语音已关闭，请重新打开软件。');
   if (!text.trim() || text.length>6000 || text.includes('\0')) throw new HttpError(400,'qwen_tts_text','请选择不超过 6000 字的有效朗读文字。');
-  if (!Number.isFinite(speed)||speed<0.25||speed>2) throw new HttpError(400,'qwen_tts_speed','朗读速度应为 0.25 到 2 倍。');
+  if (!Number.isFinite(speed)||speed<MIN_SPEECH_RATE||speed>MAX_SPEECH_RATE) throw new HttpError(400,'qwen_tts_speed',`朗读速度应为 ${MIN_SPEECH_RATE} 到 ${MAX_SPEECH_RATE} 倍。`);
   if (signal.aborted) throw cancelled();
   if (this.current) throw new HttpError(409,'qwen_tts_busy','Qwen3 正在生成上一句，请等待或先停止。');
   if (!this.ready()) throw new HttpError(503,'qwen_tts_missing','Qwen3 语音资源尚未安装完整，请检查声音设置；没有调用付费 API。');

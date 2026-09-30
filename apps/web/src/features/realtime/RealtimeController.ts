@@ -197,10 +197,14 @@ export class RealtimeController {
   private async speak(text:string,envelope:Envelope){
     const intent=this.turn;const epoch=this.epoch;
     if(this.barrierPromise)await this.barrierPromise;if(!this.isLive()||intent!==this.turn||epoch!==this.epoch||!sameEnvelope(envelope,this.options.current()))return;
-    const speed=Math.max(MIN_SPEECH_RATE,Math.min(MAX_REALTIME_RATE,this.options.rate()));
+    const requestedRate=this.options.rate();
+    const speed=Math.max(MIN_SPEECH_RATE,Math.min(MAX_REALTIME_RATE,requestedRate));
     if(speed!==this.outputSpeed){const applied=await new Promise<boolean>(resolve=>{const timer=setTimeout(()=>{this.speedUpdate=null;resolve(false);this.fail('服务端未确认语速设置，已停止连接，请重试。');},5000);this.speedUpdate={speed,resolve,timer};this.send({type:'session.update',session:{type:'realtime',audio:{output:{speed}}}});});if(!applied||intent!==this.turn||epoch!==this.epoch||!sameEnvelope(envelope,this.options.current()))return;}
     this.lease=this.options.claimOutput(()=>{if(this.remote)this.remote.muted=true;if(this.response?.kind==='audio'&&!this.response.completed)this.interrupt('输出已交给原文朗读；实时输入仍可用。');});
-    this.state.output='thinking';this.state.caption='';this.emit();
+    this.state.output='thinking';this.state.caption='';
+    if(requestedRate>MAX_REALTIME_RATE)this.state.notice=`实时讲解最高 ${MAX_REALTIME_RATE}×，本次按 ${MAX_REALTIME_RATE}× 播放；原文朗读仍使用 ${requestedRate}×。`;
+    else if(this.state.notice.startsWith('实时讲解最高 '))this.state.notice='正在准备当前步骤的声音。';
+    this.emit();
     this.createResponse('audio',envelope,++this.turn,TEACHER_RULES+' 黑板操作已有成功回执。现在只自然口述以下已展示步骤，不添加未展示推导、不调用工具、不说后续步骤。语气温和、有交流感，避免播音腔：\n'+text,false);
   }
   async continueTeaching(){

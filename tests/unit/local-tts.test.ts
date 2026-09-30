@@ -69,7 +69,7 @@ describe('isolated local TTS provider', () => {
   it('rejects empty/oversized text, invalid speeds and pre-aborted requests', async () => {
     const value = provider(); const signal = new AbortController().signal;
     for (const text of ['', ' \n ', 'a'.repeat(6001)]) await expect(value.speak(text, 1, signal)).rejects.toMatchObject({ code: 'local_tts_text' });
-    for (const speed of [NaN, Infinity, 0.24, 2.01]) await expect(value.speak('你好', speed, signal)).rejects.toMatchObject({ code: 'local_tts_speed' });
+    for (const speed of [NaN, Infinity, 0.24, 3.01]) await expect(value.speak('你好', speed, signal)).rejects.toMatchObject({ code: 'local_tts_speed' });
     await expect(value.speak('你好', 1, AbortSignal.abort('private cancellation reason'))).rejects.toMatchObject({ code: 'local_tts_cancelled' });
     expect(forkMock).not.toHaveBeenCalled();
   });
@@ -151,7 +151,7 @@ describe('isolated local TTS provider', () => {
     const first = (await value.speak('测试原文', 0.25, new AbortController().signal)).audio;
     expect(first.toString('ascii', 0, 4)).toBe('RIFF'); expect(first.readUInt32LE(24)).toBe(24000); expect(first.readUInt16LE(34)).toBe(16);
     expect([0, 1, 2, 3, 4].map(index => first.readInt16LE(44 + index * 2))).toEqual([-32768, 0, 16384, 32767, 3277]);
-    const second = (await value.speak('下一句', 2, new AbortController().signal)).audio; expect(second.readInt16LE(52)).toBe(6553); expect(forkMock).toHaveBeenCalledTimes(1);
+    const second = (await value.speak('下一句', 3, new AbortController().signal)).audio; expect(second.readInt16LE(52)).toBe(6553); expect(forkMock).toHaveBeenCalledTimes(1);
     await expect(value.speak('error', 1, new AbortController().signal)).rejects.toMatchObject({ code: 'local_tts_failed', message: expect.not.stringContaining('source-text-secret') });
     const worker = await readFile(resolve('scripts/local-tts-worker.cjs'), 'utf8'); expect(worker).not.toContain('console.'); expect(worker).not.toContain('writeFile');
   });

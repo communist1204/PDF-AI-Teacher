@@ -4,6 +4,7 @@ import { statSync } from 'node:fs';
 import { delimiter, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { HttpError } from './errors';
+import { MIN_SPEECH_RATE, MAX_SPEECH_RATE } from '../../../packages/shared/speechRate';
 
 export const LOCAL_TTS_VOICES = Object.freeze({ zf_001: 3, zf_002: 4, zf_003: 5, zm_010: 59, zm_011: 60, zm_012: 61 });
 export interface LocalTtsOptions {
@@ -87,7 +88,7 @@ export class LocalTtsProvider {
   speak(text: string, speed: number, signal: AbortSignal): Promise<{ audio: Buffer; requestId?: string }> {
     if (this.disposed) return Promise.reject(new HttpError(503, 'local_tts_closed', '本地语音引擎已关闭，请重新打开软件。'));
     if (typeof text !== 'string' || !text.trim() || text.length > 6000) return Promise.reject(new HttpError(400, 'local_tts_text', '请选择 1 到 6000 字的有效文字进行本地朗读。'));
-    if (!Number.isFinite(speed) || speed < 0.25 || speed > 2) return Promise.reject(new HttpError(400, 'local_tts_speed', '朗读速度应在 0.25 到 2 倍之间。'));
+    if (!Number.isFinite(speed) || speed < MIN_SPEECH_RATE || speed > MAX_SPEECH_RATE) return Promise.reject(new HttpError(400, 'local_tts_speed', `朗读速度应在 ${MIN_SPEECH_RATE} 到 ${MAX_SPEECH_RATE} 倍之间。`));
     if (signal.aborted) return Promise.reject(cancelled());
     if (this.pending) return Promise.reject(new HttpError(409, 'local_tts_busy', '上一段本地语音仍在生成，请先停止或等待完成。'));
     if (!this.ready()) return Promise.reject(new HttpError(503, 'local_tts_missing', '本地语音资源尚未准备完整，请在设置中检查本地声音安装状态。'));

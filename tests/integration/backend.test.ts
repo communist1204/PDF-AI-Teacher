@@ -517,7 +517,7 @@ describe('M2 transcription (mocked provider, no paid calls)', () => {
 
 
 describe('slow speech contract across coordinator, API, SDK and media adapter (provider/audio mocked)', () => {
-  it('preserves 0.25x through the full request path and uses normal media playback for the already-slow clip', async () => {
+  it('preserves 3x and 0.25x through the full request path and uses normal media playback for the already-slow clip', async () => {
     const sent: Array<{ speed: number; input: string }> = [];
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       sent.push(JSON.parse(init?.body as string) as (typeof sent)[number]);
@@ -541,27 +541,27 @@ describe('slow speech contract across coordinator, API, SDK and media adapter (p
     } });
     try {
       audio.load({ sourceId: 'selected', documentId: 'book', pageIndex: 0, pageLabel: null, blockId: 'paragraph', rect: null, sourceText: '所选第一句。所选第二句。' }, { sessionId: client.config.sessionId, generationId: 1, contextRevision: 1 }, 'live');
-      audio.setRate(2); await audio.play(); const bookmark = audio.getBookmark();
+      audio.setRate(3); await audio.play(); const bookmark = audio.getBookmark();
       audio.setRate(0.25);
       await vi.waitFor(() => expect(audio.getSnapshot().status).toBe('speaking'));
       expect(clips[0].pause).toHaveBeenCalledOnce();
-      expect(sent.map(value => value.speed)).toEqual([2, 0.25]);
+      expect(sent.map(value => value.speed)).toEqual([3, 0.25]);
       expect(sent.every(value => value.input === '所选第一句。')).toBe(true);
       expect(clips.map(value => value.playbackRate)).toEqual([1, 1]);
       expect(audio.getBookmark()).toEqual(bookmark);
       audio.stop(); await audio.resume();
       expect(fetchMock).toHaveBeenCalledTimes(2); // Reuses the exact 0.25x clip.
       audio.setRate(0.35); await vi.waitFor(() => expect(audio.getSnapshot().status).toBe('speaking'));
-      expect(sent.map(value => value.speed)).toEqual([2, 0.25, 0.35]);
+      expect(sent.map(value => value.speed)).toEqual([3, 0.25, 0.35]);
       expect(clips.every(value => value.playbackRate === 1)).toBe(true);
       expect(audio.getBookmark()).toEqual(bookmark); expect(onError).not.toHaveBeenCalled();
     } finally { audio.dispose(); vi.unstubAllGlobals(); }
   });
 
-  it.each([0.249, 2.01, 0, -1])('rejects out-of-range rate %s before the provider is called', async speed => {
+  it.each([0.249, 3.01, 0, -1])('rejects out-of-range rate %s before the provider is called', async speed => {
     const provider = mockProvider(); const app = createApp({ config: liveConfig(), provider }); const client = await browser(app);
     const response = await post(app, client, '/api/tts', { text: '所选原文', speed }).expect(400);
-    expect(response.body.message).toContain('0.25 到 2'); expect(provider.speak).not.toHaveBeenCalled();
+    expect(response.body.message).toContain('0.25 到 3'); expect(provider.speak).not.toHaveBeenCalled();
   });
 });
 

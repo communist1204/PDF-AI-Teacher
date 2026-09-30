@@ -47,6 +47,7 @@ describe('Qwen local HTTP route (mock engine; no paid API)', () => {
     const h = harness(); const first = await browser(h.app); const second = await browser(h.app);
     await post(h.app, first, '/api/tts', { text: '同一句。', speed: 1 }).expect(200).expect('x-audio-cache', 'miss');
     await post(h.app, first, '/api/tts', { text: '同一句。', speed: 0.25 }).expect(200).expect('x-audio-cache', 'hit');
+    await post(h.app, first, '/api/tts', { text: '同一句。', speed: 3 }).expect(200).expect('x-audio-cache', 'hit');
     await post(h.app, second, '/api/tts', { text: '同一句。', speed: 1 }).expect(200).expect('x-audio-cache', 'miss');
     expect(h.qwen.speak).toHaveBeenCalledTimes(2); expect((await usage(h.app, first).expect(200)).body.records).toHaveLength(1);
     await post(h.app, first, '/api/cache/clear', {}).expect(200); await post(h.app, first, '/api/tts', { text: '同一句。', speed: 1 }).expect(200).expect('x-audio-cache', 'miss');
