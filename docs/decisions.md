@@ -263,3 +263,5 @@ PDF 单换行视为物理排版，中文相邻不插空格、拉丁文字保留�
 专用云TTS也是可选方案：[豆包HTTP Chunked接口](https://docs.volcengine.com/docs/DoubaoVoice/unidirectional-streaming-text-to-speech-http?lang=zh)接受完整文本并返回流式音频，[官方概述](https://docs.volcengine.com/docs/DoubaoVoice/ProductOverview-7?lang=zh)的约600ms首包只是供应商参考；[腾讯实时合成](https://cloud.tencent.com/document/product/1073/94308)使用WebSocket。两者需独立账号/凭证和额度，不把消费者应用免费朗读等同于第三方API永久免费。腾讯[2026年8月计费说明](https://cloud.tencent.com/document/product/1073/34112)按音色等级区分免费量与期限，不能把基础音色额度套给超自然音色。未开通或付费测试。微信官方资料有文章朗读功能，但未找到当前底层模型及缓存方式的可靠公开说明，故不推断。
 
 离线候选[CosyVoice3](https://github.com/QwenAudio/CosyVoice)、[VoxCPM](https://github.com/OpenBMB/VoxCPM)有流式实现，论文/项目硬件延迟不是此Windows本机体验；未安装第二套Python/GPU环境。鉴于当前Qwen GPU已明显加速，先让用户对同文实际试听，再决定是否引入另一个引擎。不能宣称本机音色已超越OpenAI、豆包或腾讯。
+
+3倍速扩展：共享朗读范围0.25–3，UI新增1.75/2/2.5/3并保存；本地始终1×生成、播放器调速/保音高，因此3×不会重复合成或加倍应用速度。云TTS已核对当前SDK及[Speech接口](https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create)支持0.25–4，产品保守开放3；没有付费调用。Realtime保留既有1.5上限，UI说明实际限速，绝不把3发送给实时接口。

@@ -8,12 +8,13 @@ import { clearTimeout } from 'node:timers';
 // Real packaged-app smoke test. No response mocks, real user profile, API key, or microphone.
 // Run from the project root after packaging: node scripts/verify-qwen-desktop.mjs
 if (process.argv.includes('--help')) {
-  console.log('Usage: node scripts/verify-qwen-desktop.mjs [--executable <packaged.exe>] [--device cpu|cuda] [--long]\nUses a fresh test-results/qwen-desktop-profile/<run-id> profile; requires free port 4319 and packaged Qwen resources. Five-minute overall limit, 90-second generation wait. Audio is muted; listening quality is not tested.');
+  console.log('Usage: node scripts/verify-qwen-desktop.mjs [--executable <packaged.exe>] [--device cpu|cuda] [--long] [--rate 0.25|3]\nUses a fresh test-results/qwen-desktop-profile/<run-id> profile; requires free port 4319 and packaged Qwen resources. Five-minute overall limit, 90-second generation wait. Audio is muted; listening quality is not tested.');
   process.exit(0);
 }
 const deviceIndex=process.argv.indexOf('--device');
 const device=deviceIndex>=0?process.argv[deviceIndex+1]:'cpu';if(!['cpu','cuda'].includes(device))throw Error('Unsupported test device');
 const longSample=process.argv.includes('--long');
+const rateIndex=process.argv.indexOf('--rate');const playbackRate=rateIndex>=0?Number(process.argv[rateIndex+1]):0.25;if(![0.25,3].includes(playbackRate))throw Error('Unsupported test rate');
 const executableIndex = process.argv.indexOf('--executable');
 if (executableIndex >= 0 && !process.argv[executableIndex + 1]) throw Error('--executable requires a packaged executable path');
 const executablePath = resolve(executableIndex >= 0 ? process.argv[executableIndex + 1] : 'release/PDF AI Teacher-win32-x64/PDF AI Teacher.exe');
@@ -31,7 +32,7 @@ const requests = [];
 const requestRecords = new WeakMap();
 const remoteRendererRequests = [];
 const report = {
-  date: new Date().toISOString(), status: 'running', executablePath, profile, device, longSample,
+  date: new Date().toISOString(), status: 'running', executablePath, profile, device, longSample, playbackRate,
   checks: {}, requests, pageErrors, remoteRendererRequests,
   humanListening: '未验收；真实 HTMLAudio 播放使用静音，不代表音色、语气或教材朗读质量通过真人验收。',
   realAccountAndPaidApi: '未测；只使用全新隔离目录、无 Key 和演示解题模式。',
@@ -91,7 +92,7 @@ async function correctText(text) {
 }
 const getAudio = () => page.evaluate(() => {
   const audio = window.__qwenDesktopAudio.at(-1);
-  return audio ? { rate: audio.playbackRate, preservesPitch: audio.preservesPitch, duration: audio.duration, time: audio.currentTime, paused: audio.paused, readyState: audio.readyState } : null;
+  return audio ? { rate: audio.playbackRate, preservesPitch: audio.preservesPitch, duration: audio.duration, time: audio.currentTime, paused: audio.paused, readyState: audio.readyState, firstPlayingAt: audio.__firstPlayingAt } : null;
 });
 const getUsage = () => page.evaluate(async () => {
   const response = await fetch('/api/usage'); if (!response.ok) throw Error('无法读取本机语音测试用量'); return response.json();
@@ -126,7 +127,7 @@ async function run() {
     const createURL = URL.createObjectURL.bind(URL);
     URL.createObjectURL = blob => { const url=createURL(blob);window.__qwenDesktopBlobs.set(url,blob);return url; };
     const NativeAudio = Audio;
-    window.Audio = class extends NativeAudio { constructor(src) { super(src); window.__qwenDesktopAudio.push(this); } };
+    window.Audio = class extends NativeAudio { constructor(src) { super(src); window.__qwenDesktopAudio.push(this);this.addEventListener('playing',()=>{this.__firstPlayingAt ??= Date.now();}); } };
   });
 
   stage = 'pdf-selection-and-correction';
@@ -141,7 +142,7 @@ async function run() {
   const expectedSpeech = corrected.replace(/\n/g,'').replace('2026年','二零二六年');
   await correctText(corrected);
   report.checks.realPdfTextSelection = true;
-  await page.getByRole('combobox', { name: '语速', exact: true }).selectOption('0.25');
+  await page.getByRole('combobox', { name: '语速', exact: true }).selectOption(String(playbackRate));
   await page.getByRole('slider', { name: '音量', exact: true }).fill('0');
 
   stage = 'real-qwen-generation-and-decode';
@@ -154,13 +155,14 @@ async function run() {
   await expect.poll(async () => (await getAudio())?.time, { timeout: 10000 }).toBeGreaterThan(0);
   // Electron CDP reports an empty response.body() for this binary fetch. Inspect the exact blob consumed by the real player instead.
   const wav = Buffer.from(await page.evaluate(async () => { const src=window.__qwenDesktopAudio.at(-1).src; if(!src.startsWith('blob:'))throw Error('Expected actual local playback blob'); return Array.from(new Uint8Array(await window.__qwenDesktopBlobs.get(src).arrayBuffer())); }));
+  await writeFile(artifact('qwen-generated.wav'),wav);
   expect(wav.length).toBeGreaterThan(44); expect(wav.toString('ascii',0,4)).toBe('RIFF'); expect(wav.toString('ascii',8,12)).toBe('WAVE');
-  const playing = await getAudio(); expect(playing.duration).toBeGreaterThan(0.2); expect(playing.rate).toBe(0.25); expect(playing.preservesPitch).toBe(true); expect(playing.readyState).toBeGreaterThanOrEqual(2);
+  const playing = await getAudio(); expect(playing.duration).toBeGreaterThan(0.2); expect(playing.rate).toBe(playbackRate); expect(playing.preservesPitch).toBe(true); expect(playing.readyState).toBeGreaterThanOrEqual(2);
   expect(requests).toHaveLength(1); expect(requests[0].speechText).toBe(expectedSpeech); expect(requests[0].speechText).not.toMatch(/[\r\n]/); expect(requests[0].speechText).not.toContain('2026');
   const subtitle = await page.getByTestId('reading-subtitle').textContent(); expect(subtitle).toBe(corrected);
   const firstUsage = (await getUsage()).records.filter(record => record.category === 'tts');
   expect(firstUsage).toHaveLength(1); expect(firstUsage[0].local).toBe(true); expect(firstUsage[0].cancelled).toBe(false); expect(firstUsage[0].model).toMatch(/Qwen3/i);
-  report.firstAudio = { elapsedMs: Date.now() - firstStarted, bytes: wav.length, ...playing };
+  report.firstAudio = { elapsedMs: playing.firstPlayingAt - firstStarted, verificationFinishedMs: Date.now() - firstStarted, bytes: wav.length, ...playing };
   report.checks.crossLineSentenceSentOnce = true; report.checks.calendarYearPronunciation = true; report.checks.sourceTextPreserved = true; report.checks.realApiWaveAndHtmlAudioDecode = true; report.checks.localFreeUsage = true;
   await page.screenshot({ path: artifact('qwen-playing.png'), fullPage: true });
 

@@ -1,0 +1,69 @@
+{
+  "date": "2026-09-30T09:49:08.673Z",
+  "status": "passed",
+  "executablePath": "D:\\PDF-AI-Teacher\\release\\PDF AI Teacher-win32-x64\\PDF AI Teacher.exe",
+  "profile": "D:\\PDF-AI-Teacher\\test-results\\qwen-desktop-profile\\2026-09-30T09-49-08-672Z-22244",
+  "device": "cuda",
+  "longSample": true,
+  "checks": {
+    "settingsSavedAndReopened": true,
+    "realPdfTextSelection": true,
+    "crossLineSentenceSentOnce": true,
+    "calendarYearPronunciation": true,
+    "sourceTextPreserved": true,
+    "realApiWaveAndHtmlAudioDecode": true,
+    "localFreeUsage": true,
+    "pausePreservesAudioPosition": true,
+    "resumeSameSentenceWithoutRegeneration": true,
+    "singleOutput": true,
+    "stopClearsAudio": true,
+    "cancelGeneration": true,
+    "settings720pScreenshot": true
+  },
+  "requests": [
+    {
+      "speechText": "二零二六年，我们学习神经网络时，先要理解梯度描述的是损失如何随着参数变化，然后沿着能够降低损失的方向逐步更新参数，同时保持合适的学习率，并通过验证集观察模型能否处理没有见过的数据，这样才能判断训练是否真的有效，而不是只记住了已有的样本。",
+      "speed": 0.25,
+      "startedMs": 2110,
+      "status": 200,
+      "contentType": "audio/wav"
+    },
+    {
+      "speechText": "这句短文用来检查停止生成。",
+      "speed": 0.25,
+      "startedMs": 11638,
+      "status": "requested",
+      "failure": "net::ERR_ABORTED"
+    }
+  ],
+  "pageErrors": [],
+  "remoteRendererRequests": [],
+  "humanListening": "未验收；真实 HTMLAudio 播放使用静音，不代表音色、语气或教材朗读质量通过真人验收。",
+  "realAccountAndPaidApi": "未测；只使用全新隔离目录、无 Key 和演示解题模式。",
+  "configuration": {
+    "mode": "demo",
+    "engine": "qwen",
+    "model": "Qwen3-TTS-1.7B-CustomVoice-Q4_K_M",
+    "voice": "serena",
+    "device": "cuda",
+    "ready": true,
+    "noApiKey": true
+  },
+  "firstAudio": {
+    "elapsedMs": 9191,
+    "bytes": 2081324,
+    "rate": 0.25,
+    "preservesPitch": true,
+    "duration": 43.36,
+    "time": 0.970052,
+    "paused": false,
+    "readyState": 4
+  },
+  "cancellation": {
+    "localStopMs": 11,
+    "realServerAcceptedRequest": true,
+    "localCancelledUsageConfirmed": true,
+    "noLateAudioDuringObservationMs": 1500
+  },
+  "elapsedMs": 13582
+}

@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-30T09:58:49.318Z",
+  "ttsEngine": "qwen",
+  "device": "cuda",
+  "voice": "uncle_fu",
+  "resourcesReady": true,
+  "threeTimesSpeedAvailable": true,
+  "teachingSettingsUnchanged": true,
+  "voiceAndInstructionsUnchanged": true,
+  "keyPresenceUnchanged": true,
+  "activeAccountUnchanged": true,
+  "noSourceTextSent": true,
+  "method": "原用户声音设置UI保存GPU，重开检查实际配置；未读取或输出密钥，无自动朗读或提问"
+}

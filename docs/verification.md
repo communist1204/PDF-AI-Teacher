@@ -383,3 +383,32 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 普通使用：双击原桌面图标。当前已通过软件UI选好Qwen3/Serena，解题设置及Key存在状态保留，未读取或输出密钥；重新选择一小段，先用1×朗读。模型都已打包，不需执行安装命令。开发者重建可用 npm.cmd run tts:build:qwen、npm.cmd run tts:setup:qwen、npm.cmd run desktop:package；仅前两步需要已有C++工具链/公共模型下载。
 
 交付状态（17:16）：已用原用户配置正常重开桌面窗口，无调试参数或测试profile，未自动播放；见 [正常启动记录](qwen-running.json)。工具环境本身带ELECTRON_RUN_AS_NODE=1，首次直接启动未出窗口；最终仅从该次启动子进程环境去掉此变量后，窗口标题和响应已确认，不修改系统环境。
+
+
+## GPU 朗读与 3 倍速最终验收（2026-09-30 18:00）
+
+| 检查 | 实际结果 |
+|---|---|
+| npm.cmd run typecheck / lint | 最终产品代码完整通过 |
+| npm.cmd test | 21 文件、439/439 通过（17:56，1.77s）；增加GPU设备/缺DLL/不回退及3倍速回归 |
+| npm.cmd run test:e2e | 72/72 通过（43.7s）；含等待停止、设备配置、3倍速/保音高/持久化和Realtime独立上限 |
+| npm.cmd run desktop:package | 最终3倍速版本生产构建、Electron构建和打包通过；既有大chunk提醒保留 |
+| 原生GPU基准 | 34字冷进程2.016s、重复新进程1.776s；107字完整长句3.133s生成25.76s WAV，全部EOS |
+| 真实桌面短句 | 点击到原生HTMLAudio playing事件 1394ms，3.04s音频，0.25倍速/保音高/暂停原位继续/停止通过 |
+| 真实桌面长句+3倍速 | 118字符含标点，一次整句请求；点击到真实playing事件 5078ms，43.36s原速WAV，HTMLAudio.playbackRate=3、preservesPitch=true；暂停续播不重生成、单输出、取消通过 |
+| 真实GPU三音色 | Serena1.68s→7.60s音频；Vivian1.69s→8.08s；Uncle Fu1.83s→10.00s，24kHz PCM16正常，取消清理通过 |
+| 发布包 | GPU exe+2份cuBLAS DLL、CPU修复exe、2份GGUF完整SHA256核对；7份许可，asar288项未含私有配置/临时音频 |
+| 原用户设置 | 通过软件UI选GPU，保留用户当前Uncle Fu音色/语气、解题模型、账号选择及Key存在状态；重开确认speech.device=cuda |
+| 正常交付窗口 | 18:00正常配置启动，窗口响应；无测试profile/调试参数，没有自动朗读或提问 |
+
+证据：[CPU/GPU同文基准](qwen-cuda-benchmark.json)、[UTF8修复CPU基准](qwen-utf8-file-benchmark.json)、[隔离环境真实provider](qwen-gpu-provider.json)、[真实桌面短句](qwen-gpu-desktop-short-smoke.json)、[真实桌面长句3倍速](qwen-gpu-desktop-three-smoke.json)、[三音色](qwen-gpu-voices-smoke.json)、[发布包](qwen-gpu-package.json)、[用户设置](qwen-gpu-applied.json)、[正常启动](qwen-gpu-running.json)。
+
+已实际查看[GPU声音设置](screenshots/qwen-gpu-desktop-settings-720.png)、[3倍速真实播放](screenshots/qwen-gpu-desktop-three.png)、[720p等待状态](screenshots/qwen-wait-720.png)。设置可滚动、GPU与音色可见，播放条3×/所选原文字幕/暂停按钮明确。浏览器E2E的网络与WAV模拟不充当GPU推理证明；上述独立Electron检查使用真实模型、真实WAV解码和播放事件，但音量为0，不代表人耳验收。
+
+首音测量修正：最初桌面长句报告qwen-gpu-desktop-slow-smoke.json的9191ms包含把2MiB真实Blob送回CDP进行校验的开销，不是纯首音时间。最终脚本直接在真实HTMLAudio playing事件记时，将8940ms的验证完成时间与5078ms的首音时间分开。没有把原生stream首PCM约0.87s冒充产品首音。当前应用仍是完整句子WAV，端到端流式播放未接入。
+
+失败记录：原CPU文件/流式同34字曾0xC0000409，见qwen-file-benchmark.json、qwen-stream-benchmark.json。修复Windows argv UTF8后原句重新成功，CPU/GPU文件与原生流式都通过。原生编译使用现有工具链约十余分钟，未安装/修改CUDA、驱动、Conda或训练环境。GPU运行显存增量约2.6GiB，任务结束释放；没有停止其他进程。一个新GPU错误文案单测曾因PowerShell管道编码导致替换未生效而失败，显式UTF8后修正并完整复验。
+
+人耳自然度、语义重音/多音字/专业符号准确性、长书20分钟稳定听感，以及与OpenAI/豆包/腾讯的同文盲听比较仍未验收。云TTS、真实专业解题账号与付费接口未测、未产生付费请求。更高倍速只验证播放器与音高保持开关，不承诺3×同样自然或可懂。可试听[当前Uncle Fu GPU样音](audio/qwen-gpu-uncle_fu.wav)、[GPU教材长句](audio/qwen-gpu-desktop-long.wav)。
+
+最少操作：已经正常重开软件，打开PDF重新选一段→朗读所选；底部语速可选0.25–3×。以后双击原桌面图标即可，不需Key、终端或重新安装。开发者：npm.cmd run dev；重建桌面npm.cmd run desktop:package；GPU本机编译npm.cmd run tts:build:qwen:cuda；真实复验node scripts/verify-qwen-desktop.mjs --device cuda --long --rate 3。
