@@ -4,6 +4,8 @@ export interface ServerConfig {
   host: '127.0.0.1';
   port: number;
   demoMode: boolean;
+  /** Desktop OAuth is injected by the main process; never configured with a borrowed login token. */
+  authMode?: 'api_key' | 'chatgpt';
   apiKey: string;
   baseUrl: string;
   chatModel: string;

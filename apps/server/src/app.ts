@@ -9,7 +9,7 @@ import { AudioCache } from './cache';
 import { DEFAULT_TTS_STYLE, readConfig, TTS_SOURCE_FIDELITY, type ServerConfig } from './config';
 import { makeDemoPlan } from './demo';
 import { HttpError, providerError, safeRequestId } from './errors';
-import { OpenAITeachingProvider, speechRequest, type TeachingProvider } from './provider';
+import { ChatGptTeachingProvider, OpenAITeachingProvider, speechRequest, type ChatGptCredentials, type TeachingProvider } from './provider';
 
 type Job = { envelope: Envelope; controller: AbortController };
 type Session = {
@@ -31,7 +31,7 @@ function setEnvelope(res: Response, envelope: Envelope) {
 }
 function cancelledError() { return new HttpError(409, 'cancelled', '本次任务已取消，旧结果不会继续使用；已发生的服务用量可能仍会计费。'); }
 
-export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; realtimeProvider?: RealtimeProvider; now?: () => number } = {}) {
+export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; realtimeProvider?: RealtimeProvider; chatGptAuth?: ChatGptCredentials; now?: () => number } = {}) {
   const config = options.config ?? readConfig();
   const now = options.now ?? Date.now;
   const app = express();
@@ -39,18 +39,20 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
   app.set('trust proxy', false);
   const sessions = new Map<string, Session>();
   const cache = new AudioCache(config.cacheMaxBytes);
-  const provider = options.provider ?? (!config.demoMode && config.apiKey ? new OpenAITeachingProvider(config) : undefined);
+  const usingChatGpt = config.authMode === 'chatgpt';
+  const teachingConfigured = !config.demoMode && (usingChatGpt ? Boolean(options.chatGptAuth) : Boolean(config.apiKey));
+  const provider = options.provider ?? (!config.demoMode && usingChatGpt && options.chatGptAuth ? new ChatGptTeachingProvider(config, options.chatGptAuth) : !config.demoMode && config.apiKey && !usingChatGpt ? new OpenAITeachingProvider(config) : undefined);
   const realtimeState = realtimeCapability(config);
   const realtimeProvider = options.realtimeProvider ?? (realtimeState === 'untested' ? new OpenAIRealtimeProvider(config) : undefined);
   const realtimeConnections = new RealtimeConnections(realtimeProvider, now);
   const capabilities: AppConfig['capabilities'] = {
-    text: !config.demoMode && config.apiKey && config.chatModel ? 'untested' : 'unconfigured',
-    vision: !config.demoMode && config.apiKey && config.visionModel ? 'untested' : 'unconfigured',
-    structuredOutput: !config.demoMode && config.apiKey && (config.chatModel || config.visionModel) ? 'untested' : 'unconfigured',
+    text: teachingConfigured && config.chatModel ? 'untested' : 'unconfigured',
+    vision: teachingConfigured && config.visionModel ? 'untested' : 'unconfigured',
+    structuredOutput: teachingConfigured && (config.chatModel || config.visionModel) ? 'untested' : 'unconfigured',
     tts: !config.demoMode && config.apiKey && config.ttsModel ? 'untested' : 'unconfigured',
     transcription: !config.demoMode && config.apiKey && config.transcriptionModel ? 'untested' : 'unconfigured', realtimeAudio: realtimeState, realtimeTools: realtimeState, interruption: realtimeState,
   };
-  const mode: AppConfig['mode'] = config.demoMode ? 'demo' : config.apiKey && (config.chatModel || config.visionModel || config.ttsModel || config.transcriptionModel || config.realtimeModel) ? 'live' : 'unconfigured';
+  const mode: AppConfig['mode'] = config.demoMode ? 'demo' : (teachingConfigured && (config.chatModel || config.visionModel)) || (config.apiKey && (config.ttsModel || config.transcriptionModel || config.realtimeModel)) ? 'live' : 'unconfigured';
   const allowedHosts = new Set([`127.0.0.1:${config.port}`, `localhost:${config.port}`]);
 
   app.use((req, res, next) => {
@@ -149,7 +151,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     }
     session.touchedAt = now();
     res.cookie(SESSION_COOKIE, session.id, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: SESSION_TTL });
-    const body: AppConfig = { mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel, transcription: config.transcriptionModel, realtime: config.realtimeModel }, realtime: { provider: 'openai-realtime', voice: config.realtimeVoice, maxSessionSeconds: REALTIME_MAX_SESSION_SECONDS, idleSeconds: REALTIME_IDLE_SECONDS, inputTranscriptionModel: config.realtimeTranscriptionModel }, teaching: { chatReasoningEffort: config.chatReasoningEffort, visionReasoningEffort: config.visionReasoningEffort, maxOutputTokens: config.teachingMaxOutputTokens, timeoutMs: config.teachingTimeoutMs }, speech: {
+    const body: AppConfig = { authMode: usingChatGpt ? 'chatgpt' : 'api_key', mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel, transcription: config.transcriptionModel, realtime: config.realtimeModel }, realtime: { provider: 'openai-realtime', voice: config.realtimeVoice, maxSessionSeconds: REALTIME_MAX_SESSION_SECONDS, idleSeconds: REALTIME_IDLE_SECONDS, inputTranscriptionModel: config.realtimeTranscriptionModel }, teaching: { chatReasoningEffort: config.chatReasoningEffort, visionReasoningEffort: config.visionReasoningEffort, maxOutputTokens: config.teachingMaxOutputTokens, timeoutMs: config.teachingTimeoutMs }, speech: {
       voice: config.ttsVoice,
       style: !config.ttsInstructionsSupported ? '使用模型默认语气' : config.ttsInstructions === [DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') ? '自然温和，按语义停顿' : '本机自定义语气',
       instructionsSupported: config.ttsInstructionsSupported,
@@ -177,7 +179,8 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
       res.json(answer); return;
     }
     const model = request.context.imageDataUrl ? config.visionModel : config.chatModel;
-    if (!config.apiKey || !model || !provider) throw new HttpError(503, 'not_configured', request.context.imageDataUrl ? '视觉模型或 API Key 未配置。截图保留在本机，未假装识别。' : '文字模型或 API Key 未配置。请在本机 .env 中配置后重启。');
+    if (usingChatGpt && (!options.chatGptAuth || !model || !provider)) throw new HttpError(503, 'chatgpt_not_configured', '请在桌面设置中登录 ChatGPT、选择可用模型并应用设置；未使用演示回答替代。');
+    if (!teachingConfigured || !model || !provider) throw new HttpError(503, 'not_configured', request.context.imageDataUrl ? '视觉模型或 API Key 未配置。截图保留在本机，未假装识别。' : '文字模型或 API Key 未配置。请在本机 .env 中配置后重启。');
     consumeRequest(session);
     const usage = newUsage(session, model, 'text');
     const result = await runJob(session, request, req, res, usage, signal => provider.ask(request, model, signal), config.teachingTimeoutMs);
@@ -213,7 +216,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     checkFresh(session, request);
     setEnvelope(res, request);
     if (config.demoMode) throw new HttpError(409, 'demo_tts', '演示模式未调用付费 TTS。请使用明确标注的浏览器演示语音，或在本机配置真实 TTS。');
-    if (!config.apiKey || !config.ttsModel || !provider) throw new HttpError(503, 'not_configured', 'TTS 模型或 API Key 未配置；未自动切换语音服务。');
+    if (!config.apiKey || !config.ttsModel || !provider) throw new HttpError(503, 'not_configured', usingChatGpt ? 'ChatGPT 登录用于解题。自然朗读还需要独立语音 API Key；尚未调用任何语音接口。' : 'TTS 模型或 API Key 未配置；未自动切换语音服务。');
     const cacheKey = cache.key(session.id, [config.baseUrl, speechRequest(config, request.text, request.speed)]);
     const cached = cache.get(cacheKey);
     if (cached) { res.set('x-audio-cache', 'hit').type('audio/mpeg').send(cached); return; }
@@ -335,5 +338,18 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     res.status(safe.status).json({ ...(envelope.success ? envelope.data : {}), error: safe.code, message: safe.message, requestId: safe.requestId ?? randomUUID() });
   };
   app.use(errorHandler);
+  let disposing: Promise<void> | undefined;
+  app.locals.dispose = () => {
+    disposing ??= (async () => {
+      const activeIds = [...sessions.keys()];
+      for (const session of sessions.values()) {
+        for (const job of session.jobs) job.controller.abort(cancelledError());
+        cache.clear(session.id);
+      }
+      sessions.clear();
+      await Promise.allSettled(activeIds.map(id => realtimeConnections.disconnect(id)));
+    })();
+    return disposing;
+  };
   return app;
 }

@@ -1,9 +1,10 @@
 import OpenAI, { toFile } from 'openai';
 import type { SpeechCreateParams } from 'openai/resources/audio/speech';
 import { zodTextFormat } from 'openai/helpers/zod';
-import type { ResponseInputContent } from 'openai/resources/responses/responses';
+import type { Response, ResponseInputContent } from 'openai/resources/responses/responses';
 import { TeachingPlanSchema, type AskRequest, type AudioMime } from '../../../packages/shared/protocol';
 import type { ServerConfig } from './config';
+import { HttpError, safeRequestId } from './errors';
 
 export interface ProviderAnswer {
   plan: unknown;
@@ -104,5 +105,80 @@ export class OpenAITeachingProvider implements TeachingProvider {
     }
     if (!total) throw new Error('Empty audio response');
     return { audio: Buffer.concat(chunks), requestId: response.headers.get('x-request-id') ?? undefined };
+  }
+}
+
+/** Only the app's own official OAuth grant may implement this credential source. */
+export interface ChatGptCredentials { getAccessToken(signal?: AbortSignal): Promise<string> }
+
+export function chatGptProviderError(error: unknown, requestId?: string): HttpError {
+  if (error instanceof HttpError) return error;
+  const detail = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+  const code = typeof detail.code === 'string' && /^[a-z_]{1,100}$/.test(detail.code) ? detail.code : undefined;
+  const id = safeRequestId(requestId) ?? safeRequestId(detail.requestID) ?? safeRequestId(detail.request_id);
+  const messages: Record<string, [number, string]> = {
+    subscription_sharing_user_not_eligible: [403, '当前账号、工作区或策略不允许在本应用使用 ChatGPT 计划，请在 ChatGPT 中检查资格。'],
+    subscription_sharing_usage_limit_exceeded: [429, '本应用的 ChatGPT 计划用量已达到限制。请在 ChatGPT 设置 → 用量中检查额度；没有切换到 API 付费。'],
+    subscription_sharing_usage_unavailable: [503, 'ChatGPT 暂时无法确认计划用量，已保留登录信息，请稍后手动重试。'],
+    subscription_sharing_unsupported_capability: [400, 'ChatGPT 计划接口不支持本次模型、图片或结构化能力。请检查所选模型；没有换用其他模型。'],
+    subscription_sharing_route_not_supported: [403, 'ChatGPT 计划不支持此请求路径，请检查应用版本。'],
+    subscription_sharing_invalid_user: [401, 'ChatGPT 账号验证失败，请在桌面设置中重新登录。'],
+    chatpass_v2_scope_not_authorized: [403, 'ChatGPT 授权不允许本次操作，请检查账号与计划授权。'],
+    chatpass_v2_invalid_authorization_context: [403, 'ChatGPT 授权信息无效，请检查账号与计划授权。'],
+    subscription_sharing_user_unavailable: [503, 'ChatGPT 账号服务暂不可用，已保留登录信息，请稍后手动重试。'],
+  };
+  if (code && messages[code]) return new HttpError(messages[code][0], code, messages[code][1], id);
+  if (detail.name === 'AuthError' || detail.status === 401) return new HttpError(401, 'chatgpt_authentication', 'ChatGPT 登录或计划授权已失效，请在桌面设置中检查账号并重新登录。', id);
+  if (detail.status === 403) return new HttpError(403, 'chatgpt_permission', 'ChatGPT 账号、区域或工作区策略不允许本次请求，请检查计划权限。', id);
+  if (detail.status === 429) return new HttpError(429, 'chatgpt_usage_limit', 'ChatGPT 请求达到用量或频率限制，请在 ChatGPT 设置 → 用量中查看后再试。', id);
+  if (detail.status === 400 || detail.status === 404) return new HttpError(502, 'chatgpt_capability', '当前 ChatGPT 模型不接受本次请求，请刷新可用模型并检查能力；没有自动换用模型或 API 付费。', id);
+  return new HttpError(502, 'chatgpt_connection', 'ChatGPT 服务连接或响应失败，已保留登录信息，请稍后手动重试。', id);
+}
+
+/** SIWC public Responses route. OAuth credentials are never used on any audio endpoint. */
+export class ChatGptTeachingProvider implements TeachingProvider {
+  private readonly audioProvider?: OpenAITeachingProvider;
+  constructor(private readonly config: ServerConfig, private readonly auth: ChatGptCredentials, private readonly fetcher?: typeof fetch) {
+    if (config.apiKey) this.audioProvider = new OpenAITeachingProvider(config, fetcher ? new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl, fetch: fetcher, maxRetries: 0 }) : undefined);
+  }
+  async ask(request: AskRequest, model: string, signal: AbortSignal): Promise<ProviderAnswer> {
+    let requestId: string | undefined;
+    try {
+      const token = await this.auth.getAccessToken(signal);
+      signal.throwIfAborted();
+      const client = new OpenAI({ apiKey: token, baseURL: 'https://api.openai.com/v1', fetch: this.fetcher, maxRetries: 0, timeout: this.config.teachingTimeoutMs });
+      const { imageDataUrl, ...context } = request.context;
+      const content: ResponseInputContent[] = [{ type: 'input_text', text: JSON.stringify({ question: request.question, contextRevision: request.contextRevision, context, recentHistory: request.history }) }];
+      if (imageDataUrl) content.push({ type: 'input_image', image_url: imageDataUrl, detail: 'auto' });
+      const effort = imageDataUrl ? this.config.visionReasoningEffort : this.config.chatReasoningEffort;
+      const { data: stream, response } = await client.responses.create({ model, store: false, stream: true, instructions: TEACHER_INSTRUCTIONS, input: [{ role: 'user', content }], text: { format: zodTextFormat(TeachingPlanSchema, 'teaching_plan') }, ...(effort ? { reasoning: { effort } } : {}) }, { signal, maxRetries: 0, timeout: this.config.teachingTimeoutMs }).withResponse();
+      requestId = safeRequestId(response.headers.get('x-request-id'));
+      let completed: Response | undefined;
+      for await (const event of stream) {
+        signal.throwIfAborted();
+        if (event.type === 'response.failed') throw chatGptProviderError(event.response.error, requestId);
+        if (event.type === 'error') throw chatGptProviderError(event, requestId);
+        if (event.type === 'response.incomplete') return { plan: null, incompleteReason: 'other', requestId, inputTokens: event.response.usage?.input_tokens, outputTokens: event.response.usage?.output_tokens };
+        if (event.type === 'response.completed') completed = event.response;
+      }
+      signal.throwIfAborted();
+      if (!completed || completed.status !== 'completed') throw new HttpError(502, 'chatgpt_interrupted_stream', 'ChatGPT 回答在完成前中断，未显示不完整教案。请手动重试；本次可能已有计划用量。', requestId);
+      const text = completed.output.flatMap(item => item.type === 'message' ? item.content.flatMap(part => part.type === 'output_text' ? [part.text] : []) : []).join('');
+      if (!text || text.length > 2 * 1024 * 1024) throw new HttpError(502, 'invalid_model_output', 'ChatGPT 未返回可验证的教案，未执行板书。请缩小问题后手动重试。', requestId);
+      let plan: unknown;
+      try { plan = JSON.parse(text); } catch { throw new HttpError(502, 'invalid_model_output', 'ChatGPT 教案格式无效，未执行板书。请手动重试。', requestId); }
+      return { plan, requestId, inputTokens: completed.usage?.input_tokens, outputTokens: completed.usage?.output_tokens };
+    } catch (error) {
+      if (signal.aborted) throw signal.reason;
+      throw chatGptProviderError(error, requestId);
+    }
+  }
+  async speak(text: string, speed: number, signal: AbortSignal): Promise<ProviderAudio> {
+    if (!this.audioProvider) throw new HttpError(503, 'tts_key_required', '自然朗读需要单独的语音 API Key。ChatGPT 登录只用于解题，尚未开通语音接口。');
+    return this.audioProvider.speak(text, speed, signal);
+  }
+  async transcribe(audio: Buffer, mimeType: AudioMime, signal: AbortSignal): Promise<ProviderTranscript> {
+    if (!this.audioProvider) throw new HttpError(503, 'transcription_key_required', '转写需要独立 API Key；ChatGPT 登录授权不用于转写。');
+    return this.audioProvider.transcribe(audio, mimeType, signal);
   }
 }
