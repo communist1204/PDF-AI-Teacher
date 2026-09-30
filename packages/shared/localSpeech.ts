@@ -16,7 +16,10 @@ export const QWEN_TTS_VOICES: ReadonlyArray<{ name: string; id: string }> = [
 ];
 export const DEFAULT_QWEN_TTS_VOICE = 'serena';
 export const DEFAULT_QWEN_TTS_INSTRUCTIONS = '用温和自然的中文陪读语气，按语义停顿，不增添或改动原文。';
-export type SpeechEngine = 'local' | 'qwen' | 'openai' | 'system';
+export type SpeechEngine = 'local' | 'qwen' | 'doubao' | 'openai' | 'system';
 export function isLocalSpeechEngine(engine?: SpeechEngine): boolean {
   return engine === 'local' || engine === 'qwen';
 }
+
+/** These engines synthesize at 1x; the reader applies speed without resynthesis. */
+export function usesPlaybackRate(engine?: SpeechEngine): boolean { return isLocalSpeechEngine(engine) || engine === 'doubao'; }

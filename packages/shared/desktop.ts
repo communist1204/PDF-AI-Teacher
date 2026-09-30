@@ -12,6 +12,8 @@ export interface DesktopPreferences {
   localTtsVoice?: string;
   qwenTtsVoice?: string;
   qwenTtsDevice?: 'cpu' | 'cuda';
+  doubaoTtsVoice?: string;
+  doubaoTtsInstructions?: string;
   qwenTtsInstructions?: string;
   ttsModel: string;
   ttsVoice: string;
@@ -24,6 +26,7 @@ export interface DesktopSettings extends DesktopPreferences {
   qwenTtsReady?: boolean;
   qwenCudaReady?: boolean;
   hasApiKey: boolean;
+  hasDoubaoApiKey?: boolean;
   encryptionAvailable: boolean;
   auth: {
     status: 'signed_out' | 'signed_in' | 'expired';
@@ -38,13 +41,13 @@ export interface DesktopSettings extends DesktopPreferences {
 
 export interface DesktopTeacherBridge {
   getSettings(): Promise<DesktopSettings>;
-  saveSettings(input: DesktopPreferences & { apiKey?: string; clearApiKey?: boolean }): Promise<DesktopSettings>;
+  saveSettings(input: DesktopPreferences & { apiKey?: string; clearApiKey?: boolean; doubaoApiKey?: string; clearDoubaoApiKey?: boolean }): Promise<DesktopSettings>;
   login(accountId?: string): Promise<DesktopSettings>;
   selectAccount(accountId: string): Promise<DesktopSettings>;
   cancelLogin(): Promise<void>;
   logout(): Promise<DesktopSettings>;
   restart(): Promise<void>;
-  openAccountPage(page: 'api-keys' | 'billing' | 'chatgpt'): Promise<void>;
+  openAccountPage(page: 'api-keys' | 'billing' | 'chatgpt' | 'doubao-guide' | 'doubao-console'): Promise<void>;
   createShortcut(): Promise<{ path: string }>;
 }
 
