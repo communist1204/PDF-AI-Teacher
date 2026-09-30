@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DesktopPreferences, DesktopSettings, DesktopTeacherBridge } from '../../../../../packages/shared/desktop';
 import { DEFAULT_LOCAL_TTS_VOICE, DEFAULT_QWEN_TTS_INSTRUCTIONS, DEFAULT_QWEN_TTS_VOICE, LOCAL_TTS_VOICES, QWEN_TTS_VOICES } from '../../../../../packages/shared/localSpeech';
+import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_VOICES } from '../../../../../packages/shared/doubaoSpeech';
 import './desktopSettings.css';
 
 function preferences(settings: DesktopSettings): DesktopPreferences {
   const { mode, chatModel, visionModel, reasoningEffort, ttsModel, ttsVoice, ttsInstructions } = settings;
-  return { mode, chatModel, visionModel, reasoningEffort, ttsModel, ttsVoice, ttsInstructions, ttsEngine: settings.ttsEngine ?? 'local', localTtsVoice: settings.localTtsVoice ?? DEFAULT_LOCAL_TTS_VOICE, qwenTtsVoice: settings.qwenTtsVoice ?? DEFAULT_QWEN_TTS_VOICE, qwenTtsDevice: settings.qwenTtsDevice ?? 'cpu', qwenTtsInstructions: settings.qwenTtsInstructions ?? DEFAULT_QWEN_TTS_INSTRUCTIONS };
+  return { mode, chatModel, visionModel, reasoningEffort, ttsModel, ttsVoice, ttsInstructions, ttsEngine: settings.ttsEngine ?? 'local', localTtsVoice: settings.localTtsVoice ?? DEFAULT_LOCAL_TTS_VOICE, qwenTtsVoice: settings.qwenTtsVoice ?? DEFAULT_QWEN_TTS_VOICE, qwenTtsDevice: settings.qwenTtsDevice ?? 'cpu', qwenTtsInstructions: settings.qwenTtsInstructions ?? DEFAULT_QWEN_TTS_INSTRUCTIONS, doubaoTtsVoice: settings.doubaoTtsVoice ?? DEFAULT_DOUBAO_TTS_VOICE, doubaoTtsInstructions: settings.doubaoTtsInstructions ?? DEFAULT_DOUBAO_TTS_INSTRUCTIONS };
 }
 
 export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccountChange }: { bridge: DesktopTeacherBridge; onChange: (settings: DesktopSettings) => void; onBeforeAccountChange: () => void }) {
@@ -13,6 +14,8 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
   const [draft, setDraft] = useState<DesktopPreferences | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [clearApiKey, setClearApiKey] = useState(false);
+  const [doubaoApiKey, setDoubaoApiKey] = useState('');
+  const [clearDoubaoApiKey, setClearDoubaoApiKey] = useState(false);
   const [pending, setPending] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -68,16 +71,17 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
     if (draft.mode === 'chatgpt' && settings.models.length && [draft.chatModel, draft.visionModel].some(id => !settings.models.some(model => model.id === id))) throw new Error('请从此账号返回的模型列表中选择文字和看图解题模型。');
     if (draft.mode === 'api' && !apiKey.trim() && (!settings.hasApiKey || clearApiKey)) throw new Error('API 模式需要填写本机 API Key。也可以使用 ChatGPT 登录或本地演示。');
     const key = apiKey.trim();
-    setApiKey('');
-    const value = await bridge.saveSettings({ ...draft, ...(key ? { apiKey: key } : {}), ...(clearApiKey ? { clearApiKey: true } : {}) });
-    setApiKey(''); setClearApiKey(false);
+    const doubaoKey = doubaoApiKey.trim();
+    setApiKey(''); setDoubaoApiKey('');
+    const value = await bridge.saveSettings({ ...draft, ...(key ? { apiKey: key } : {}), ...(clearApiKey ? { clearApiKey: true } : {}), ...(doubaoKey ? { doubaoApiKey: doubaoKey } : {}), ...(clearDoubaoApiKey ? { clearDoubaoApiKey: true } : {}) });
+    setApiKey(''); setClearApiKey(false); setDoubaoApiKey(''); setClearDoubaoApiKey(false);
     if (!mounted.current) return;
     accept(value);
     if (restart) { onBeforeAccountChange(); await bridge.restart(); }
     else setNotice('设置已保存在本机，点击「应用并重启」后生效。');
   };
   const update = <K extends keyof DesktopPreferences>(field: K, value: DesktopPreferences[K]) => setDraft(current => current ? { ...current, [field]: value } : current);
-  const dirty = !!draft && !!settings && (JSON.stringify(draft) !== JSON.stringify(preferences(settings)) || !!apiKey || clearApiKey);
+  const dirty = !!draft && !!settings && (JSON.stringify(draft) !== JSON.stringify(preferences(settings)) || !!apiKey || clearApiKey || !!doubaoApiKey || clearDoubaoApiKey);
   const account = settings?.auth;
   const busy = !!pending;
   const modelInput = (field: 'chatModel' | 'visionModel', label: string) => draft && <label>{label}{draft.mode === 'chatgpt' && settings?.models.length ? <select aria-label={label} value={draft[field]} onChange={event => update(field, event.target.value)}>{!settings.models.some(model => model.id === draft[field]) && <option value={draft[field]}>请选择账号可用模型</option>}{settings.models.map(model => <option key={model.id} value={model.id}>{model.name} · {model.id}</option>)}</select> : <input aria-label={label} value={draft[field]} onChange={event => update(field, event.target.value)} maxLength={120} placeholder="例如 gpt-6-astra"/>}</label>;
@@ -103,7 +107,7 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
         <p className="desktop-setting-note">复杂理论可优先选择账号可用的高能力模型；不会为了朗读方便更换解题模型。GPT-6 Astra / xhigh 是配置建议，权限、推理强度支持及真实解题质量需验证。{draft.mode === 'chatgpt' && !settings.models.length && ' 账号模型列表尚未取得。'}</p>
       </fieldset>
       <fieldset disabled={busy} className="desktop-model-fields desktop-speech-fields"><legend>朗读声音</legend>
-        <label>朗读方式<select aria-label="朗读方式" value={draft.ttsEngine ?? 'local'} onChange={event => update('ttsEngine', event.target.value as DesktopPreferences['ttsEngine'])}><option value="local">免费本地 AI 声音（Kokoro）</option><option value="qwen">Qwen3 本地语音（免费·本地运行）</option><option value="openai">OpenAI AI 声音（按 API 用量计费）</option><option value="system">系统基本语音（免费）</option></select></label>
+        <label>朗读方式<select aria-label="朗读方式" value={draft.ttsEngine ?? 'local'} onChange={event => update('ttsEngine', event.target.value as DesktopPreferences['ttsEngine'])}><option value="local">免费本地 AI 声音（Kokoro）</option><option value="qwen">Qwen3 本地语音（免费·本地运行）</option><option value="doubao">豆包语音 2.0（在线·额度按账号）</option><option value="openai">OpenAI AI 声音（按 API 用量计费）</option><option value="system">系统基本语音（免费）</option></select></label>
         {draft.ttsEngine === 'local' && <><p>免费本地 AI 合成语音：使用 Kokoro 中文模型在电脑 CPU 上生成声音，不需要 API Key、登录或充值，朗读文本留在本机。AI 解题仍使用你选择的账号或演示模式。</p><label>本地中文音色<select aria-label="本地中文音色" value={draft.localTtsVoice ?? DEFAULT_LOCAL_TTS_VOICE} onChange={event => update('localTtsVoice', event.target.value)}>{LOCAL_TTS_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.name} · {voice.id}</option>)}</select></label><p role="status">{settings.localTtsReady ? '本地语音模型已就绪。' : '本地语音模型尚未就绪；请先安装项目提供的本地语音模型包。不会自动切换到付费语音或系统声音。'}</p><p className="desktop-setting-note">保存并应用后，选一小段原文点「朗读所选」试听。音色编号不代表音质排名，中文听感请实际试听。</p></>}
         {draft.ttsEngine === 'qwen' && <>
           <p>Qwen3 本地 AI 合成语音：免费，朗读文本留在本机，不需要 API Key、登录或充值。解题仍使用你选择的账号和模型，不受朗读方式影响。</p>
@@ -115,10 +119,23 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
           <p role="status">{settings.qwenTtsReady ? '本次运行：Qwen3 语音资源已就绪。' : '本次运行：Qwen3 语音资源尚未就绪；请先安装项目提供的 Qwen3 语音模型包。不会自动切换到付费语音或系统声音。'}</p>
           <p className="desktop-setting-note">可用文字描述希望的语气；较长句子可能需要等待，语气效果、速度与朗读准确性请实际试听。保存并应用后，选一小段原文点「朗读所选」。合成声音不代表模型理解了教材，也不负责解题。</p>
         </>}
+        {draft.ttsEngine === 'doubao' && <div className="desktop-doubao-fields">
+          <p>豆包语音 2.0 是独立的在线 AI 合成声音。你主动朗读的文本会发送至火山引擎，解题继续使用上方选择的账号和专业模型。</p>
+          <p className="desktop-setting-note">免费试用资格、剩余额度和有效期请在火山引擎控制台确认。超出免费额度可能计费，本软件不会自动保证免费。</p>
+          <div className="desktop-setting-actions"><button className="text-button" onClick={() => void run('link', () => bridge.openAccountPage('doubao-guide'))}>打开豆包官方试用指南</button><button className="text-button" onClick={() => void run('link', () => bridge.openAccountPage('doubao-console'))}>打开火山引擎控制台</button></div>
+          <fieldset disabled={!settings.encryptionAvailable} aria-label="豆包声音凭证">
+            <label>豆包语音 API Key<input type="password" aria-label="豆包语音 API Key" autoComplete="new-password" spellCheck={false} value={doubaoApiKey} onChange={event => { setDoubaoApiKey(event.target.value); setClearDoubaoApiKey(false); }} placeholder={settings.hasDoubaoApiKey ? '已保存；留空保持原 Key' : '只在本机填写，不要发送到聊天'} maxLength={512}/></label>
+            <p className="desktop-setting-note" role="status">{settings.hasDoubaoApiKey ? '本机已保存豆包 API Key；不会回显，真实连通性和听感仍需试听。' : '尚未配置豆包声音：请在本机填写专用 API Key。'} 它与 OpenAI API Key 分开保存，提交后输入框清空，由桌面程序加密保管。</p>
+            {settings.hasDoubaoApiKey && <label className="desktop-check"><input type="checkbox" checked={clearDoubaoApiKey} onChange={event => { setClearDoubaoApiKey(event.target.checked); if (event.target.checked) setDoubaoApiKey(''); }}/>删除本机保存的豆包 API Key（保存后生效）</label>}
+          </fieldset>
+          <label>豆包中文音色<select aria-label="豆包中文音色" value={draft.doubaoTtsVoice ?? DEFAULT_DOUBAO_TTS_VOICE} onChange={event => update('doubaoTtsVoice', event.target.value)}>{DOUBAO_TTS_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</select></label>
+          <label>豆包朗读语气<textarea aria-label="豆包朗读语气" value={draft.doubaoTtsInstructions ?? DEFAULT_DOUBAO_TTS_INSTRUCTIONS} onChange={event => update('doubaoTtsInstructions', event.target.value)} rows={3} maxLength={1000} placeholder="自然稳定地朗读，按语义停顿，不增改原文。"/></label>
+          <p className="desktop-setting-note">可以先保存声音选项，稍后再填写 Key；保存设置不会请求语音。确认额度并「应用并重启」后，再选一小段原文点「朗读所选」试听。声音合成完成后播放，播放中可原位调速。</p>
+        </div>}
         {draft.ttsEngine === 'system' && <p>系统基本语音：免费，使用 Windows / 浏览器已有声音，音色和自然度受本机系统限制。不会向 OpenAI 请求语音。</p>}
         {draft.ttsEngine === 'openai' && <p>OpenAI AI 合成语音使用独立 API Key 和 API 额度；ChatGPT 登录不包含本应用的 TTS 授权。只有你主动朗读时才请求语音，真实听感需试听。</p>}
       </fieldset>
-      <details className="desktop-advanced"><summary>高级 API 配置（可选）</summary><p>仅独立 API 解题或 OpenAI 朗读需要此配置。免费本地朗读与系统语音不使用 API Key。</p><fieldset disabled={busy || !settings.encryptionAvailable}>
+      <details className="desktop-advanced"><summary>高级 API 配置（可选）</summary><p>仅独立 API 解题或 OpenAI 朗读需要此配置。豆包声音使用上方单独的凭证；免费本地朗读与系统语音不使用 API Key。</p><fieldset disabled={busy || !settings.encryptionAvailable}>
         <label>OpenAI API Key<input type="password" aria-label="OpenAI API Key" autoComplete="new-password" spellCheck={false} value={apiKey} onChange={event => { setApiKey(event.target.value); setClearApiKey(false); }} placeholder={settings.hasApiKey ? '已保存；留空保持原 Key' : '只在本机填写，不要发送到聊天'} maxLength={512}/></label>
         <p className="desktop-setting-note">{settings.hasApiKey ? '本机已保存 API Key；不会回显。' : '尚未保存 API Key。'} 保存后输入框清空，凭证由桌面程序加密保管。</p>
         {settings.hasApiKey && <label className="desktop-check"><input type="checkbox" checked={clearApiKey} onChange={event => { setClearApiKey(event.target.checked); if (event.target.checked) setApiKey(''); }}/>删除本机保存的 API Key（保存后生效）</label>}
