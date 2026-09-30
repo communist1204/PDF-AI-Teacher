@@ -33,11 +33,13 @@ if (current !== commit) {
 }
 git(['submodule', 'update', '--init', '--recursive']);
 if (git(['rev-parse', 'HEAD'], resolve(source, 'ggml'), true) !== ggmlCommit) throw new Error('Unexpected GGML revision.');
-const patch = resolve(root, 'scripts/qwen-tts-native.patch');
+const patches = ['scripts/qwen-tts-native.patch', 'scripts/qwen-tts-windows-utf8.patch'].map(path => resolve(root, path));
+for (const patch of patches) {
 const reverse = spawnSync('git', ['-c', `safe.directory=${source.replaceAll('\\', '/')}`, 'apply', '--ignore-space-change', '--reverse', '--check', patch], { cwd: source, windowsHide: true, encoding: 'utf8' });
 if (reverse.status !== 0) {
   git(['apply', '--ignore-space-change', '--check', patch]);
   git(['apply', '--ignore-space-change', patch]);
+}
 }
 // Static CPU-only build. No CUDA, Vulkan, Python, Conda, or global environment changes.
 const off = ['CUDA', 'VULKAN', 'METAL', 'SYCL', 'HIP', 'HIPBLAS', 'BLAS', 'OPENCL', 'RPC', 'CANN', 'WEBGPU', 'HEXAGON', 'OPENMP', 'BACKEND_DL'];
@@ -46,7 +48,7 @@ run(cmake, ['--build', build, '--config', 'Release', '--target', 'qwen-tts', 'te
 run(resolve(build, 'Release/test-abi-c.exe'), []);
 const exe = resolve(build, 'Release/qwen-tts.exe');
 if (!existsSync(exe)) throw new Error('Native CLI output is missing.');
-writeFileSync(resolve(build, 'build-provenance.json'), JSON.stringify({ source: 'https://github.com/ServeurpersoCom/qwentts.cpp', commit, ggmlCommit, cpuOnly: true, defaultThreads: 2, allowedThreads: [2, 4], env: 'PDF_AI_TTS_THREADS', cmake, exe, patch: readFileSync(patch, 'utf8') }, null, 2));
+writeFileSync(resolve(build, 'build-provenance.json'), JSON.stringify({ source: 'https://github.com/ServeurpersoCom/qwentts.cpp', commit, ggmlCommit, cpuOnly: true, defaultThreads: 2, allowedThreads: [2, 4], env: 'PDF_AI_TTS_THREADS', cmake, exe, patches: patches.map(patch => readFileSync(patch, 'utf8')) }, null, 2));
 const runtime = resolve(root, 'qwen-tts-runtime');
 mkdirSync(resolve(runtime, 'bin'), { recursive: true });
 copyFileSync(exe, resolve(runtime, 'bin/qwen-tts.exe'));
