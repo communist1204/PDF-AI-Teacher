@@ -77,7 +77,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const doubaoTtsVoice = env.DOUBAO_TTS_VOICE?.trim() || DEFAULT_DOUBAO_TTS_VOICE;
   if(!DOUBAO_TTS_VOICES.some(voice=>voice.id===doubaoTtsVoice))throw new Error('请选择列表中的豆包音色。');
   const doubaoTtsInstructions = env.DOUBAO_TTS_INSTRUCTIONS?.trim() || DEFAULT_DOUBAO_TTS_INSTRUCTIONS;
-  if(doubaoTtsInstructions.length>1000)throw new Error('豆包朗读语气请限制在1000字以内。');
+  if(doubaoTtsInstructions.length>1000 || doubaoTtsInstructions.includes("\0"))throw new Error('豆包朗读语气请限制在1000字以内。');
   const doubaoApiKey=env.DOUBAO_TTS_API_KEY?.trim() || '';
   if(doubaoApiKey.length>500 || /[\r\n\0]/.test(doubaoApiKey))throw new Error('豆包语音凭证格式不正确。');
   const ttsModel = env.TTS_MODEL?.trim() || '';

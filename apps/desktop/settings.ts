@@ -11,7 +11,7 @@ export const PreferenceSchema = z.object({
   mode: z.enum(['demo','chatgpt','api']),
   ttsEngine:z.enum(['local','qwen','doubao','openai','system']).default('local'),
   doubaoTtsVoice:z.string().refine(value=>DOUBAO_TTS_VOICES.some(voice=>voice.id===value)).default(DEFAULT_DOUBAO_TTS_VOICE),
-  doubaoTtsInstructions:z.string().trim().max(1000).default(DEFAULT_DOUBAO_TTS_INSTRUCTIONS),
+  doubaoTtsInstructions:z.string().trim().max(1000).refine(value=>!value.includes("\0")).default(DEFAULT_DOUBAO_TTS_INSTRUCTIONS),
   qwenTtsDevice:z.enum(['cpu','cuda']).default('cpu'),
   qwenTtsVoice:z.enum(['serena','vivian','uncle_fu']).default('serena'),
   qwenTtsInstructions:z.string().trim().max(1000).default(DEFAULT_QWEN_TTS_INSTRUCTIONS),

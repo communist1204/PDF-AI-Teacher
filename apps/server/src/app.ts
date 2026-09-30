@@ -241,9 +241,9 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     if (cached) { res.set('x-audio-cache', 'hit').type(contentType).send(cached); return; }
     // Local CPU speech has no paid session quota. The provider serializes generation.
     if (!usingLocalTts) consumeRequest(session);
-    const usage = newUsage(session, ttsModel, 'tts', request.text.length);
+    const usage = newUsage(session, ttsModel, 'tts', usingDoubaoTts ? null : request.text.length);
     if (usingLocalTts) usage.local = true;
-    const result = await runJob(session, request, req, res, usage, signal => usingDoubaoTts ? doubaoProvider!.speak(request.text,request.speed,signal,session.id+'-'+request.contextRevision+'-'+request.generationId) : usingLocalTts ? localProvider!.speak(request.text, request.speed, signal) : provider!.speak(request.text, request.speed, signal), usingQwenTts ? 305000 : config.requestTimeoutMs);
+    const result = await runJob(session, request, req, res, usage, signal => usingDoubaoTts ? doubaoProvider!.speak(request.text,request.speed,signal,session.id+'-'+request.contextRevision+'-'+request.generationId) : usingLocalTts ? localProvider!.speak(request.text, request.speed, signal) : provider!.speak(request.text, request.speed, signal), usingQwenTts ? 305000 : usingDoubaoTts ? 125000 : config.requestTimeoutMs);
     if (!result.audio.length || result.audio.length > 8 * 1024 * 1024) throw new HttpError(502, 'invalid_audio', '语音返回为空或超出大小限制，未播放。');
     usage.requestId = safeRequestId('requestId' in result ? result.requestId : undefined) ?? usage.requestId;
     if (usingDoubaoTts) usage.characters = 'characters' in result ? result.characters ?? null : null;
