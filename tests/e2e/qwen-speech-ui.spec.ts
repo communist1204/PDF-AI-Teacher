@@ -4,15 +4,15 @@ import { DEFAULT_QWEN_TTS_INSTRUCTIONS, type SpeechEngine } from '../../packages
 import { mockSourceSpeech } from './realtimeHarness';
 
 type QwenHarness = { systemCalls: string[]; saves: DesktopPreferences[]; restarts: number; audio: HTMLAudioElement[] };
-async function setup(page: Page, options: { engine?: SpeechEngine; ready?: boolean; mode?: DesktopMode | 'unconfigured' } = {}) {
-  const { engine = 'qwen', ready = true, mode = 'demo' } = options;
-  await page.addInitScript(({ engine, ready, mode, instructions }) => {
+async function setup(page: Page, options: { engine?: SpeechEngine; ready?: boolean; mode?: DesktopMode | 'unconfigured'; device?: 'cpu' | 'cuda'; cudaReady?: boolean } = {}) {
+  const { engine = 'qwen', ready = true, mode = 'demo', device, cudaReady = true } = options;
+  await page.addInitScript(({ engine, ready, mode, device, cudaReady, instructions }) => {
     const state: QwenHarness = { systemCalls: [], saves: [], restarts: 0, audio: [] };
     Object.defineProperty(window, '__qwenSpeech', { value: state });
     const signedIn = mode === 'chatgpt';
     const settings: DesktopSettings = {
       mode: mode === 'unconfigured' ? 'demo' : mode, chatModel: 'account-expert', visionModel: 'account-vision', reasoningEffort: 'xhigh',
-      ttsEngine: engine, localTtsVoice: 'zf_001', qwenTtsVoice: 'serena', qwenTtsInstructions: instructions, qwenTtsReady: ready,
+      ttsEngine: engine, localTtsVoice: 'zf_001', qwenTtsVoice: 'serena', qwenTtsInstructions: instructions, qwenTtsReady: ready, qwenTtsDevice: device, qwenCudaReady: cudaReady,
       ttsModel: 'gpt-4o-mini-tts', ttsVoice: 'marin', ttsInstructions: '云端旧设置', localTtsReady: true,
       hasApiKey: false, encryptionAvailable: true,
       auth: { status: signedIn ? 'signed_in' : 'signed_out', accounts: signedIn ? [{id:'mock-account',label:'测试账号',status:'signed_in'}] : [], ...(signedIn ? {activeAccountId:'mock-account'} : {}) },
@@ -29,10 +29,10 @@ async function setup(page: Page, options: { engine?: SpeechEngine; ready?: boole
     Object.defineProperty(window, 'speechSynthesis', { value: { getVoices: () => [], speak(value: Utterance) { state.systemCalls.push(value.text); queueMicrotask(() => value.onstart?.()); }, cancel() {}, pause() {}, resume() {}, addEventListener() {}, removeEventListener() {} } });
     const NativeAudio = window.Audio;
     window.Audio = class extends NativeAudio { constructor(src?: string) { super(src); state.audio.push(this); } };
-  }, { engine, ready, mode, instructions: DEFAULT_QWEN_TTS_INSTRUCTIONS });
+  }, { engine, ready, mode, device, cudaReady, instructions: DEFAULT_QWEN_TTS_INSTRUCTIONS });
   await page.route('**/api/config', async route => {
     const response = await route.fetch(); const config = await response.json();
-    await route.fulfill({json: {...config, mode: mode === 'chatgpt' ? 'live' : mode, authMode: mode === 'chatgpt' ? 'chatgpt' : 'api', models: {...config.models,chat:'account-expert',vision:'account-vision',tts:'Qwen3-TTS-1.7B-CustomVoice-Q4_K_M'}, capabilities:{...config.capabilities,tts:ready?'supported':'unconfigured'},speech:{engine,ready,voice:'serena',style:DEFAULT_QWEN_TTS_INSTRUCTIONS,instructionsSupported:true}}});
+    await route.fulfill({json: {...config, mode: mode === 'chatgpt' ? 'live' : mode, authMode: mode === 'chatgpt' ? 'chatgpt' : 'api', models: {...config.models,chat:'account-expert',vision:'account-vision',tts:'Qwen3-TTS-1.7B-CustomVoice-Q4_K_M'}, capabilities:{...config.capabilities,tts:ready?'supported':'unconfigured'},speech:{engine,ready,device:device??'cpu',voice:'serena',style:DEFAULT_QWEN_TTS_INSTRUCTIONS,instructionsSupported:true}}});
   });
   const tts: Array<{text:string;speed:number}> = []; const remote: string[] = []; const questions: string[] = [];
   page.on('request', request => {
@@ -58,7 +58,7 @@ test('Qwen 是可选本地声音，三种中文音色与独立语气可保存，
   await setup(page,{engine:'local'}); await page.getByRole('button',{name:'声音设置',exact:true}).click();
   const engine=page.getByRole('combobox',{name:'朗读方式',exact:true}); const panel=page.locator('.desktop-speech-fields');
   await expect(engine).toHaveValue('local'); await engine.selectOption('qwen');
-  await expect(panel).toContainText('不需要 API Key、登录或充值'); await expect(panel).toContainText('CPU 生成可能需要等待'); await expect(panel).toContainText('Qwen3 语音资源已就绪');
+  await expect(panel).toContainText('不需要 API Key、登录或充值'); await expect(panel).toContainText('较长句子可能需要等待'); await expect(panel).toContainText('Qwen3 语音资源已就绪');
   const voice=page.getByRole('combobox',{name:'Qwen3 中文音色',exact:true}); const style=page.getByRole('textbox',{name:'Qwen3 朗读语气',exact:true});
   await expect(voice.locator('option')).toHaveCount(3); await expect(style).toHaveAttribute('maxlength','1000'); await expect(style).toHaveValue(DEFAULT_QWEN_TTS_INSTRUCTIONS);
   await page.locator('.desktop-advanced summary').click(); await expect(page.getByRole('combobox',{name:'朗读音色',exact:true})).toHaveCount(0); await expect(page.getByRole('textbox',{name:'朗读语气',exact:true})).toHaveCount(0);
@@ -114,4 +114,23 @@ test('ChatGPT 账号和专业解题模型独立于 Qwen 声音设置，免费语
   await page.locator('.usage-details summary').click(); const row=page.locator('.usage-details tbody tr').first(); await expect(row).toContainText('本地免费'); await expect(row).toContainText('本地生成已取消 · 免费'); await expect(row).not.toContainText('可能已计费');
   await expect(page.getByRole('dialog',{name:'设置与用量'})).toContainText('文字与看图解题使用 ChatGPT 账号授权及计划额度');
   await page.getByRole('button',{name:'关闭设置',exact:true}).click(); await expect(page.locator('.teaching-route')).toContainText('解题：account-expert'); await expect(page.locator('.desktop-pending-banner')).toContainText('设置等待应用');
+});
+
+test('Qwen 旧配置默认 CPU，主动保存 GPU 并提示资源就绪不等于已实测',async({page})=>{
+  await setup(page); await page.getByRole('button',{name:'声音设置',exact:true}).click();
+  const device=page.getByRole('combobox',{name:'Qwen3 运算设备',exact:true}); const panel=page.locator('.desktop-speech-fields');
+  await expect(device).toHaveValue('cpu'); await expect(panel).toContainText('不会自动启用 GPU');
+  await device.selectOption('cuda'); await expect(panel).toContainText('CUDA 运行资源已就绪'); await expect(panel).toContainText('不代表本机 GPU 朗读已验证');
+  await page.getByRole('button',{name:'保存设置',exact:true}).click(); await expect(page.getByRole('button',{name:'保存设置',exact:true})).toBeDisabled();
+  expect((await harness(page)).saves.at(-1)).toMatchObject({ttsEngine:'qwen',qwenTtsDevice:'cuda',mode:'demo'}); expect((await harness(page)).restarts).toBe(0);
+  await expect(page.locator('.voice-config-card')).toContainText('本次运行设备：CPU');
+  await page.getByRole('button',{name:'关闭设置',exact:true}).click(); await page.getByRole('button',{name:'声音设置',exact:true}).click(); await expect(device).toHaveValue('cuda');
+  await device.selectOption('cpu'); await page.getByRole('button',{name:'应用并重启',exact:true}).click(); expect((await harness(page)).saves.at(-1)).toMatchObject({qwenTtsDevice:'cpu'}); expect((await harness(page)).restarts).toBe(1);
+});
+
+test('Qwen 显示后端报告的 GPU，缺少 CUDA 资源时不声称就绪',async({page})=>{
+  await setup(page,{device:'cuda',cudaReady:false}); await page.getByRole('button',{name:'声音设置',exact:true}).click();
+  await expect(page.getByRole('combobox',{name:'Qwen3 运算设备',exact:true})).toHaveValue('cuda'); await expect(page.locator('.desktop-speech-fields')).toContainText('CUDA 运行资源尚未就绪');
+  await expect(page.locator('.voice-config-card')).toContainText('本次运行设备：NVIDIA GPU（CUDA）'); await expect(page.locator('.voice-config-card')).not.toContainText('在本机 CPU 生成');
+  await page.setViewportSize({width:1280,height:720}); await page.getByRole('combobox',{name:'Qwen3 运算设备',exact:true}).scrollIntoViewIfNeeded(); await page.screenshot({path:'test-results/qwen-device-settings-720.png',fullPage:true});
 });

@@ -11,6 +11,7 @@ export interface DesktopPreferences {
   ttsEngine?: SpeechEngine;
   localTtsVoice?: string;
   qwenTtsVoice?: string;
+  qwenTtsDevice?: 'cpu' | 'cuda';
   qwenTtsInstructions?: string;
   ttsModel: string;
   ttsVoice: string;
@@ -21,6 +22,7 @@ export interface DesktopPreferences {
 export interface DesktopSettings extends DesktopPreferences {
   localTtsReady?: boolean;
   qwenTtsReady?: boolean;
+  qwenCudaReady?: boolean;
   hasApiKey: boolean;
   encryptionAvailable: boolean;
   auth: {
