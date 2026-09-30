@@ -81,8 +81,9 @@ test('桌面官方登录可取消，成功后仅显式应用才重启，并保�
 
 test('自然朗读 API 凭证独立保存且不回显、不写入网页存储，不自动重启', async ({ page }) => {
   await setup(page, true); await page.getByRole('button', { name: 'ChatGPT 账号设置', exact: true }).click();
+  await page.getByRole('combobox', { name: '朗读方式' }).selectOption('openai');
   await page.locator('.desktop-advanced summary').click();
-  await expect(page.locator('.desktop-advanced')).toContainText('ChatGPT 登录不包含本应用的 TTS 授权');
+  await expect(page.locator('.desktop-speech-fields')).toContainText('ChatGPT 登录不包含本应用的 TTS 授权');
   const key = page.getByRole('textbox', { name: 'OpenAI API Key' });
   await expect(key).toHaveAttribute('type', 'password');
   await key.fill('mock-key-only-not-a-secret'); await page.getByRole('combobox', { name: '朗读音色' }).selectOption('cedar');

@@ -1,3 +1,5 @@
+import type { SpeechEngine } from './localSpeech';
+
 export type DesktopMode = 'demo' | 'chatgpt' | 'api';
 
 /** Preferences contain no credential material. Persisted by the desktop main process. */
@@ -6,6 +8,8 @@ export interface DesktopPreferences {
   chatModel: string;
   visionModel: string;
   reasoningEffort: string;
+  ttsEngine?: SpeechEngine;
+  localTtsVoice?: string;
   ttsModel: string;
   ttsVoice: string;
   ttsInstructions: string;
@@ -13,6 +17,7 @@ export interface DesktopPreferences {
 
 /** Safe public state exposed by preload; OAuth tokens and saved API keys never return to the renderer. */
 export interface DesktopSettings extends DesktopPreferences {
+  localTtsReady?: boolean;
   hasApiKey: boolean;
   encryptionAvailable: boolean;
   auth: {
