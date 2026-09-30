@@ -248,3 +248,26 @@ describe('review is per original sentence, not the entire selected passage', () 
     expect(requiresFormulaConfirmation(' \r\n\t ')).toBe(false);
   });
 });
+
+describe('real PDF Unicode scripts through the reading pipeline', () => {
+  it('speaks the fixture EMA recurrence and Unicode exponent without leaving script glyphs behind', () => {
+    const source = '更新公式：Mₜ = β Mₜ₋₁ + (1 − β) gₜ。修正因子含有 βᵗ。';
+    const speech = toSpeechText(source);
+    expect(speech).toBe('更新公式：大写 M 下标 t 等于 贝塔 乘以 大写 M，下标开始，t 减 一，下标结束 加 左括号，一 减 贝塔，右括号 乘以 g 下标 t。修正因子含有 贝塔 的 t 次方。');
+    expect(speech).not.toMatch(/[ₜ₋₁ᵗ]/u);
+    expect(requiresFormulaConfirmation(source)).toBe(false);
+    expect(splitSentences(source).map(sentence => sentence.sourceText).join('')).toBe(source);
+  });
+
+  it.each(['参数 βᵊ 是什么。', '参数 βᵦ 是什么。', '参数 β\u{107A5} 是什么。', 'M\u0000ₜ = βᵗ', '代码 `xᵗ`。'])('does not partly convert a formula then silently pass an unknown script: %s', source => {
+    expect(toSpeechText(source)).toBe(source);
+    expect(requiresFormulaConfirmation(source)).toBe(true);
+    expect(splitSentences(source).map(sentence => sentence.sourceText).join('')).toBe(source);
+  });
+
+  it('recognizes Latin script markers even when there is no Greek letter or explicit delimiter', () => {
+    const source = '变量 xᵢ、xₙ 和 xⁿ 保留字母。';
+    expect(toSpeechText(source)).toBe('变量 x 下标 i、x 下标 n 和 x 的 n 次方 保留字母。');
+    expect(requiresFormulaConfirmation(source)).toBe(false);
+  });
+});

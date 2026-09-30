@@ -29,9 +29,12 @@ const COMMANDS: Record<string, string> = {
   log: 'function', ln: 'function', exp: 'function',
 };
 const FUNCTIONS: Record<string, string> = { sin: '正弦', cos: '余弦', tan: '正切', log: '对数', ln: '自然对数', exp: '指数函数' };
-const SUPER = '⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁽⁾';
-const SUB = '₀₁₂₃₄₅₆₇₈₉₊₋₍₎';
-const SCRIPT_ASCII = '0123456789+-()';
+const SUPER = '⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁽⁾ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᴬᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᴿᵀᵁⱽᵂ';
+const SUB = '₀₁₂₃₄₅₆₇₈₉₊₋₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ';
+// Includes unsupported modifier letters so a PDF glyph is reviewed, never left half-read.
+export const UNICODE_SCRIPT_MARKERS = /[\u00B2\u00B3\u00B9\u02B0-\u02FF\u1D2C-\u1D6A\u1D78-\u1DBF\u2070-\u209F\u2C7C\u2C7D\u{10780}-\u{107BF}]/u;
+// Normalize only the declared script alphabet; never apply NFKC to arbitrary PDF text.
+const SCRIPT_ASCII = Object.fromEntries([...SUPER, ...SUB].map(char => [char, char.normalize('NFKC')]));
 class ReviewError extends Error {}
 interface Token { kind: string; value: string }
 type Node =
@@ -65,7 +68,7 @@ function tokenize(input: string): Token[] {
     if (SUPER.includes(char) || SUB.includes(char)) {
       const alphabet = SUPER.includes(char) ? SUPER : SUB;
       let digits = '';
-      while (at < input.length && alphabet.includes(input[at])) digits += SCRIPT_ASCII[alphabet.indexOf(input[at++])];
+      while (at < input.length && alphabet.includes(input[at])) digits += SCRIPT_ASCII[input[at++]];
       push(alphabet === SUPER ? '^' : '_'); push('{');
       for (const token of tokenize(digits)) push(token.kind, token.value);
       push('}'); continue;
@@ -312,7 +315,7 @@ export function mathToSpeech(sourceText: string, options: MathSpeechOptions = {}
   const delimiters = [['$$', '$$'], ['$', '$'], ['\\[', '\\]'], ['\\(', '\\)']];
   const delimiter = delimiters.find(([start]) => input.startsWith(start));
   const corrupted = /[\uFFFD\u200B-\u200F]|\p{Co}|\p{Cc}/u.test(sourceText.replace(/[\t\r\n]/gu, ''));
-  const candidate = corrupted || format !== 'auto' || !!delimiter || /^[A-Za-z\dα-ω]\s*-/u.test(input) || /[\\α-ωΑ-Ωϵϑϰϖϱϕ∂∑∫√∞=+*/<>≤≥≠≈_^−×·÷⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]/u.test(input);
+  const candidate = corrupted || UNICODE_SCRIPT_MARKERS.test(input) || format !== 'auto' || !!delimiter || /^[A-Za-z\dα-ω]\s*-/u.test(input) || /[\\α-ωΑ-Ωϵϑϰϖϱϕ∂∑∫√∞=+*/<>≤≥≠≈_^−×·÷⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]/u.test(input);
   if (!candidate) return { sourceText, speechText: sourceText, reviewRequired: false, status: 'not-math' };
   try {
     if (corrupted) throw new ReviewError('公式含有乱码或不可见控制字符，请对照原文校对。');

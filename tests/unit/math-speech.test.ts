@@ -138,3 +138,30 @@ describe('review instead of partial or invented formula speech', () => {
     expect(source).toBe(String.raw`\frac{1}{1-\beta^t}`);
   });
 });
+
+describe('Unicode Latin scripts extracted from real PDF text', () => {
+  it.each([
+    ['βᵗ', '贝塔 的 t 次方'], ['xⁱ', 'x 的 i 次方'], ['xⁿ', 'x 的 n 次方'],
+    ['Mₜ', '大写 M 下标 t'], ['xᵢ', 'x 下标 i'], ['xₙ', 'x 下标 n'],
+    ['xⱼ', 'x 下标 j'], ['xᵣ', 'x 下标 r'], ['xᵤ', 'x 下标 u'],
+    ['xᵥ', 'x 下标 v'], ['xᵀ', 'x 上标 大写 T'], ['xᶜ', 'x 的 c 次方'],
+    ['xʲ', 'x 的 j 次方'], ['xⱽ', 'x 上标 大写 V'],
+  ])('reads each declared script as an actual index or exponent: %s', (source, expected) => {
+    expect(read(source)).toBe(expected);
+  });
+
+  it('preserves the t−1 subscript scope in the real fixture recurrence', () => {
+    const source = 'Mₜ = β Mₜ₋₁ + (1 − β) gₜ';
+    expect(read(source)).toBe('大写 M 下标 t 等于 贝塔 乘以 大写 M，下标开始，t 减 一，下标结束 加 左括号，一 减 贝塔，右括号 乘以 g 下标 t');
+    expect(read(source)).toBe(read('M_t = β M_{t-1} + (1 − β) g_t'));
+    expect(read('βᵗ⁻¹')).toBe('贝塔，上标开始，t 减 一，上标结束');
+  });
+
+  it.each(['xᵊ', 'βᵦ', 'x\u{107A5}', 'ᵗ', 'xⁱⁿ', 'M\u0000ₜ'])('rejects unsupported, ambiguous or corrupt scripts as a whole: %s', source => review(source));
+
+  it('does not normalize unrelated compatibility glyphs or guess a missing hat from NUL', () => {
+    review('𝑀ₜ = 1');
+    review('M\u0000ₜ = βᵗ');
+    expect(mathToSpeech('M\u0000ₜ = βᵗ').sourceText).toBe('M\u0000ₜ = βᵗ');
+  });
+});

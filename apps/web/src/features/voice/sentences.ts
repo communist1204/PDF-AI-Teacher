@@ -1,5 +1,5 @@
 import type { Sentence } from '../../../../../packages/shared/protocol';
-import { mathToSpeech } from './mathSpeech';
+import { mathToSpeech, UNICODE_SCRIPT_MARKERS } from './mathSpeech';
 
 // Both chunk boundaries and pronunciation changes deliberately invalidate bookmarks.
 export const SEGMENTATION_VERSION = 'sentence-v3';
@@ -40,6 +40,7 @@ function pronounceCalendarYears(text: string): string {
 
 const MAX_SPEECH_CHARACTERS = 1400;
 const STRONG_MATH = /[α-ωΑ-Ωϵϑϰϖϱϕ∂∑∫√∞^_⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]|\\[A-Za-z]+/u;
+const hasStrongMath = (text: string) => STRONG_MATH.test(text) || UNICODE_SCRIPT_MARKERS.test(text);
 interface ExplicitSpan { start: number; end: number; closed: boolean; code: boolean }
 interface SpeechAnalysis { speechText: string; reviewRequired: boolean }
 
@@ -81,7 +82,7 @@ function convertInlineMath(text: string): SpeechAnalysis {
   let output = ''; let run = ''; let reviewRequired = false;
   const flush = () => {
     if (!run) return;
-    if (STRONG_MATH.test(run)) {
+    if (hasStrongMath(run)) {
       const result = convertMathRun(run);
       output += result.speechText; reviewRequired ||= result.reviewRequired;
     } else output += run;
@@ -93,8 +94,9 @@ function convertInlineMath(text: string): SpeechAnalysis {
     if (command) { run += command; at += command.length; continue; }
     const word = /^[A-Za-z]+/u.exec(remaining)?.[0];
     if (word && word.length > 1) { flush(); output += word; at += word.length; continue; }
-    const char = text[at++];
-    if (/[A-Za-z\dα-ωΑ-Ωϵϑϰϖϱϕ∂∑∫√∞=+*/<>≤≥≠≈_^−×·÷⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁽⁾₀₁₂₃₄₅₆₇₈₉₊₋₍₎()[\]{}\s.-]/u.test(char)) run += char;
+    const char = String.fromCodePoint(text.codePointAt(at)!);
+    at += char.length;
+    if (UNICODE_SCRIPT_MARKERS.test(char) || /[A-Za-z\dα-ωΑ-Ωϵϑϰϖϱϕ∂∑∫√∞=+*/<>≤≥≠≈_^−×·÷⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁽⁾₀₁₂₃₄₅₆₇₈₉₊₋₍₎()[\]{}\s.-]/u.test(char)) run += char;
     else { flush(); output += char; }
   }
   flush();
@@ -111,7 +113,7 @@ function analyzeBlock(text: string): SpeechAnalysis {
     const source = text.slice(span.start, span.end);
     if (!span.closed || span.code) {
       speechText += source;
-      reviewRequired ||= !span.closed || STRONG_MATH.test(source);
+      reviewRequired ||= !span.closed || hasStrongMath(source);
     } else {
       const result = convertMathRun(source, true);
       speechText += result.speechText; reviewRequired ||= result.reviewRequired;
@@ -166,7 +168,7 @@ function isStandaloneFormula(line: string): boolean {
   // English words and Han prose are not inferred to be mathematical identifiers.
   return value.length > 0 && !/[\p{Script=Han}。！？!?]/u.test(value)
     && !/[A-Za-z]{2,}/u.test(value.replace(/\\[A-Za-z]+/gu, ''))
-    && (STRONG_MATH.test(value) || /[=+*/<>≈≠≤≥−×·÷]|[A-Za-z\d]\s*-/u.test(value));
+    && (hasStrongMath(value) || /[=+*/<>≈≠≤≥−×·÷]|[A-Za-z\d]\s*-/u.test(value));
 }
 
 /** Preserve paragraphs, lists and display formulas, not wraps inside a formula. */
