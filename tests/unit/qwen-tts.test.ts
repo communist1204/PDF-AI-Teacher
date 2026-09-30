@@ -128,3 +128,15 @@ describe('Qwen CPU child adapter (mock process, real temporary files)', () => {
   });
 });
 
+
+describe('bounded Qwen CPU thread options', () => {
+  it.each([2, 4] as const)('uses %s threads only within its own child environment', async threads => {
+    const run = await running(provider({ threads }));
+    expect(spawnMock.mock.calls[0][2].env).toMatchObject({ GGML_BACKEND: 'CPU', PDF_AI_TTS_THREADS: String(threads) });
+    await run.child.complete(); await expect(run.promise).resolves.toMatchObject({ audio: wave() });
+  });
+  it('rejects unsupported counts before starting a process', () => {
+    for (const threads of [0, 1, 3, 8, NaN]) expect(() => provider({ threads: threads as 2 })).toThrow('线程数');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+});

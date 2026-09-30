@@ -10,13 +10,13 @@ const LIMIT_MARKER = 'PDF_AI_TTS_FRAME_LIMIT_REACHED';
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 const cancelled = () => new HttpError(409, 'qwen_tts_cancelled', 'Qwen3 本地朗读已停止，未产生 API 费用。');
 const failed = () => new HttpError(503, 'qwen_tts_failed', 'Qwen3 本地语音未能完成生成，请重试短句；没有切换到其他语音服务。');
-export interface QwenTtsOptions { runtimePath: string; workPath: string; voice: string; instructions: string; }
+export interface QwenTtsOptions { runtimePath: string; workPath: string; voice: string; instructions: string; threads?: 2 | 4; }
 function fileExists(path: string, size = 1) { try { const s = statSync(path); return s.isFile() && s.size >= size; } catch { return false; } }
-function environment(): NodeJS.ProcessEnv {
+function environment(threads: 2 | 4): NodeJS.ProcessEnv {
  const result: NodeJS.ProcessEnv = {};
  for (const [key, value] of Object.entries(process.env)) if (['systemroot','windir','temp','tmp'].includes(key.toLowerCase())) result[key] = value;
  // Per-process settings only. This build contains no GPU backend.
- result.GGML_BACKEND = 'CPU'; result.PDF_AI_TTS_THREADS = '2';
+ result.GGML_BACKEND = 'CPU'; result.PDF_AI_TTS_THREADS = String(threads);
  return result;
 }
 export function validateQwenWave(audio: Buffer): boolean {
@@ -33,6 +33,7 @@ export class QwenTtsProvider {
  constructor(options: QwenTtsOptions) {
   if (!['serena','vivian','uncle_fu'].includes(options.voice)) throw new HttpError(400,'qwen_tts_voice','请选择列表中的 Qwen3 中文音色。');
   if (options.instructions.length > 1000 || options.instructions.includes('\0')) throw new HttpError(400,'qwen_tts_style','Qwen3 朗读语气请限制在 1000 字以内。');
+  if (options.threads !== undefined && options.threads !== 2 && options.threads !== 4) throw new HttpError(400,'qwen_tts_threads','Qwen3 CPU 线程数只允许 2 或 4。');
   this.options = {...options,runtimePath:resolve(options.runtimePath),workPath:resolve(options.workPath)};
  }
  ready() {
@@ -69,7 +70,7 @@ export class QwenTtsProvider {
       '--model',join(this.options.runtimePath,'model',QWEN_TALKER),'--codec',join(this.options.runtimePath,'model',QWEN_CODEC),
       '--speaker',this.options.voice,'--lang','Chinese','--instruct',this.options.instructions,
       '--max-new','1800','--seed','42','-o',output,
-     ],{cwd:join(this.options.runtimePath,'bin'),env:environment(),windowsHide:true,stdio:['pipe','pipe','pipe'],shell:false});
+     ],{cwd:join(this.options.runtimePath,'bin'),env:environment(this.options.threads ?? 2),windowsHide:true,stdio:['pipe','pipe','pipe'],shell:false});
      child.stdout.resume();child.stderr.on('data',(data:Buffer)=>{diagnostic+=data.toString('utf8');hitLimit ||= diagnostic.includes(LIMIT_MARKER);diagnostic=diagnostic.slice(-LIMIT_MARKER.length);});
      child.once('error',()=>finish(failed()));child.stdin.on('error',()=>stop(failed()));
      child.once('close',code=>{
