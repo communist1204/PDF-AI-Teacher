@@ -1,0 +1,14 @@
+.desktop-account-entry{border:1px solid #c9d8d0;border-radius:7px;background:#edf4ef;color:#295a49;padding:8px 11px;font-size:12px;white-space:nowrap;cursor:pointer}
+.desktop-settings{border:1px solid #d5e1d8;border-radius:12px;padding:20px;margin:16px 0 22px;background:#f8faf7;color:#35473e}
+.desktop-settings-heading h3{margin:5px 0 8px;font-size:21px;line-height:1.35;color:#263e32}
+.desktop-settings p{line-height:1.7;margin:8px 0 12px}.desktop-settings label{display:flex;flex-direction:column;gap:7px;font-size:13px;margin:10px 0;color:#365343}
+.desktop-settings input:not([type=checkbox]),.desktop-settings select,.desktop-settings textarea{width:100%;box-sizing:border-box;background:#fff;border:1px solid #cbd8ce;color:#283f31;padding:9px 10px;border-radius:6px;font:inherit;min-width:0}
+.desktop-settings input:focus,.desktop-settings select:focus,.desktop-settings textarea:focus{outline:2px solid #86aa92;outline-offset:1px}.desktop-settings textarea{resize:vertical}
+.desktop-account-card{border:1px solid #c8d9ce;border-radius:9px;background:#fff;padding:16px;margin-top:16px}.desktop-account-email{display:block;font-size:13px;color:#637d6d;margin-top:5px;overflow-wrap:anywhere}
+.desktop-setting-actions{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-top:12px}.desktop-setting-note{color:#6b7c70;font-size:12px}
+.desktop-settings fieldset{border:0;padding:0;margin:16px 0}.desktop-settings legend{font-size:14px;font-weight:650;padding:0;margin-bottom:3px}.desktop-fields-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.desktop-advanced{border-top:1px solid #d5e1d8;border-bottom:1px solid #d5e1d8;padding:15px 0;margin-top:18px}.desktop-advanced summary{cursor:pointer;font-size:14px;font-weight:600}.desktop-settings .desktop-check{flex-direction:row;align-items:center;font-size:12px}.desktop-check input{accent-color:#356f55}
+.desktop-restart-notice{background:#f5eedf;border:1px solid #e8d9ba;border-radius:7px;margin-top:18px;padding:12px 14px;color:#795c2b;font-size:13px}.desktop-restart-notice p{margin:5px 0 0}.desktop-save-actions{margin-top:18px}.desktop-setting-notice{color:#346448;font-size:13px}.desktop-setting-error{color:#9d432e;font-size:13px;overflow-wrap:anywhere}.desktop-settings button:disabled{opacity:.5;cursor:default}
+@media(max-width:720px){.desktop-settings{padding:14px}.desktop-fields-row{grid-template-columns:1fr;gap:0}.desktop-account-entry{font-size:11px;padding:7px}.desktop-settings-heading h3{font-size:18px}}
+
+.desktop-pending-banner{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 24px;background:#f6edda;color:#795c2b;font-size:12px}.desktop-pending-banner .text-button{color:inherit;white-space:nowrap}
