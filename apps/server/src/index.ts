@@ -5,9 +5,12 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app';
 import { readConfig } from './config';
+import { LocalTtsProvider } from './localTts';
 
 const config = readConfig();
-const app = createApp({ config });
+const runtimePath = resolve(process.cwd(), 'local-tts-runtime');
+const localTts = config.ttsEngine === 'local' ? new LocalTtsProvider({ workerPath: resolve(runtimePath, 'local-tts-worker.cjs'), runtimePath, modelDir: resolve(runtimePath, 'model'), voice: config.localTtsVoice ?? 'zf_001', threads: 2 }) : undefined;
+const app = createApp({ config, localTts });
 const server = createServer(app);
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 let closeDevServer: (() => Promise<void>) | undefined;
@@ -34,6 +37,7 @@ let closing = false;
 async function close() {
   if (closing) return;
   closing = true;
+  await app.locals.dispose();
   await closeDevServer?.();
   server.close();
   server.closeIdleConnections();

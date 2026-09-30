@@ -311,3 +311,47 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 过程记录：网络会话改名时漏改一个 permission handler，首次 typecheck 失败，修正为 windowSession 后通过。第一版 Windows GUI 探测未等待子进程完整退出，未把空输出视为成功；改为 Node spawn 等待后拿到明确200。两项 UI 工具初始化失败已保留上述边界，不绕过授权或填写凭证。没有删测试。未授权的专业答案、声音与真人验收仍为未测。
 
 使用方式：软件已重新打包到原 exe 路径，桌面图标不需更换；重新打开软件再点击「使用 ChatGPT 登录」。刚才自动检查打开的旧测试页面已取消，应使用软件新打开的页面授权。
+
+
+## 免费本地中文语音与429提示（2026-09-30 16:27）
+
+本轮按用户要求替换必须充值的默认朗读路径，接入本机CPU运行的Kokoro；没有发出付费请求，也没有读取既有ChatGPT/Codex凭证。模型和依赖已实际安装，声音存在于最终桌面包中。下列真人待验项目继续保留，不用自动测试替代音质评判。
+
+### 最终执行与证据
+
+| 检查 | 实际结果 |
+|---|---|
+| npm.cmd run typecheck | 通过，最终本地声音配置和异步播放器类型检查退出0 |
+| npm.cmd run lint | 通过，包含新增安装、worker和真实桌面验证脚本 |
+| npm.cmd test | 18文件、360/360通过（16:22，1.29s） |
+| npm.cmd run test:e2e | 57/57通过（16:25，35.0s）；Edge真实PDF/选区、音频和网络按各场景标明模拟或真实 |
+| npm.cmd run desktop:package | build + Electron构建 + 打包通过；2019 modules，原有大chunk提醒仍存在 |
+| node scripts/verify-local-tts-desktop.mjs | 最终打包exe、真实CPU模型+真实HTMLAudio解码/时间推进，首音2363ms，无Key，0.25×且preservesPitch=true；暂停同句续播、真实跨句交接只有一个输出、停止释放全部audio src，0 pageErrors |
+| npm.cmd run test:desktop -- --packaged | 真实首次启动、单实例、回环403、PDF/公式/笔记保存、Windows加密测试凭证、重开恢复、关闭服务均通过（16:19） |
+| npm.cmd run test:desktop:restart | 实际app.relaunch、设置应用和学习存储保留、关窗停服务通过（16:19）；使用独立测试profile |
+| npx.cmd tsx scripts/verify-local-tts.ts | 六种中文音色均真实生成24kHz/PCM16 WAV；初次4.4–4.8秒生成约24–27秒样音，热启动短句0.71–0.80秒；真实worker取消后重新生成成功 |
+| 最终包内容检查 | asar282项仅白名单应用内容；原生运行库仅sherpa两包；发布模型与安装模型逐字节hash一致、worker与源文件一致、第三方许可齐全，没有账号数据或API Key |
+
+原始证据：[六音色合成数据](local-tts-smoke.json)、[桌面真实播放](local-tts-desktop-smoke.json)、[软件包检查](local-tts-package.json)、[桌面基础检查](desktop-smoke.json)、[真实自动重启](desktop-restart.json)。桌面基础报告里的realModelAndTts未测指该基础脚本没有调用云模型；免费本地TTS由独立真实播放脚本验证，不能混淆。
+
+真实桌面播放测试将音量设0，验证CPU合成、WAV解码、时间推进、pause/resume、音高保持开关和清理。为了快速到达下一句，在实际HTMLAudio元素上seek到句末触发真实ended；没有用假音频事件冒充解码。该测试不代表扬声器听感或完整自然播放20分钟。未登录/未带真实Key的隔离profile与普通用户数据独立，交付软件不带测试调试参数。
+
+已实际查看：[朗读第二句](screenshots/local-tts-real-desktop.png)、[免费声音设置](screenshots/local-tts-settings.png)、[720p设置](screenshots/local-tts-settings-720.png)。选区高亮、逐句字幕、0.25×、免费标签和模型就绪状态正确；720p设置可滚动，音色和免费模式可见。没有仅凭终端无异常宣称UI完成。
+
+### 覆盖与修复过程
+
+- 新增本地worker离线验证14项：声音白名单、文本/速度限制、单任务、JSON/base64/WAV格式和长度校验、取消/超时/迟到结果/子进程故障/退出，禁止凭证与调试环境继承。真实native推理由两个独立smoke补充，mock不代表音质。
+- 本地路由覆盖无Key/DEMO也可真实输出、显式缺模型失败、不自动切付费/系统声音、WAV缓存按文本和voice复用、免费记录不消耗付费会话预算、解题仍独立。
+- 音频覆盖本地只预生成下一句、下一句交接不重复生成、停止丢弃迟到结果、付费路径不预生成、0.25仅应用一次。最终复核发现快速pause→resume可能在上游取消尚未排空时得到409，失败预取污染下一句。现按对象身份清理失败预取，真正到达该句才正常请求；已采用的失败预取也只转一次前台请求，不循环重试。补3项竞态回归。
+- 设置迁移覆盖老版本无ttsEngine/localTtsVoice，保留测试账号/Key/解题模型。另修正local/system被隐藏的旧OpenAI语气校验阻止保存的问题，补2项；OpenAI模式仍严格校验。
+- 429测试通过真实SDK+模拟fetch覆盖11种返回及请求标识，另有隐私单测、余额不足/未知原因720p浏览器提示；无自动重试、不曝光原始响应。截图：[余额不足](screenshots/tts-credit_balance_exhausted-720.png)、[原因未明](screenshots/tts-unrecognized_limit-720.png)。真实账单由用户截图提供，本轮未访问个人账单。
+- 单连接模型下载过慢，改为固定官方资源的分段恢复并校验全部SHA256后解压；未修改系统代理。Node模型smoke最初通过，但真实Electron报503。进一步发现advanced IPC的V8版本不兼容及原生external ArrayBuffer限制，改JSON/base64和enableExternalBuffer=false后，真实exe合成/播放才通过；保留[当时失败截图](screenshots/local-tts-desktop-failure.png)。
+- 初版音频测试暴露结束回调重复生效，已在最后句结束时取消旧回调；TypeScript还发现Buffer类型和标签变量错误，修正后全量通过。
+- 浏览器初次53/57、随后55/57：既有fixture未声明mock TTS能力、旧系统声音文案、错误提示前缀不匹配；补真实测试配置与断言后57/57。一次与桌面打包并行运行导致Vite扫描发布目录中的DLL出现EBUSY，明确忽略release/runtime/test-results等生成目录，最终测试与打包顺序执行。不删测试掩盖失败。
+
+### 未完成验收与最少使用步骤
+
+人耳自然度、情感/停顿、术语和多音字、长教材20分钟稳定听感、与OpenAI同文对比均未验收。Kokoro是已装好的免费轻量候选，不声称超过OpenAI；Qwen3-TTS/CosyVoice3未安装，不能把研究记录当作已具备功能。真实专业模型账号权限/答案正确性也没有在本轮获得验证。
+
+普通使用：双击原桌面PDF AI Teacher → 打开PDF选文字 → 朗读所选。无需充值/Key。设置→朗读声音→本地中文音色，可选六种并应用重启；先用1×比较，喜欢后再放慢。六个同文样音：[女声001](audio/kokoro-zf_001.wav)、[女声002](audio/kokoro-zf_002.wav)、[女声003](audio/kokoro-zf_003.wav)、[男声010](audio/kokoro-zm_010.wav)、[男声011](audio/kokoro-zm_011.wav)、[男声012](audio/kokoro-zm_012.wav)。用户只需给出喜欢的音色，以及读音或停顿不合适的具体句子，无需提供Key。
+交付运行状态（16:28）：正常桌面窗口已重新打开，使用原用户配置，未带测试profile或调试参数；没有自动播放或自动提出问题。见 [启动记录](local-tts-running.json)。

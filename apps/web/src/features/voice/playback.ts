@@ -3,6 +3,7 @@ export type PlaybackInput = {
   text: string;
   blob?: Blob;
   rate: number;
+  generatedRate?: number;
   volume: number;
   signal: AbortSignal;
   onStarted: () => void;
@@ -63,8 +64,9 @@ export const browserPlaybackAdapter: PlaybackAdapter = {
       const audio = new Audio(url);
       let released = false;
       audio.volume = input.volume;
-      // The server generated this clip at input.rate already.
-      audio.playbackRate = 1;
+      // Cloud clips use input.rate; local clips retain 1x synthesis for pitch-preserving playback.
+      audio.preservesPitch = true;
+      audio.playbackRate = input.rate / (input.generatedRate ?? input.rate);
       audio.onplaying = input.onStarted;
       audio.onended = input.onEnded;
       audio.onerror = () => input.onError('语音文件无法播放，请检查浏览器音频权限或重试。');
@@ -82,7 +84,7 @@ export const browserPlaybackAdapter: PlaybackAdapter = {
         pause() { audio.pause(); },
         stop: release,
         dispose: release,
-        setRate(rate) { audio.playbackRate = rate / input.rate; },
+        setRate(rate) { audio.playbackRate = rate / (input.generatedRate ?? input.rate); },
         setVolume(volume) { audio.volume = volume; },
       };
     }

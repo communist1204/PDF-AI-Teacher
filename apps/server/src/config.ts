@@ -14,6 +14,8 @@ export interface ServerConfig {
   visionReasoningEffort: TeachingReasoningEffort | null;
   teachingMaxOutputTokens: number;
   teachingTimeoutMs: number;
+  ttsEngine?: 'local' | 'openai' | 'system';
+  localTtsVoice?: string;
   ttsModel: string;
   transcriptionModel: string;
   realtimeModel: string;
@@ -57,13 +59,16 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) {
     throw new Error('OPENAI_BASE_URL 必须为 HTTPS 服务地址或本机回环 HTTP 地址，且不能包含凭证。');
   }
+  if (env.TTS_ENGINE && !['local', 'openai', 'system'].includes(env.TTS_ENGINE)) throw new Error('TTS_ENGINE 必须为 local、openai 或 system。');
+  if (env.LOCAL_TTS_VOICE && !['zf_001', 'zf_002', 'zf_003', 'zm_010', 'zm_011', 'zm_012'].includes(env.LOCAL_TTS_VOICE)) throw new Error('本地中文音色无效。');
+  const cloudSpeech = env.TTS_ENGINE !== 'local' && env.TTS_ENGINE !== 'system';
   const ttsModel = env.TTS_MODEL?.trim() || '';
-  const supportSetting = env.TTS_SUPPORTS_INSTRUCTIONS?.trim();
+  const supportSetting = cloudSpeech ? env.TTS_SUPPORTS_INSTRUCTIONS?.trim() : undefined;
   if (supportSetting && !['true', 'false'].includes(supportSetting)) throw new Error('TTS_SUPPORTS_INSTRUCTIONS 必须为 true 或 false，或留空自动判断。');
   const legacyTts = ['tts-1', 'tts-1-hd'].includes(ttsModel);
   if (legacyTts && supportSetting === 'true') throw new Error('tts-1 / tts-1-hd 不支持语气指令，请清空 TTS_INSTRUCTIONS 并移除 TTS_SUPPORTS_INSTRUCTIONS=true。');
-  const ttsInstructionsSupported = !legacyTts && (supportSetting === 'true' || (!supportSetting && url.origin === 'https://api.openai.com' && url.pathname.replace(/\/$/, '') === '/v1' && INSTRUCTION_MODELS.has(ttsModel)));
-  const customInstructions = env.TTS_INSTRUCTIONS?.trim() || '';
+  const ttsInstructionsSupported = cloudSpeech && !legacyTts && (supportSetting === 'true' || (!supportSetting && url.origin === 'https://api.openai.com' && url.pathname.replace(/\/$/, '') === '/v1' && INSTRUCTION_MODELS.has(ttsModel)));
+  const customInstructions = cloudSpeech ? env.TTS_INSTRUCTIONS?.trim() || '' : '';
   if (customInstructions.length > 3000) throw new Error('TTS_INSTRUCTIONS 请限制在 3000 字以内。');
   if (customInstructions && !ttsInstructionsSupported) throw new Error('当前 TTS 模型未确认支持语气指令，请清空 TTS_INSTRUCTIONS；使用支持的模型，或核实兼容服务文档后显式设置 TTS_SUPPORTS_INSTRUCTIONS=true。');
   return {
@@ -79,6 +84,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     visionReasoningEffort: reasoningEffort(env.VISION_REASONING_EFFORT, 'VISION_REASONING_EFFORT'),
     teachingMaxOutputTokens: integer(env.TEACHING_MAX_OUTPUT_TOKENS, 16000, 1024, 128000, 'TEACHING_MAX_OUTPUT_TOKENS'),
     teachingTimeoutMs: integer(env.TEACHING_TIMEOUT_MS, 180000, 1000, 600000, 'TEACHING_TIMEOUT_MS'),
+    ttsEngine: env.TTS_ENGINE as ServerConfig['ttsEngine'],
+    localTtsVoice: env.LOCAL_TTS_VOICE || 'zf_001',
     ttsModel,
     transcriptionModel: env.TRANSCRIPTION_MODEL?.trim() || '',
     realtimeModel: env.REALTIME_MODEL?.trim() || '',

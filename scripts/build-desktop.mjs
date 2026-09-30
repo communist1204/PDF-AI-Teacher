@@ -11,3 +11,9 @@ const pkg=JSON.parse(await readFile('package.json','utf8'));
 await writeFile(resolve(stage,'package.json'),JSON.stringify({name:'pdf-ai-teacher-desktop',productName:'PDF AI Teacher',version:pkg.version,private:true,main:'main.cjs',description:'本机 PDF 阅读与 AI 教学工作台'},null,2));
 await writeFile(resolve(stage,'LICENSES.txt'),'Electron / Chromium licenses are included in the distribution. PDF.js bundled assets retain their upstream licenses.\n');
 console.log('Desktop application built: '+stage);
+
+// The native CPU runtime stays outside asar, separate from account data.
+const runtime=resolve(root,'local-tts-runtime');
+await mkdir(runtime,{recursive:true});
+await cp(resolve(root,'scripts/local-tts-worker.cjs'),resolve(runtime,'local-tts-worker.cjs'));
+if((await import('node:fs')).existsSync(resolve(root,'assets/third-party-tts')))await cp(resolve(root,'assets/third-party-tts'),resolve(runtime,'licenses'),{recursive:true});

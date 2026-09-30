@@ -22,7 +22,8 @@
     "desktop:runtime": "node node_modules/electron/install.js",
     "test:desktop:restart": "node scripts/verify-desktop-restart.mjs",
     "test:desktop:network": "node scripts/verify-desktop-network.mjs",
-    "test:desktop:login": "node scripts/verify-desktop-login.mjs"
+    "test:desktop:login": "node scripts/verify-desktop-login.mjs",
+    "tts:setup": "node scripts/setup-local-tts.mjs"
   },
   "dependencies": {
     "dotenv": "^18.0.4",
@@ -34,6 +35,7 @@
     "pdfjs-dist": "^6.3.289",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "sherpa-onnx-node": "1.13.8",
     "zod": "^4.6.5"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AudioCoordinator, requiresFormulaConfirmation, splitSentences, toSpeechText, type PlaybackAdapter, type PlaybackHandle, type PlaybackInput } from '../../apps/web/src/features/voice/AudioCoordinator';
+import { AudioCoordinator, requiresFormulaConfirmation, splitSentences, toSpeechText, type PlaybackAdapter, type PlaybackHandle, type PlaybackInput, type AudioCoordinatorOptions } from '../../apps/web/src/features/voice/AudioCoordinator';
 import type { Envelope, PdfTarget, TeachingStep } from '../../packages/shared/protocol';
 
 const envelope: Envelope = { sessionId: 'test-session', generationId: 1, contextRevision: 1 };
@@ -13,7 +13,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function harness(requestSpeech = vi.fn(async () => new Blob(['mock-audio']))) {
+function harness(requestSpeech: ReturnType<typeof vi.fn<AudioCoordinatorOptions['requestSpeech']>> = vi.fn(async () => new Blob(['mock-audio'])), options: Partial<AudioCoordinatorOptions> = {}) {
   let audible = 0;
   let maxAudible = 0;
   const handles: Array<PlaybackHandle & { input: PlaybackInput; position: number; plays: number; stopped: boolean }> = [];
@@ -43,7 +43,7 @@ function harness(requestSpeech = vi.fn(async () => new Blob(['mock-audio']))) {
   const onError = vi.fn();
   const onChange = vi.fn();
   const onComplete = vi.fn();
-  const audio = new AudioCoordinator({ requestSpeech, onChange, onError, onComplete, playbackAdapter: adapter });
+  const audio = new AudioCoordinator({ requestSpeech, onChange, onError, onComplete, playbackAdapter: adapter, ...options });
   audio.load(target, envelope, 'live');
   return { audio, handles, requestSpeech, onError, onChange, onComplete, audible: () => audible, maxAudible: () => maxAudible };
 }
@@ -766,4 +766,101 @@ describe('slow speech and rate changes (simulated playback)', () => {
       expect(spoken[1]).not.toBe(spoken[0]); expect(audio.getSnapshot().sentenceIndex).toBe(0);
     } finally { audio.dispose(); vi.unstubAllGlobals(); }
   });
+});
+
+
+describe('free local speech continuity and cancellation', () => {
+  it('prefetches only one next sentence and transfers it without a duplicate request', async () => {
+    const h = harness(undefined, { prefetchLocalSpeech: true, generatedSpeechRate: 1 });
+    h.audio.setRate(0.25);
+    await h.audio.play();
+    expect(h.requestSpeech.mock.calls.map(call => call[0])).toEqual(['第一句。', '第二句。']);
+    expect(h.handles[0].input).toMatchObject({ rate: 0.25, generatedRate: 1 });
+    expect(h.audio.getSnapshot().sentenceIndex).toBe(0);
+    h.handles[0].input.onEnded();
+    await vi.waitFor(() => expect(h.handles).toHaveLength(2));
+    expect(h.requestSpeech.mock.calls.map(call => call[0])).toEqual(['第一句。', '第二句。', '第三句。']);
+    expect(h.handles[1].input.text).toBe('第二句。');
+    expect(h.maxAudible()).toBe(1);
+    h.audio.stop();
+  });
+  it('aborts pending local lookahead on stop and ignores its late audio', async () => {
+    const next = deferred<Blob>();
+    let pendingSignal: AbortSignal | undefined;
+    const request = vi.fn<AudioCoordinatorOptions['requestSpeech']>(async (text, _env, _rate, signal) => {
+      if (text === '第二句。') { pendingSignal = signal; return next.promise; }
+      return new Blob(['fake']);
+    });
+    const h = harness(request, { prefetchLocalSpeech: true });
+    await h.audio.play();
+    expect(pendingSignal?.aborted).toBe(false);
+    h.audio.stop();
+    expect(pendingSignal?.aborted).toBe(true);
+    next.resolve(new Blob(['old'])); await tick();
+    expect(h.handles).toHaveLength(1);
+    expect(h.audio.getSnapshot().status).toBe('silent');
+    expect(h.audio.getBookmark()?.cursor.sentenceIndex).toBe(0);
+    expect(h.audible()).toBe(0);
+  });
+  it('does not prefetch paid speech by default', async () => {
+    const h = harness(); await h.audio.play(); expect(h.requestSpeech).toHaveBeenCalledOnce(); h.audio.stop();
+  });
+  it('applies local 0.25x once while preserving pitch, without changing cloud rate handling', async () => {
+    const values: Array<{ playbackRate: number; preservesPitch: boolean }> = [];
+    class AudioMock { playbackRate = 1; preservesPitch = false; volume = 1; onplaying = null; onended = null; onerror = null; constructor() { values.push(this); } async play() {} pause() {} load() {} removeAttribute() {} }
+    vi.stubGlobal('Audio', AudioMock);
+    try {
+      const { browserPlaybackAdapter } = await import('../../apps/web/src/features/voice/playback');
+      for (const generatedRate of [1, undefined]) {
+        const handle = await browserPlaybackAdapter.create({ mode: 'live', text: '中文', blob: new Blob(['mock']), rate: 0.25, generatedRate, volume: 1, signal: new AbortController().signal, onStarted: vi.fn(), onEnded: vi.fn(), onError: vi.fn() });
+        handle.setRate(0.25);
+        expect(values.at(-1)?.playbackRate).toBe(generatedRate === 1 ? 0.25 : 1);
+        expect(values.at(-1)?.preservesPitch).toBe(true);
+        handle.dispose();
+      }
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
+
+
+describe('local lookahead failures do not poison resumed reading',()=>{
+ it('retries a rejected lookahead only when its sentence is reached after a rapid pause and resume',async()=>{
+  const aborted=deferred<Blob>();let secondCalls=0;let abortStillDraining=true;
+  const request=vi.fn<AudioCoordinatorOptions['requestSpeech']>(async(text)=>{
+   if(text==='第二句。'){
+    secondCalls++;
+    if(secondCalls===1)return aborted.promise;
+    if(abortStillDraining)throw Error('request_in_progress');
+   }
+   return new Blob(['valid local audio']);
+  });
+  const h=harness(request,{prefetchLocalSpeech:true});await h.audio.play();
+  h.audio.pause();await h.audio.resume();await tick();
+  expect(secondCalls).toBe(2);expect(h.audio.getSnapshot().status).toBe('speaking');
+  abortStillDraining=false;aborted.reject(Error('cancelled'));await tick();
+  h.handles[0].input.onEnded();await vi.waitFor(()=>expect(h.handles).toHaveLength(2));
+  expect(secondCalls).toBe(3);expect(h.handles[1].input.text).toBe('第二句。');
+  expect(h.onError).not.toHaveBeenCalled();expect(h.maxAudible()).toBe(1);h.audio.dispose();
+ });
+ it('retries an adopted failed lookahead once, then reports a foreground failure without looping',async()=>{
+  const next=deferred<Blob>();let calls=0;
+  const request=vi.fn<AudioCoordinatorOptions['requestSpeech']>(async(text)=>{
+   if(text==='第二句。'){calls++;if(calls===1)return next.promise;throw Error('engine unavailable');}
+   return new Blob(['valid']);
+  });
+  const h=harness(request,{prefetchLocalSpeech:true});await h.audio.play();h.handles[0].input.onEnded();
+  next.reject(Error('request_in_progress'));await vi.waitFor(()=>expect(h.onError).toHaveBeenCalledOnce());
+  expect(calls).toBe(2);expect(h.audio.getSnapshot().status).toBe('silent');h.audio.dispose();
+ });
+ it('ignores rejection of an old aborted prefetch after a newer one has succeeded',async()=>{
+  const old=deferred<Blob>();let calls=0;
+  const request=vi.fn<AudioCoordinatorOptions['requestSpeech']>(async(text)=>{
+   if(text==='第二句。'&&++calls===1)return old.promise;
+   return new Blob(['fresh']);
+  });
+  const h=harness(request,{prefetchLocalSpeech:true});await h.audio.play();h.audio.pause();await h.audio.resume();
+  old.reject(Error('old cancelled'));await tick();h.handles[0].input.onEnded();
+  await vi.waitFor(()=>expect(h.handles).toHaveLength(2));
+  expect(calls).toBe(2);expect(h.onError).not.toHaveBeenCalled();h.audio.dispose();
+ });
 });

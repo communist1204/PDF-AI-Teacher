@@ -40,6 +40,9 @@ export type AudioCoordinatorOptions = {
   onError: (message: string) => void;
   onComplete?: (event: AudioCompletion) => void;
   playbackAdapter?: PlaybackAdapter;
+  generatedSpeechRate?: number;
+  /** Only enable for a free local engine. Never speculatively generate paid speech. */
+  prefetchLocalSpeech?: boolean;
 };
 
 // The input state stays orthogonal to the single output owner.
@@ -63,7 +66,7 @@ function validTarget(value: PdfTarget): boolean {
   return SourceSchema.safeParse(value).success && (value.imageDataUrl === undefined || (typeof value.imageDataUrl === 'string' && value.imageDataUrl.length <= 3000000 && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(value.imageDataUrl)));
 }
 
-/** One owner, one current sentence, no speculative pre-generation. */
+/** One owner, one current sentence, no speculative paid generation. */
 export class AudioCoordinator {
   private state: AudioState = { status: 'silent', channel: 'source', teachingStepId: null, error: null, sentenceIndex: 0, sentences: [], cursor: null, hasBookmark: false, mode: 'demo', rate: 1, volume: 1 };
   private target: PdfTarget | null = null;
@@ -73,6 +76,7 @@ export class AudioCoordinator {
   private active: PlaybackHandle | null = null;
   private externalOutput: { stop: () => void } | null = null;
   private request: AbortController | null = null;
+  private prefetched: { text: string; envelope: Envelope; controller: AbortController; promise: Promise<Blob> } | null = null;
   private epoch = 0;
   private playbackAttempt = 0;
   private disposed = false;
@@ -146,6 +150,8 @@ export class AudioCoordinator {
     this.epoch += 1;
     this.request?.abort();
     this.request = null;
+    this.prefetched?.controller.abort();
+    this.prefetched = null;
     const previous = this.active;
     const external = this.externalOutput;
     this.active = null;
@@ -244,12 +250,14 @@ export class AudioCoordinator {
 
   private async startSentence(): Promise<void> {
     if (this.disposed || !this.envelope) return;
+    const cached = this.prefetched?.text === this.state.sentences[this.state.sentenceIndex]?.speechText && sameEnvelope(this.prefetched.envelope, this.envelope) ? this.prefetched : null;
+    if (cached) this.prefetched = null;
     this.cancel();
     const token = this.epoch;
     const envelope = { ...this.envelope };
     const sentence = this.state.sentences[this.state.sentenceIndex];
     if (!sentence) return;
-    const request = new AbortController();
+    const request = cached?.controller ?? new AbortController();
     this.request = request;
     const valid = () => !this.disposed && token === this.epoch && !!this.envelope && sameEnvelope(envelope, this.envelope) && !request.signal.aborted;
     let started = false;
@@ -260,10 +268,16 @@ export class AudioCoordinator {
     this.emit();
     try {
       const rate = this.state.rate;
-      const blob = this.state.mode === 'live' ? await this.options.requestSpeech(sentence.speechText, envelope, rate, request.signal) : undefined;
+      let blob: Blob | undefined;
+      if (this.state.mode === 'live') {
+        // Speculative local work may fail while an aborted request is draining.
+        // A failed lookahead must not become the foreground sentence's result.
+        if (cached) { try { blob = await cached.promise; } catch { if (!valid()) return; } }
+        if (!blob && valid()) blob = await this.options.requestSpeech(sentence.speechText, envelope, rate, request.signal);
+      }
       if (!valid()) return;
       const handle = await this.adapter.create({
-        mode: this.state.mode, text: sentence.speechText, blob, rate, volume: this.state.volume, signal: request.signal,
+        mode: this.state.mode, text: sentence.speechText, blob, rate, generatedRate: this.options.generatedSpeechRate, volume: this.state.volume, signal: request.signal,
         onStarted: () => { if (valid() && this.state.status !== 'paused') { started = true; this.state.status = 'speaking'; this.emit(); } },
         onEnded: () => {
           if (!valid() || !started) return;
@@ -280,7 +294,7 @@ export class AudioCoordinator {
       handle.setRate(this.state.rate);
       handle.setVolume(this.state.volume);
       const attempt = ++this.playbackAttempt;
-      try { await handle.play(); }
+      try { await handle.play(); if (valid()) this.prefetchNext(); }
       catch (error) {
         // pause() can reject an in-flight HTMLMediaElement.play() Promise.
         // A later resume owns a new attempt; neither case is a playback failure.
@@ -293,14 +307,27 @@ export class AudioCoordinator {
     }
   }
 
+  private prefetchNext() {
+    if (!this.options.prefetchLocalSpeech || this.state.mode !== 'live' || this.state.status !== 'speaking' || !this.envelope || this.prefetched || this.disposed) return;
+    const next = this.state.sentences[this.state.sentenceIndex + 1];
+    if (!next) return;
+    const controller = new AbortController();
+    const envelope = { ...this.envelope };
+    const promise = this.options.requestSpeech(next.speechText, envelope, this.state.rate, controller.signal);
+    const entry = { text: next.speechText, envelope, controller, promise };
+    this.prefetched = entry;
+    // Leave failures to a normal foreground attempt, without automatic loops.
+    void promise.catch(() => { if (this.prefetched === entry) this.prefetched = null; });
+  }
+
   private finishedSentence() {
     const next = this.state.sentenceIndex + 1;
     const completion: AudioCompletion | null = this.envelope ? { channel: this.state.channel, stepId: this.state.teachingStepId, envelope: { ...this.envelope } } : null;
-    this.cancel();
     if (next < this.state.sentences.length) {
       this.state.sentenceIndex = next;
       void this.startSentence();
     } else {
+      this.cancel();
       if (this.state.channel === 'source') this.sourceBookmark = null;
       this.state.status = 'silent';
       this.state.hasBookmark = false;
@@ -327,6 +354,8 @@ export class AudioCoordinator {
       return;
     }
     if (this.disposed || (this.state.status !== 'speaking' && this.state.status !== 'buffering')) return;
+    this.prefetched?.controller.abort();
+    this.prefetched = null;
     if (this.active) {
       this.playbackAttempt += 1;
       this.active.pause();
@@ -343,7 +372,7 @@ export class AudioCoordinator {
       this.state.status = 'buffering';
       this.emit();
       const attempt = ++this.playbackAttempt;
-      try { await this.active.play(); }
+      try { await this.active.play(); if (token === this.epoch) this.prefetchNext(); }
       catch (error) { if (token === this.epoch && attempt === this.playbackAttempt) this.fail(error instanceof Error ? `无法继续播放：${error.message}` : '无法继续播放，请重试。'); }
       return;
     }

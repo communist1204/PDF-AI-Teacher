@@ -323,6 +323,36 @@ describe('mocked live provider lifecycle (no paid calls)', () => {
 });
 
 describe('provider protocol and bounded cache', () => {
+  it.each([
+    ['credit_balance_exhausted', 'insufficient_quota', 'provider_quota', '可用余额不足'],
+    ['project_spend_limit_exceeded', 'insufficient_quota', 'provider_quota', '项目已达到'],
+    ['organization_spend_limit_exceeded', 'insufficient_quota', 'provider_quota', '组织已达到 API 支出'],
+    ['organization_usage_limit_exceeded', 'insufficient_quota', 'provider_quota', '组织已达到 API 用量'],
+    ['insufficient_quota', null, 'provider_quota', 'API 额度不足'],
+    [null, 'insufficient_quota', 'provider_quota', 'API 额度不足'],
+    ['rate_limit_exceeded', 'rate_limit_error', 'provider_rate_limit', '请求过于频繁'],
+    ['slow_down', 'rate_limit_error', 'provider_rate_limit', '请求过于频繁'],
+    [null, 'rate_limit_error', 'provider_rate_limit', '请求过于频繁'],
+    ['unknown-private-code', null, 'provider_limit_unknown', '尚不能确定'],
+    [null, null, 'provider_limit_unknown', '尚不能确定'],
+  ])('classifies TTS 429 %s / %s through the real SDK without paid calls or retries', async (code, type, expected, hint) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: { code, type, message: 'sk-sensitive-private-pdf-content' } }), {
+      status: 429, headers: { 'content-type': 'application/json', 'x-request-id': 'req_sdk_tts_error' },
+    }));
+    const app = createApp({ config: liveConfig(), fetch: fetchMock as typeof fetch });
+    const client = await browser(app);
+    const result = await post(app, client, '/api/tts', { text: '测试一个短句。', speed: 1 });
+    expect(result.status).toBe(expected === 'provider_quota' ? 502 : 503);
+    expect(result.body).toMatchObject({ error: expected, requestId: 'req_sdk_tts_error' });
+    expect(result.body.message).toContain(hint);
+    expect(result.text).not.toMatch(/sk-sensitive|private-pdf-content|unknown-private-code|Authorization/);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const records = (await usage(app, client)).body.records;
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ category: 'tts', requestId: 'req_sdk_tts_error', estimatedCost: null });
+    expect((await browser(app)).config.capabilities.tts).not.toBe('supported');
+  });
+
   it('sends exact selected speech text to the documented TTS SDK endpoint without rewriting', async () => {
     let sent!: Record<string, unknown>;
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {

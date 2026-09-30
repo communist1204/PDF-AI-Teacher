@@ -6,6 +6,7 @@ import { REALTIME_IDLE_SECONDS, REALTIME_MAX_SESSION_SECONDS, RealtimeConnectReq
 import { OpenAIRealtimeProvider, RealtimeConnections, realtimeCapability, type RealtimeProvider } from './realtime';
 import { validateRecording } from './recording';
 import { AudioCache } from './cache';
+import type { LocalTtsProvider } from './localTts';
 import { DEFAULT_TTS_STYLE, readConfig, TTS_SOURCE_FIDELITY, type ServerConfig } from './config';
 import { makeDemoPlan } from './demo';
 import { HttpError, providerError, safeRequestId } from './errors';
@@ -31,7 +32,7 @@ function setEnvelope(res: Response, envelope: Envelope) {
 }
 function cancelledError() { return new HttpError(409, 'cancelled', '本次任务已取消，旧结果不会继续使用；已发生的服务用量可能仍会计费。'); }
 
-export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; realtimeProvider?: RealtimeProvider; chatGptAuth?: ChatGptCredentials; fetch?: typeof fetch; now?: () => number } = {}) {
+export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; localTts?: Pick<LocalTtsProvider, 'ready' | 'speak' | 'dispose'>; realtimeProvider?: RealtimeProvider; chatGptAuth?: ChatGptCredentials; fetch?: typeof fetch; now?: () => number } = {}) {
   const config = options.config ?? readConfig();
   const now = options.now ?? Date.now;
   const app = express();
@@ -39,6 +40,10 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
   app.set('trust proxy', false);
   const sessions = new Map<string, Session>();
   const cache = new AudioCache(config.cacheMaxBytes);
+  const usingLocalTts = config.ttsEngine === 'local';
+  const localReady = usingLocalTts && !!options.localTts?.ready();
+  const usingSystemTts = config.ttsEngine === 'system';
+  const ttsModel = usingLocalTts ? 'Kokoro-82M-v1.1-zh' : usingSystemTts ? 'Windows 本机语音' : config.ttsModel;
   const usingChatGpt = config.authMode === 'chatgpt';
   const teachingConfigured = !config.demoMode && (usingChatGpt ? Boolean(options.chatGptAuth) : Boolean(config.apiKey));
   const provider = options.provider ?? (!config.demoMode && usingChatGpt && options.chatGptAuth ? new ChatGptTeachingProvider(config, options.chatGptAuth, options.fetch) : !config.demoMode && config.apiKey && !usingChatGpt ? new OpenAITeachingProvider(config, undefined, options.fetch) : undefined);
@@ -49,7 +54,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     text: teachingConfigured && config.chatModel ? 'untested' : 'unconfigured',
     vision: teachingConfigured && config.visionModel ? 'untested' : 'unconfigured',
     structuredOutput: teachingConfigured && (config.chatModel || config.visionModel) ? 'untested' : 'unconfigured',
-    tts: !config.demoMode && config.apiKey && config.ttsModel ? 'untested' : 'unconfigured',
+    tts: usingLocalTts ? (localReady ? 'untested' : 'unconfigured') : usingSystemTts ? 'untested' : !config.demoMode && config.apiKey && config.ttsModel ? 'untested' : 'unconfigured',
     transcription: !config.demoMode && config.apiKey && config.transcriptionModel ? 'untested' : 'unconfigured', realtimeAudio: realtimeState, realtimeTools: realtimeState, interruption: realtimeState,
   };
   const mode: AppConfig['mode'] = config.demoMode ? 'demo' : (teachingConfigured && (config.chatModel || config.visionModel)) || (config.apiKey && (config.ttsModel || config.transcriptionModel || config.realtimeModel)) ? 'live' : 'unconfigured';
@@ -151,11 +156,13 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     }
     session.touchedAt = now();
     res.cookie(SESSION_COOKIE, session.id, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: SESSION_TTL });
-    const body: AppConfig = { authMode: usingChatGpt ? 'chatgpt' : 'api_key', mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: config.ttsModel, transcription: config.transcriptionModel, realtime: config.realtimeModel }, realtime: { provider: 'openai-realtime', voice: config.realtimeVoice, maxSessionSeconds: REALTIME_MAX_SESSION_SECONDS, idleSeconds: REALTIME_IDLE_SECONDS, inputTranscriptionModel: config.realtimeTranscriptionModel }, teaching: { chatReasoningEffort: config.chatReasoningEffort, visionReasoningEffort: config.visionReasoningEffort, maxOutputTokens: config.teachingMaxOutputTokens, timeoutMs: config.teachingTimeoutMs }, speech: {
+    const body: AppConfig = { authMode: usingChatGpt ? 'chatgpt' : 'api_key', mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: ttsModel, transcription: config.transcriptionModel, realtime: config.realtimeModel }, realtime: { provider: 'openai-realtime', voice: config.realtimeVoice, maxSessionSeconds: REALTIME_MAX_SESSION_SECONDS, idleSeconds: REALTIME_IDLE_SECONDS, inputTranscriptionModel: config.realtimeTranscriptionModel }, teaching: { chatReasoningEffort: config.chatReasoningEffort, visionReasoningEffort: config.visionReasoningEffort, maxOutputTokens: config.teachingMaxOutputTokens, timeoutMs: config.teachingTimeoutMs }, speech: {
       voice: config.ttsVoice,
       style: !config.ttsInstructionsSupported ? '使用模型默认语气' : config.ttsInstructions === [DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') ? '自然温和，按语义停顿' : '本机自定义语气',
       instructionsSupported: config.ttsInstructionsSupported,
     }, maxRequests: config.maxRequests };
+    if (usingLocalTts || usingSystemTts) body.speech = { engine: config.ttsEngine, ready: usingSystemTts || localReady, voice: usingLocalTts ? config.localTtsVoice ?? 'zf_001' : '系统所选声音', style: usingLocalTts ? '本地中文语音；不使用语气提示词' : '系统默认', instructionsSupported: false };
+    else if (config.ttsEngine) body.speech!.engine = config.ttsEngine;
     res.json(body);
   });
 
@@ -215,19 +222,24 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     const request = parsed.data;
     checkFresh(session, request);
     setEnvelope(res, request);
-    if (config.demoMode) throw new HttpError(409, 'demo_tts', '演示模式未调用付费 TTS。请使用明确标注的浏览器演示语音，或在本机配置真实 TTS。');
-    if (!config.apiKey || !config.ttsModel || !provider) throw new HttpError(503, 'not_configured', usingChatGpt ? 'ChatGPT 登录用于解题。自然朗读还需要独立语音 API Key；尚未调用任何语音接口。' : 'TTS 模型或 API Key 未配置；未自动切换语音服务。');
-    const cacheKey = cache.key(session.id, [config.baseUrl, speechRequest(config, request.text, request.speed)]);
+    if (usingSystemTts) throw new HttpError(409, 'system_tts', '当前选择系统本机声音，不调用语音 API。');
+    if (usingLocalTts && !localReady) throw new HttpError(503, 'local_tts_missing', '免费本地声音包未就绪。请修复或重新安装本软件的本地声音包；没有调用付费 API。');
+    if (!usingLocalTts && config.demoMode) throw new HttpError(409, 'demo_tts', '演示模式未调用付费 TTS。请使用明确标注的浏览器演示语音，或在本机配置真实 TTS。');
+    if (!usingLocalTts && (!config.apiKey || !config.ttsModel || !provider)) throw new HttpError(503, 'not_configured', usingChatGpt ? 'ChatGPT 登录用于解题。OpenAI 朗读还需要独立语音 API Key，也可以在设置中选择免费本地朗读。' : 'TTS 模型或 API Key 未配置；未自动切换语音服务。');
+    const contentType = usingLocalTts ? 'audio/wav' : 'audio/mpeg';
+    const cacheKey = cache.key(session.id, usingLocalTts ? ['local', ttsModel, config.localTtsVoice, request.text] : [config.baseUrl, speechRequest(config, request.text, request.speed)]);
     const cached = cache.get(cacheKey);
-    if (cached) { res.set('x-audio-cache', 'hit').type('audio/mpeg').send(cached); return; }
-    consumeRequest(session);
-    const usage = newUsage(session, config.ttsModel, 'tts', request.text.length);
-    const result = await runJob(session, request, req, res, usage, signal => provider.speak(request.text, request.speed, signal));
+    if (cached) { res.set('x-audio-cache', 'hit').type(contentType).send(cached); return; }
+    // Local CPU speech has no paid session quota. The provider serializes generation.
+    if (!usingLocalTts) consumeRequest(session);
+    const usage = newUsage(session, ttsModel, 'tts', request.text.length);
+    if (usingLocalTts) usage.local = true;
+    const result = await runJob(session, request, req, res, usage, signal => usingLocalTts ? options.localTts!.speak(request.text, request.speed, signal) : provider!.speak(request.text, request.speed, signal));
     if (!result.audio.length || result.audio.length > 8 * 1024 * 1024) throw new HttpError(502, 'invalid_audio', '语音返回为空或超出大小限制，未播放。');
     usage.requestId = safeRequestId(result.requestId) ?? usage.requestId;
     cache.set(session.id, cacheKey, result.audio);
     capabilities.tts = 'supported';
-    res.set({ 'x-audio-cache': 'miss', 'x-request-id': usage.requestId }).type('audio/mpeg').send(result.audio);
+    res.set({ 'x-audio-cache': 'miss', 'x-request-id': usage.requestId }).type(contentType).send(result.audio);
   });
 
   app.post('/api/transcribe', async (req, res) => {
@@ -347,6 +359,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
         cache.clear(session.id);
       }
       sessions.clear();
+      options.localTts?.dispose();
       await Promise.allSettled(activeIds.map(id => realtimeConnections.disconnect(id)));
     })();
     return disposing;

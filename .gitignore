@@ -15,3 +15,7 @@ release/
 .electron-cache/
 .desktop-data/
 *.lnk
+
+models/
+.model-cache/
+local-tts-runtime/

@@ -332,11 +332,11 @@ test('取消选区丢弃迟到回答，并可清除正在拖动的框',async({pa
 
 test('声音设置明确区分本机演示和自然语音模型',async({page})=>{
   await page.goto('/');
-  await expect(page.locator('.audio-kind')).toHaveText('本机合成语音 · 演示');
+  await expect(page.locator('.audio-kind')).toHaveText('系统基本语音 · 免费');
   await page.getByRole('button',{name:'声音设置',exact:true}).click();
   const dialog=page.getByRole('dialog');
-  await expect(dialog).toContainText('自然语音模型尚未连接');
-  await expect(dialog).toContainText('TTS_MODEL=gpt-4o-mini-tts');
+  await expect(dialog).toContainText('系统基本语音');
+  await expect(dialog).toContainText('当前朗读免费，不消耗 OpenAI API 额度');
   await expect(dialog).toContainText('仅用打字提问和朗读，不需要配置转写或 Realtime');
   await expect(dialog).toContainText('Realtime：未配置');
   await expect(dialog).toContainText('实际语音效果待真人验收');

@@ -200,3 +200,36 @@ OAuth Responses 使用 store=false、stream=true、input 数组与 instructions�
 使用独立非持久化 provider session，强制 credentials=omit、cache=no-store、redirect=error，保留 AbortSignal 与流式 Response。网页登录 cookie 不作为凭证；OAuth 仍使用自己的 PKCE、state、nonce 与经验证的令牌。注入点覆盖 auth discovery/token/JWKS/refresh/models、ChatGPT Responses、独立 API Key 的问答/TTS/转写与可选 Realtime，网页开发版默认网络方式不变。SDK通过显式 Response 构造器识别 FormData，避免 Chromium 不支持的 data: 探测。
 
 登录等待/失败/成功/取消紧邻按钮并使用 live region；错误出现滚到反馈处，720p 可见。预检失败明确说明登录页尚未打开、HTTP 状态，不回显上游 HTML。保留失败后重试，不因失败切换计费路线。[OpenAI 官方登录流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) 的授权/验证步骤未缩减。
+
+
+## 免费本地 TTS 的选择与实现（2026-09-30）
+
+### 质量目标与方案比较
+
+用户的重点是中文陪读的自然语气与句读，理论回答继续交给单独的强推理模型。用户允许查找免费项目并接入；未授权付费对比请求，也未授权改变现有科研运行环境。
+
+| 方案 | 官方核验与本轮决定 |
+|---|---|
+| [Kokoro-82M-v1.1-zh](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh) + [sherpa-onnx](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/kokoro.html) | 82M、多中文音色、24kHz；可用官方 Node CPU 推理，Windows不需Python/GPU，适合现有桌面包。选为可直接落地试听的轻量方案。作者也说明此版本有训练和声音质量限制，不把它宣传为最高音质。 |
+| [Qwen3-TTS-12Hz-1.7B-CustomVoice](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice) / [官方源码](https://github.com/QwenLM/Qwen3-TTS) | 支持中文及自然语言风格控制，更符合用户对语气的长期要求。官方指令控制评测有超过gpt-4o-mini-tts的项目，但不是本机试听、不是全维度音质胜出。约4.52GB权重并需独立Python/PyTorch运行时；本机CPU速度未测，未安装，不把Qwen ASR误当TTS支持。 |
+| [Fun-CosyVoice3-0.5B](https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512) | 专业语音生成、读音和风格控制值得后续比较，依赖与参考音频流程更复杂，本轮未部署。 |
+
+不采用把 Microsoft Edge 内部朗读端点当作稳定免费 API 的方法，也不依赖未知额度的在线试用。系统声音保留为明确的低配置备用选项，不暗中替代AI声音。最高目标「比OpenAI更好听」须同文同速度真人比较：人声自然度、断句停顿、中文多音字/数字/英文术语、长句、低速听感。六份本地样音已准备，尚无用户评分。Kokoro不支持界面原先给OpenAI的任意风格指令，因此本地设置不展示无效的「朗读语气」输入。
+
+### 固定来源、隔离与播放
+
+安装脚本 scripts/setup-local-tts.mjs 固定下载官方 sherpa 发布的 kokoro-multi-lang-v1_1.tar.bz2（364816464 bytes），SHA256=a3f4c73d043860e3fd2e5b06f36795eb81de0fc8e8de6df703245edddd87dbad；分段恢复、全文件校验后才解压到项目 local-tts-runtime/model。原始档案与大模型目录忽略Git。打包只复制指定模型/运行库/worker/许可，不复制用户数据或Key。模型Apache-2.0、sherpa Apache-2.0、ONNX Runtime MIT；现版本还含espeak-ng GPL组件，完整包不标成纯Apache，许可保留在assets/third-party-tts和软件resources里。详见其中NOTICE.md。
+
+使用独立、隐形的CPU worker，最多两线程；不安装Python、不访问GPU或修改系统代理。子进程不继承API凭证、NODE_OPTIONS或调试参数；超时/取消只结束本实例启动的进程。文本、voice和WAV均有长度与类型验证，失败消息不泄漏路径/文本。模型ready只代表文件存在，最终以实际合成和播放测试验证可用。
+
+真实Electron测试发现两项仅Node单测无法覆盖的差异：跨V8版本的advanced IPC序列化不兼容，以及Electron不支持原生外部ArrayBuffer。改为有界JSON/base64 IPC，严格解码并检查WAV结构；调用sherpa generate时enableExternalBuffer=false。原生库留在asar外，不打入网页。
+
+本地合成固定原始1×，HTMLAudio.playbackRate统一应用速度且preservesPitch=true；缓存不因播放速度重复合成。本地允许提前生成下一句，只有一个输出播放器；付费云模式不预生成。暂停、停止、新问题、换目标取消未使用结果；迟到结果不能复活。保留标点与原文，不用字符串改写伪造更自然的内容；复杂公式仍需原页校对。最低0.25×只保证播放器接受和音高处理开启，不保证极低速自然度。
+
+免费CPU请求记录local=true，不消耗付费API会话预算或显示「可能已计费」。问答、TTS、麦克风能力独立；没登录或DEMO不再拦住本地合成。旧桌面设置自动补充local引擎与zf_001，保留账号、Key和解题模型。OpenAI仍只在用户显式选择且具备Key时使用，无失败自动代付。
+
+### OpenAI 429反馈修正
+
+核对本机SDK与[官方错误说明](https://developers.openai.com/api/docs/guides/error-codes)，SDK请求标识为requestID，旧request_id仅作受限兼容。支持顶层/嵌套code、type，不回显任意响应字段。429按明确code区分余额、项目/组织预算与临时速率；未知429保留原因不明，不直接推断欠费或限流。测试使用真实SDK+本地模拟响应，没有付费调用。
+
+最终复核补充：预生成失败按请求对象身份丢弃，不污染下一句；到达下一句才做普通前台尝试，禁止重试循环。local/system忽略隐藏云TTS语气配置，切回OpenAI仍严格校验。
