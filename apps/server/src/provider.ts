@@ -5,6 +5,8 @@ import type { Response, ResponseInputContent } from 'openai/resources/responses/
 import { TeachingPlanSchema, type AskRequest, type AudioMime } from '../../../packages/shared/protocol';
 import type { ServerConfig } from './config';
 import { HttpError, safeRequestId } from './errors';
+import { ReadingAssistDraftSchema, type ReadingAssistRequest } from '../../../packages/shared/readingAssist';
+import { READING_ASSIST_INSTRUCTIONS, readingAssistContent } from './readingAssistPrompt';
 
 export interface ProviderAnswer {
   plan: unknown;
@@ -13,9 +15,11 @@ export interface ProviderAnswer {
   inputTokens?: number;
   outputTokens?: number;
 }
+export interface ProviderReadingAssist extends Omit<ProviderAnswer, 'plan'> { draft: unknown }
 export interface ProviderAudio { audio: Buffer; requestId?: string }
 export interface ProviderTranscript { text: string; requestId?: string; inputTokens?: number; outputTokens?: number; audioSeconds?: number }
 export interface TeachingProvider {
+  readingAssist?(request: ReadingAssistRequest, model: string, signal: AbortSignal): Promise<ProviderReadingAssist>;
   transcribe(audio: Buffer, mimeType: AudioMime, signal: AbortSignal): Promise<ProviderTranscript>;
   ask(request: AskRequest, model: string, signal: AbortSignal): Promise<ProviderAnswer>;
   speak(text: string, speed: number, signal: AbortSignal): Promise<ProviderAudio>;
@@ -66,6 +70,27 @@ export class OpenAITeachingProvider implements TeachingProvider {
     // Reasoning tokens share the output budget. Never treat a cut-off answer as a complete lesson.
     if (result.status !== 'completed') return { ...usage, plan: null, incompleteReason: result.incomplete_details?.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other' };
     return { ...usage, plan: result.output_parsed };
+  }
+
+  async readingAssist(request: ReadingAssistRequest, model: string, signal: AbortSignal): Promise<ProviderReadingAssist> {
+    signal.throwIfAborted();
+    const effort = request.context.imageDataUrl ? this.config.visionReasoningEffort : this.config.chatReasoningEffort;
+    const result = await this.client.responses.parse({
+      model, store: false, instructions: READING_ASSIST_INSTRUCTIONS,
+      input: [{ role: 'user', content: readingAssistContent(request) }],
+      text: { format: zodTextFormat(ReadingAssistDraftSchema, 'reading_assist') },
+      ...(effort ? { reasoning: { effort } } : {}),
+      max_output_tokens: this.config.teachingMaxOutputTokens,
+    }, { signal, maxRetries: 0, timeout: this.config.teachingTimeoutMs }).catch((error: unknown) => {
+      if (signal.aborted) throw signal.reason;
+      const details = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+      if (details.name === 'ZodError' || details.name === 'SyntaxError') throw new HttpError(502, 'invalid_reading_output', '模型朗读稿未通过结构校验，未使用或播放不完整内容。', safeRequestId(details.requestID));
+      throw error;
+    });
+    signal.throwIfAborted();
+    const usage = { requestId: result._request_id ?? undefined, inputTokens: result.usage?.input_tokens, outputTokens: result.usage?.output_tokens };
+    if (result.status !== 'completed') return { ...usage, draft: null, incompleteReason: result.incomplete_details?.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other' };
+    return { ...usage, draft: result.output_parsed };
   }
 
   async transcribe(audio: Buffer, mimeType: AudioMime, signal: AbortSignal): Promise<ProviderTranscript> {
@@ -168,6 +193,41 @@ export class ChatGptTeachingProvider implements TeachingProvider {
       let plan: unknown;
       try { plan = JSON.parse(text); } catch { throw new HttpError(502, 'invalid_model_output', 'ChatGPT 教案格式无效，未执行板书。请手动重试。', requestId); }
       return { plan, requestId, inputTokens: completed.usage?.input_tokens, outputTokens: completed.usage?.output_tokens };
+    } catch (error) {
+      if (signal.aborted) throw signal.reason;
+      throw chatGptProviderError(error, requestId);
+    }
+  }
+  async readingAssist(request: ReadingAssistRequest, model: string, signal: AbortSignal): Promise<ProviderReadingAssist> {
+    let requestId: string | undefined;
+    try {
+      const token = await this.auth.getAccessToken(signal);
+      signal.throwIfAborted();
+      const client = new OpenAI({ apiKey: token, baseURL: 'https://api.openai.com/v1', fetch: this.fetcher, maxRetries: 0, timeout: this.config.teachingTimeoutMs });
+      const effort = request.context.imageDataUrl ? this.config.visionReasoningEffort : this.config.chatReasoningEffort;
+      // Match the existing ChatGPT plan transport; do not send API-only budget fields.
+      const { data: stream, response } = await client.responses.create({
+        model, store: false, stream: true, instructions: READING_ASSIST_INSTRUCTIONS,
+        input: [{ role: 'user', content: readingAssistContent(request) }],
+        text: { format: zodTextFormat(ReadingAssistDraftSchema, 'reading_assist') },
+        ...(effort ? { reasoning: { effort } } : {}),
+      }, { signal, maxRetries: 0, timeout: this.config.teachingTimeoutMs }).withResponse();
+      requestId = safeRequestId(response.headers.get('x-request-id'));
+      let completed: Response | undefined;
+      for await (const event of stream) {
+        signal.throwIfAborted();
+        if (event.type === 'response.failed') throw chatGptProviderError(event.response.error, requestId);
+        if (event.type === 'error') throw chatGptProviderError(event, requestId);
+        if (event.type === 'response.incomplete') return { draft: null, incompleteReason: event.response.incomplete_details?.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other', requestId, inputTokens: event.response.usage?.input_tokens, outputTokens: event.response.usage?.output_tokens };
+        if (event.type === 'response.completed') completed = event.response;
+      }
+      signal.throwIfAborted();
+      if (!completed || completed.status !== 'completed') throw new HttpError(502, 'chatgpt_interrupted_stream', 'ChatGPT 在完成朗读稿之前中断，未使用不完整结果。请手动重试；本次可能已有计划用量。', requestId);
+      const text = completed.output.flatMap(item => item.type === 'message' ? item.content.flatMap(part => part.type === 'output_text' ? [part.text] : []) : []).join('');
+      let draft: unknown = null;
+      // Preserve reported usage even for malformed/refused output; the route rejects null.
+      if (text && text.length <= 100000) { try { draft = JSON.parse(text); } catch { /* validated by the route */ } }
+      return { draft, requestId, inputTokens: completed.usage?.input_tokens, outputTokens: completed.usage?.output_tokens };
     } catch (error) {
       if (signal.aborted) throw signal.reason;
       throw chatGptProviderError(error, requestId);

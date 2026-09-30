@@ -6,6 +6,7 @@ import { AskRequestSchema, EnvelopeSchema, TtsRequestSchema, TranscriptionReques
 import { REALTIME_IDLE_SECONDS, REALTIME_MAX_SESSION_SECONDS, RealtimeConnectRequestSchema, RealtimeConnectionRequestSchema, type RealtimeConnectResponse } from '../../../packages/shared/realtime';
 import { OpenAIRealtimeProvider, RealtimeConnections, realtimeCapability, type RealtimeProvider } from './realtime';
 import { validateRecording } from './recording';
+import { ReadingAssistRequestSchema, ReadingAssistResponseSchema, validateReadingAssist } from '../../../packages/shared/readingAssist';
 import { AudioCache } from './cache';
 import type { LocalTtsProvider } from './localTts';
 import { DEFAULT_TTS_STYLE, readConfig, TTS_SOURCE_FIDELITY, type ServerConfig } from './config';
@@ -223,6 +224,50 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     res.json(answer);
   });
 
+  app.post('/api/reading-assist', async (req, res) => {
+    const session = requireMutation(req);
+    const parsed = ReadingAssistRequestSchema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, 'invalid_request', '朗读整理的选区或上下文格式不正确，或超出长度限制。');
+    const request = parsed.data;
+    if (request.context.sources.some(source => source.documentId !== request.context.documentId) || new Set(request.context.sources.map(source => source.sourceId)).size !== request.context.sources.length) throw new HttpError(400, 'context_mismatch', '本次朗读选区必须来自同一本书，且来源不能重复。');
+    if (request.context.sources.reduce((sum, source) => sum + source.sourceText.length, 0) > 24000) throw new HttpError(400, 'context_too_large', '朗读选区超过 24000 字，请缩小选区；没有静默裁剪。');
+    if (!request.context.imageDataUrl && request.context.sources.every(source => !source.sourceText.trim())) throw new HttpError(400, 'empty_reading_source', '没有可整理的原文或框选图片。');
+    if (request.context.imageDataUrl) {
+      const start = Buffer.from(request.context.imageDataUrl.slice('data:image/png;base64,'.length, 'data:image/png;base64,'.length + 16), 'base64');
+      if (start.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new HttpError(400, 'invalid_image', '截图不是有效的 PNG 图片。');
+    }
+    checkFresh(session, request);
+    setEnvelope(res, request);
+    if (config.demoMode) throw new HttpError(409, 'demo_reading_assist', '演示模式不调用模型整理朗读稿，也不提供模拟识别；请登录 ChatGPT 或配置文字模型。');
+    const model = request.context.imageDataUrl ? config.visionModel : config.chatModel;
+    if (usingChatGpt && (!options.chatGptAuth || !model || !provider)) throw new HttpError(503, 'chatgpt_not_configured', '请在桌面设置中登录 ChatGPT、选择可用模型并应用设置；没有使用演示稿替代。');
+    if (!teachingConfigured || !model || !provider) throw new HttpError(503, 'not_configured', request.context.imageDataUrl ? '视觉模型或 API Key 未配置，未识别截图。' : '文字模型或 API Key 未配置；可在桌面设置中登录 ChatGPT 或在本机配置 API。');
+    if (!provider.readingAssist) throw new HttpError(503, 'reading_assist_unsupported', '当前模型适配器尚不支持朗读稿整理，未改用解题回答或其他服务。');
+    // A duplicate does not spend the local request budget or create a fictitious usage row.
+    if ([...session.jobs].some(job => !job.controller.signal.aborted)) throw new HttpError(409, 'request_in_progress', '已有任务正在生成，请等待完成或先停止。');
+    consumeRequest(session);
+    const usage = newUsage(session, model, 'text');
+    const result = await runJob(session, request, req, res, usage, signal => provider.readingAssist!(request, model, signal), config.teachingTimeoutMs);
+    usage.requestId = safeRequestId(result.requestId) ?? usage.requestId;
+    usage.inputTokens = Number.isSafeInteger(result.inputTokens) && result.inputTokens! >= 0 ? result.inputTokens! : null;
+    usage.outputTokens = Number.isSafeInteger(result.outputTokens) && result.outputTokens! >= 0 ? result.outputTokens! : null;
+    if (result.incompleteReason) {
+      capabilities.structuredOutput = 'error';
+      throw new HttpError(502, 'incomplete_model_output', result.incompleteReason === 'max_output_tokens'
+        ? '朗读稿达到模型输出上限，未使用截断结果；请缩小选区后重试，本次可能已有用量。'
+        : '模型未完成朗读稿整理，未使用不完整结果；请手动重试，本次可能已有用量。', safeRequestId(result.requestId));
+    }
+    let draft;
+    try { draft = validateReadingAssist(result.draft, request); }
+    catch {
+      capabilities.structuredOutput = 'error';
+      throw new HttpError(502, 'invalid_reading_output', '模型朗读稿未通过结构、长度或上下文校验，未开始朗读；请缩小选区后重试。', safeRequestId(result.requestId));
+    }
+    capabilities[request.context.imageDataUrl ? 'vision' : 'text'] = 'supported';
+    capabilities.structuredOutput = 'supported';
+    const answer = ReadingAssistResponseSchema.parse({ sessionId: request.sessionId, generationId: request.generationId, ...draft, usage });
+    res.json(answer);
+  });
   app.post('/api/tts', async (req, res) => {
     const session = requireMutation(req);
     const parsed = TtsRequestSchema.safeParse(req.body);
