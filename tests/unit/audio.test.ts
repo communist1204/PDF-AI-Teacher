@@ -54,9 +54,9 @@ describe('sentence source fidelity', () => {
     const sentences = splitSentences(text);
     expect(sentences).toHaveLength(2);
     expect(sentences.map(value => value.sourceText).join('')).toBe(text);
-    expect(sentences[0].speechText).toBe('参数 beta 一的 t 次方，值 0.9。');
-    expect(sentences[1].speechText).toBe('损失 L 对参数 w 的偏导 是偏导。');
-    expect(toSpeechText(String.raw`\frac{\partial L}{\partial w}`)).toBe('损失 L 对参数 w 的偏导');
+    expect(sentences[0].speechText).toBe('参数 贝塔 下标 一 的 t 次方，值 0.9。');
+    expect(sentences[1].speechText).toBe('大写 L 对 w 的偏导数 是偏导。');
+    expect(toSpeechText(String.raw`\frac{\partial L}{\partial w}`)).toBe('大写 L 对 w 的偏导数');
     expect(requiresFormulaConfirmation('β_1^t')).toBe(false);
     expect(requiresFormulaConfirmation('x^2 + ∫f(x)dx')).toBe(true);
   });
