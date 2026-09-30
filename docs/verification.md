@@ -412,3 +412,30 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 人耳自然度、语义重音/多音字/专业符号准确性、长书20分钟稳定听感，以及与OpenAI/豆包/腾讯的同文盲听比较仍未验收。云TTS、真实专业解题账号与付费接口未测、未产生付费请求。更高倍速只验证播放器与音高保持开关，不承诺3×同样自然或可懂。可试听[当前Uncle Fu GPU样音](audio/qwen-gpu-uncle_fu.wav)、[GPU教材长句](audio/qwen-gpu-desktop-long.wav)。
 
 最少操作：已经正常重开软件，打开PDF重新选一段→朗读所选；底部语速可选0.25–3×。以后双击原桌面图标即可，不需Key、终端或重新安装。开发者：npm.cmd run dev；重建桌面npm.cmd run desktop:package；GPU本机编译npm.cmd run tts:build:qwen:cuda；真实复验node scripts/verify-qwen-desktop.mjs --device cuda --long --rate 3。
+
+
+## 原位变速、公式朗读与官方豆包适配验收（2026-09-30 23:50）
+
+| 检查 | 结果与范围 |
+|---|---|
+| npm.cmd test | 最终26文件、664/664通过（23:42，1.78秒）；含有界数学解析/整段管线/Unicode上下标/中央输出拦截、独立云TTS和凭证迁移 |
+| npm.cmd run typecheck / lint | 完整通过；只读和脚本改动后再次定向检查 |
+| npm.cmd run test:e2e | 最终83/83通过（48.2秒），真实Edge页面/鼠标PDF选区；模型、云响应和大部分声音使用明确mock |
+| npm.cmd run desktop:package | 最终生产网页、Electron构建和打包通过；已有大chunk提示与开发Vite HMR弃用提示保留 |
+| node scripts/verify-speech-continuity.mjs --save-wav | 最终exe、隔离无Key profile、真实Qwen CUDA/UncleFu、静音HTMLAudio，32.437秒完整通过，0页面错误、0renderer云请求 |
+| 原位变速 | 1→2时currentTime0.826215→0.843632；2→0.5时1.494972→1.495544；0.5→3时1.757437→1.778455，始终同一Audio，无seek、无同句重生成 |
+| 三句连播 | 118/51/48字符分别只一次生成；首句32.72秒原速音频。后两次3×自然ended→playing为14.2ms和14.4ms；这是播放器交接，不含音频内部的静音停顿 |
+| 公式真实管线 | 原文「式子为 $\frac{1}{1-\beta^t}$。」送入Qwen前变成「式子为 分数开始，分子为一，分母为一 减 贝塔 的 t 次方，分数结束。」；原字幕保留LaTeX。实际生成453164字节、9.44秒WAV |
+| 豆包服务 | 41 provider合同测试+新集成/vault/UI回归；固定官方host、无Key不请求、不回退、取消/超时/额度错误、跨速度缓存、未知字符用量null通过。真实免费额度、接口连通性、音质均未测 |
+| 发布包核验 | CUDA exe/两份cuBLAS DLL/两份GGUF及CPU exe哈希通过；7份许可；asar288项不含私有配置或临时音频，见speech-package.json |
+| 正常启动 | 原用户profile重开，仅移除启动子进程的ELECTRON_RUN_AS_NODE，未改变系统环境；无debug/test参数，无自动朗读或提问。正常窗口标题与响应见speech-running.json |
+
+实际查看了[公式预览](screenshots/math-reading-preview-720.png)、[未知公式校对](screenshots/math-reading-review-720.png)、[豆包设置](screenshots/doubao-settings-720.png)与[真实GPU变速页面](screenshots/speech-rate-change-720.png)。1280×720逻辑窗口可滚动，上一句/下一句和速度可操作；Electron在本机1.5DPI保存的截图为1920×1080物理像素。设置截图中凭证状态来自测试bridge，不能当作真实豆包已配置。
+
+证据：[真实连续播放报告](speech-continuity.json)、[发布包核验](speech-package.json)、[第一句样音](audio/speech-continuity-first.wav)、[第二句](audio/speech-continuity-2.wav)、[第三句](audio/speech-continuity-3.wav)、[公式样音](audio/speech-formula.wav)。真人听感和发音正确性未验收，样音不证明“优于OpenAI”。此轮没有付费请求。
+
+过程失败保留：第一轮全E2E为67过/14失败，7项旧文案、整页公式checkbox旧流程、后段会话容量耗尽导致页面无配置。开发StrictMode的并发getConfig曾创建重复会话，已合并仅在途初始化请求（不提高128会话上限），补成功/失败后可重新获取状态测试。整页PDF中的丢失帽符NUL不允许直接读，原测试改为验证真实校对流程，未删除覆盖。第二轮81过/2失败：一处测试文本替换未落盘已修；另一处刷新后未等待配置mock完成即销毁context，现等待实际声音状态后结束。两文件19项定向复验全过，最终83全过。测试失败截图/上下文保留于.model-cache/speech-e2e-first-failures和执行记录。
+
+真实桌面首轮因720p下目标行未滚入PDF可见区域而拖选失败，0语音请求；保留test-results/speech-continuity-profile中的failed报告。脚本改为先scrollIntoViewIfNeeded后真实鼠标拖选，第二轮完整通过。未降低产品选区或播放断言。正常窗口外的HTTP请求被桌面guard拒绝，未放宽安全配置。
+
+当前边界：OpenAI及系统声音尚沿用原来的句首改速；本地Qwen/Kokoro和豆包支持原位改速。Qwen逐句生成的模型音色/语气变动与音频内部停顿仍不能承诺完全消除。豆包没有凭证所以没有真实试听；不把模拟响应、官方支持LaTeX或14ms软件交接当作自然人声保证。开发启动npm.cmd run dev，双击release/PDF AI Teacher-win32-x64/PDF AI Teacher.exe运行桌面；重建npm.cmd run desktop:package。

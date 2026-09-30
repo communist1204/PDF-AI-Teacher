@@ -265,3 +265,15 @@ PDF 单换行视为物理排版，中文相邻不插空格、拉丁文字保留�
 离线候选[CosyVoice3](https://github.com/QwenAudio/CosyVoice)、[VoxCPM](https://github.com/OpenBMB/VoxCPM)有流式实现，论文/项目硬件延迟不是此Windows本机体验；未安装第二套Python/GPU环境。鉴于当前Qwen GPU已明显加速，先让用户对同文实际试听，再决定是否引入另一个引擎。不能宣称本机音色已超越OpenAI、豆包或腾讯。
 
 3倍速扩展：共享朗读范围0.25–3，UI新增1.75/2/2.5/3并保存；本地始终1×生成、播放器调速/保音高，因此3×不会重复合成或加倍应用速度。云TTS已核对当前SDK及[Speech接口](https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create)支持0.25–4，产品保守开放3；没有付费调用。Realtime保留既有1.5上限，UI说明实际限速，绝不把3发送给实时接口。
+
+
+## 2026-09-30：原位变速、公式转读法和独立豆包语音
+
+- 把声音质量、文本读法和播放控制分开处理。Qwen/Kokoro及豆包生成原速音频，AudioCoordinator只修改同一个HTMLAudio的playbackRate，保留currentTime、暂停状态和下一句预取；OpenAI按供应商速度生成与系统speechSynthesis仍保留原来的句首改速边界，界面分别说明。
+- 不把“音色变化”解释为已发现自动换引擎。现有实现没有自动fallback，但每句独立的生成式合成仍可能声线/语气漂移，高倍速也会缩短下一句准备时间。本轮固定所选voice，不声称仅修改播放器就能消除模型漂移；真人同文比较未完成。
+- 引入有界纯解析器，将明确的LaTeX/Unicode公式转成中文符号读法；分式显式说明分子与分母边界。它不推断字母的理论含义，不恢复PDF丢失的二维结构，不执行LaTeX或外部命令。未知命令/操作数缺失/乱码/不明确分母范围要求校对；取消旧checkbox直接放行原始公式的路径。字幕与书签原文保留，校对窗口显示真正送入TTS的文本。
+- pronunciation/segmentation升级sentence-v3，旧v1/v2书签失效，避免把旧句索引硬套到新分段。已知公式展开过长时同样要求缩短或改写；播放与预取入口均检查。
+- 用户授权联网并优先尝试官方免费额度，增加火山引擎豆包Speech2.0独立可选声音，而不改变专业理论解答模型或当前Qwen GPU/UncleFu设置。专用Key只在本机加密vault/后端环境中保存，public config仅暴露存在状态；OpenAI Key与解题账号独立。
+- 核验依据：[官方HTTP接口](https://docs.volcengine.com/docs/DoubaoVoice/unidirectional-streaming-text-to-speech-http?lang=zh)、[字节官方示例](https://github.com/bytedance/agentkit-samples/blob/main/skills/byted-text-to-speech/scripts/text_to_speech.py)。使用固定openspeech.bytedance.com的V3单向HTTP接口、X-Api-Key、新资源seed-tts-2.0；官方示例同时给出SSE变体，本实现使用NDJSON HTTP变体。公式参数enable_latex_tn/latex_parser=v2保留，但本应用优先发送可审核的中文读法。
+- 云响应有120秒超时/8MiB上限、完整结束帧验证和取消；PCM包成完整WAV。未接前端流式播放，不宣传“秒出声”。未知用量为null，不把原文字数当作供应商账单。无启动/保存自动试听、自动重试、无自动回退、不预生成云端下一句。
+- 没有核实每个新账号的Speech2.0免费额度，不能把旧版免费额度或腾讯其他音色额度套用。界面要求用户在[官方Key控制台](https://console.volcengine.com/speech/new/setting/apikeys)确认服务/音色/免费额度，免费用完可能计费；本软件无法读取云账户余额。当前没有真实豆包凭证与免费额度确认，真实接口和听感待验，不能承诺优于OpenAI。

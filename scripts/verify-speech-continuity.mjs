@@ -127,6 +127,7 @@ async function waitPlaying(index) {
 async function selectSample() {
   await page.getByRole('button', { name: /示例/ }).first().click(); await expect(page.locator('main')).toHaveAttribute('aria-busy', 'false');
   const span = page.locator('.textLayer span').filter({ hasText: '指数移动平均将过去' }).first(); await expect(span).toBeVisible();
+  await span.scrollIntoViewIfNeeded();
   const box = await span.boundingBox(); expect(box).not.toBeNull();
   await page.mouse.move(box.x + 1, box.y + box.height / 2); await page.mouse.down();
   await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 12 }); await page.mouse.up();
@@ -137,7 +138,7 @@ async function enterCorrection(text, checkPreview = false) {
   await page.getByRole('textbox', { name: '确认后的朗读文本', exact: true }).fill(text);
   if (checkPreview) {
     const preview = page.getByTestId('speech-preview');
-    await expect(preview).toBeVisible(); await expect(preview).toContainText('分之'); await expect(preview).not.toContainText('\\frac');
+    await expect(preview).toBeVisible(); await expect(preview).toContainText('分子为'); await expect(preview).not.toContainText('\\frac');
     report.formulaPreview = await preview.textContent();
     await page.screenshot({ path: artifact('formula-preview-720.png'), fullPage: false });
   }
@@ -234,7 +235,7 @@ async function run() {
   await page.getByRole('combobox', { name: '语速', exact: true }).selectOption('1');
   await page.getByRole('button', { name: '朗读所选', exact: true }).click();
   await expect.poll(() => requests.length, { timeout: 15000 }).toBeGreaterThan(formulaRequestCount);
-  const formulaRequest = requests[formulaRequestCount]; expect(formulaRequest.speechText).toContain('分之'); expect(formulaRequest.speechText).toMatch(/[\u3400-\u9fff]/); expect(formulaRequest.speechText).not.toMatch(/\\frac|\\beta|\$|[{}]/);
+  const formulaRequest = requests[formulaRequestCount]; expect(formulaRequest.speechText).toContain('分子为'); expect(formulaRequest.speechText).toMatch(/[\u3400-\u9fff]/); expect(formulaRequest.speechText).not.toMatch(/\\frac|\\beta|\$|[{}]/);
   await waitPlaying(formulaAudioIndex); expect(formulaRequest.status).toBe(200);
   await expect(page.getByTestId('reading-subtitle')).toHaveText(formula);
   report.formula = { source: formula, speechText: formulaRequest.speechText, subtitle: await page.getByTestId('reading-subtitle').textContent(), audio: await saveAudio(formulaAudioIndex, 'formula.wav') };

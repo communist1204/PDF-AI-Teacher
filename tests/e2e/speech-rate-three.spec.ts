@@ -48,7 +48,7 @@ for (const engine of ['local', 'qwen', 'openai'] as const) {
     await rate.selectOption('3'); await expect.poll(async () => (await audioState(page))?.rate).toBe(engine === 'openai' ? 1 : 3);
     await page.getByRole('button', { name: '停止', exact: true }).click();
     await expect.poll(async () => (await audioState(page))?.paused).toBe(true);
-    await page.reload(); await expect(rate).toHaveValue('3');
+    await page.reload(); await expect(page.locator('.audio-kind')).toHaveText(engine==='qwen'?'Qwen3 本地 AI 语音':engine==='local'?'免费本地 AI 合成语音':'OpenAI AI 合成语音 · API 计费'); await expect(rate).toHaveValue('3');
     expect(await page.evaluate(() => (window as unknown as { __rateProbe: AudioProbe }).__rateProbe.elements.length)).toBe(0);
     if (engine === 'qwen') { await page.setViewportSize({ width: 1280, height: 720 }); await page.screenshot({ path: 'test-results/speech-rate-three-720.png', fullPage: true }); }
   });

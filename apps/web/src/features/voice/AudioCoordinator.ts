@@ -257,7 +257,7 @@ export class AudioCoordinator {
     const envelope = { ...this.envelope };
     const sentence = this.state.sentences[this.state.sentenceIndex];
     if (!sentence) return;
-    if (requiresFormulaConfirmation(sentence.sourceText)) { this.fail('这句含有尚不能可靠朗读的公式，请先在「校对朗读文本」中补充中文读法。'); return; }
+    if (sentence.speechText.length > 1400 || requiresFormulaConfirmation(sentence.sourceText)) { this.fail('这句含有尚不能可靠朗读的公式，请先在「校对朗读文本」中补充中文读法。'); return; }
     const request = cached?.controller ?? new AbortController();
     this.request = request;
     const valid = () => !this.disposed && token === this.epoch && !!this.envelope && sameEnvelope(envelope, this.envelope) && !request.signal.aborted;
@@ -311,7 +311,7 @@ export class AudioCoordinator {
   private prefetchNext() {
     if (!this.options.prefetchLocalSpeech || this.state.mode !== 'live' || this.state.status !== 'speaking' || !this.envelope || this.prefetched || this.disposed) return;
     const next = this.state.sentences[this.state.sentenceIndex + 1];
-    if (!next || requiresFormulaConfirmation(next.sourceText)) return;
+    if (!next || next.speechText.length > 1400 || requiresFormulaConfirmation(next.sourceText)) return;
     const controller = new AbortController();
     const envelope = { ...this.envelope };
     const promise = this.options.requestSpeech(next.speechText, envelope, this.state.rate, controller.signal);

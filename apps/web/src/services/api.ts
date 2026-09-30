@@ -1,10 +1,16 @@
 import type { AppConfig, AskRequest, AskResponse, Envelope, TranscriptionRequest, TranscriptionResponse } from '../../../../packages/shared/protocol';
 import { sameEnvelope, TranscriptionResponseSchema, validatePlan } from '../../../../packages/shared/protocol';
 
-export async function getConfig(): Promise<AppConfig> {
-  const response = await fetch('/api/config');
-  if (!response.ok) throw new Error('无法连接本地服务，请确认启动终端仍在运行。');
-  return response.json();
+// Share only concurrent initialization, including development StrictMode's repeated effect.
+// Clear after completion so explicit reconnection still reads fresh session state.
+let pendingConfig: Promise<AppConfig> | undefined;
+export function getConfig(): Promise<AppConfig> {
+  pendingConfig ??= (async () => {
+    const response = await fetch('/api/config');
+    if (!response.ok) throw new Error('无法连接本地服务，请确认软件已启动，或重新打开软件。');
+    return response.json() as Promise<AppConfig>;
+  })().finally(() => { pendingConfig = undefined; });
+  return pendingConfig;
 }
 async function checked(response: Response) {
   if (!response.ok) {
