@@ -1,9 +1,8 @@
 ﻿{
-    "date":  "2026-09-30T03:41:58.2592319Z",
-    "pid":  12132,
+    "date":  "2026-09-30T05:20:17.5729032Z",
+    "pid":  21824,
     "desktopShortcut":  "C:\\Users\\A\\Desktop\\PDF AI Teacher.lnk",
-    "shortcutTargetVerified":  true,
-    "windowHandle":  2426828,
-    "outsideHttpStatus":  403,
-    "debuggingFlags":  false
+    "windowHandle":  460778,
+    "debuggingFlags":  false,
+    "loginNetworkFix":  true
 }

@@ -1,0 +1,10 @@
+﻿import {build} from 'esbuild';
+import {spawn} from 'node:child_process';
+import {mkdir} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import electron from 'electron';
+const file=resolve('test-results','desktop-network-smoke.cjs');await mkdir(resolve('test-results'),{recursive:true});
+await build({entryPoints:['tests/desktop/network-smoke.ts'],outfile:file,bundle:true,platform:'node',format:'cjs',external:['electron'],logLevel:'warning'});
+const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
+const child=spawn(electron,[file,...process.argv.slice(2)],{env,windowsHide:true,stdio:'inherit'});
+process.exitCode=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>resolve(code??1));});

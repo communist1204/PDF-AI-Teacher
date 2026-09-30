@@ -82,6 +82,19 @@ describe('ChatGPT plan Responses adapter (all provider requests mocked)', () => 
 });
 
 describe('ChatGPT local API and desktop disposal (mocked inference)', () => {
+  it('uses the injected desktop transport for both ChatGPT requests and separate TTS', async () => {
+    const calls: Array<{url:string;authorization:string|null}> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      calls.push({url:String(input),authorization:new Headers(init?.headers).get('authorization')});
+      return String(input).endsWith('/audio/speech') ? new Response(new Uint8Array([1,2,3]), {headers:{'Content-Type':'audio/mpeg'}}) : sse([completed()]);
+    };
+    const app = createApp({config:{...config(),apiKey:'fake-separate-audio',ttsModel:'gpt-4o-mini-tts'},chatGptAuth:{getAccessToken:async ()=>'fake-chatgpt-token'},fetch:fetcher});
+    const browser = await client(app);
+    await post(app,browser,'/api/ask',{}).expect(200);
+    await post(app,browser,'/api/tts',{text:'短句',speed:1}).expect(200);
+    expect(calls).toEqual([{url:'https://api.openai.com/v1/responses',authorization:'Bearer fake-chatgpt-token'},{url:'https://api.openai.com/v1/audio/speech',authorization:'Bearer fake-separate-audio'}]);
+    await app.locals.dispose();
+  });
   it('enables teaching without an API key and leaves every audio capability unconfigured', async () => {
     const provider: TeachingProvider = { ask: vi.fn(async () => ({ plan: makeDemoPlan(body) })), speak: vi.fn(), transcribe: vi.fn() };
     const auth = { getAccessToken: vi.fn(async () => 'private-token') };

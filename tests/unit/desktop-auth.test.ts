@@ -105,6 +105,17 @@ describe('desktop ChatGPT OAuth (official endpoints mocked; real local callback 
       expect(h.network.some(call => /backend-api|audio|responses/.test(call.url))).toBe(false);
     } finally { h.manager.dispose(); }
   });
+  it('shows pre-browser HTTP failures without upstream HTML and allows a fresh login retry', async () => {
+    const h = await harness();
+    try {
+      h.fetcher.mockImplementationOnce(async () => new Response('<html>sensitive-network-body</html>', { status: 403, headers: { 'Content-Type': 'text/html' } }));
+      const failed = h.manager.login();
+      await expect(failed).rejects.toThrow('登录页尚未打开：ChatGPT 服务返回了非 JSON 内容（HTTP 403）');
+      await expect(failed).rejects.not.toThrow('sensitive-network-body');
+      expect(h.opened).toHaveLength(0); expect(h.manager.snapshot().status).toBe('signed_out');
+      expect((await h.manager.login()).status).toBe('signed_in'); expect(h.opened).toHaveLength(1);
+    } finally { h.manager.dispose(); }
+  });
   it('serializes rotating refreshes and preserves registration and host across restart', async () => {
     const h = await harness();
     try {

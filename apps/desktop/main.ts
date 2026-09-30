@@ -1,5 +1,5 @@
 /* eslint-disable preserve-caught-error -- IPC errors intentionally omit original causes that may contain credentials. */
-import {app,BrowserWindow,ipcMain,safeStorage,shell,dialog,Menu,type IpcMainInvokeEvent} from 'electron';
+import {app,BrowserWindow,ipcMain,safeStorage,shell,dialog,Menu,session,type IpcMainInvokeEvent} from 'electron';
 import {createServer,type Server} from 'node:http';
 import {join,resolve} from 'node:path';
 import {access} from 'node:fs/promises';
@@ -8,6 +8,7 @@ import express from 'express';
 import {createApp} from '../server/src/app';
 import {SettingsVault,SaveSettingsSchema,serverConfigFor} from './settings';
 import {ChatGptAuthManager,type AuthStore} from './auth';
+import {createDesktopFetch} from './network';
 import type {DesktopSettings} from '../../packages/shared/desktop';
 
 app.setName('PDF AI Teacher');
@@ -42,7 +43,7 @@ function assertSender(event:IpcMainInvokeEvent){
 }
 async function openAuthorization(url:string){
  const parsed=new URL(url);if(parsed.origin!=='https://auth.openai.com'||parsed.pathname!=='/api/accounts/authorize')throw Error('拒绝非官方登录地址。');
- await shell.openExternal(url);
+ try{await shell.openExternal(url);}catch{throw Error('无法打开系统默认浏览器。请检查 Windows 的默认浏览器设置后重试。');}
 }
 async function publicSettings():Promise<DesktopSettings>{
  if(auth.snapshot().status==='signed_in'&&!models.length)await refreshModels();const data=vault.get();const snapshot=auth.snapshot();
@@ -72,14 +73,15 @@ async function shutdown(){
 }
 async function start(){
  await app.whenReady();
+ const desktopFetch=createDesktopFetch(session.fromPartition('pdf-teacher-provider',{cache:false}));
  vault=new SettingsVault(join(app.getPath('userData'),'private-settings.bin'),{available:()=>safeStorage.isEncryptionAvailable(),encrypt:value=>safeStorage.encryptString(value),decrypt:value=>safeStorage.decryptString(value)});
  await vault.load();
- auth=new ChatGptAuthManager({readAuth:async()=>vault.get().auth as AuthStore|null,writeAuth:async value=>{await vault.update({auth:value});},openExternal:openAuthorization});
+ auth=new ChatGptAuthManager({readAuth:async()=>vault.get().auth as AuthStore|null,writeAuth:async value=>{await vault.update({auth:value});},openExternal:openAuthorization,fetch:desktopFetch});
  await auth.initialize();
  const data=vault.get(),prefs=data.preferences;
  const config=serverConfigFor(prefs,data.apiKey,data.port);
  config.authMode=prefs.mode==='chatgpt'?'chatgpt':'api_key';
- localApp=createApp({config,chatGptAuth:prefs.mode==='chatgpt'?{getAccessToken:signal=>auth.getAccessToken(signal)}:undefined});
+ localApp=createApp({config,fetch:desktopFetch,chatGptAuth:prefs.mode==='chatgpt'?{getAccessToken:signal=>auth.getAccessToken(signal)}:undefined});
  const token=(await import('node:crypto')).randomBytes(32).toString('hex');
  const guarded=express();
  guarded.use((req,res,next)=>{if(req.header('x-desktop-instance')!==token){res.status(403).send('此地址仅供 PDF AI Teacher 桌面窗口使用。');return;}next();});
@@ -92,14 +94,14 @@ async function start(){
  origin='http://127.0.0.1:'+data.port;
  mainWindow=new BrowserWindow({width:1500,height:960,minWidth:1050,minHeight:680,title:'PDF AI Teacher',backgroundColor:'#f5f7f2',icon:join(app.getAppPath(),'assets/app.png'),show:false,autoHideMenuBar:true,webPreferences:{preload:join(app.getAppPath(),'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,spellcheck:false,partition:'persist:pdf-teacher'}});
  Menu.setApplicationMenu(null);
- const session=mainWindow.webContents.session;
- session.webRequest.onBeforeSendHeaders({urls:[origin+'/*']},(details,callback)=>{if(details.webContentsId===mainWindow?.webContents.id)details.requestHeaders['x-desktop-instance']=token;callback({requestHeaders:details.requestHeaders});});
+ const windowSession=mainWindow.webContents.session;
+ windowSession.webRequest.onBeforeSendHeaders({urls:[origin+'/*']},(details,callback)=>{if(details.webContentsId===mainWindow?.webContents.id)details.requestHeaders['x-desktop-instance']=token;callback({requestHeaders:details.requestHeaders});});
  mainWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  mainWindow.webContents.on('will-navigate',(event,url)=>{if(url!==origin+'/')event.preventDefault();});
  mainWindow.webContents.on('will-attach-webview',event=>event.preventDefault());
  let microphoneApproved=false;
- session.setPermissionCheckHandler((contents,permission,requestingOrigin,details)=>contents===mainWindow?.webContents&&details.isMainFrame&&requestingOrigin===origin&&(permission==='clipboard-sanitized-write'||(permission==='media'&&microphoneApproved&&details.mediaType==='audio'&&details.securityOrigin===origin)));
- session.setPermissionRequestHandler((contents,permission,callback,details)=>{
+ windowSession.setPermissionCheckHandler((contents,permission,requestingOrigin,details)=>contents===mainWindow?.webContents&&details.isMainFrame&&requestingOrigin===origin&&(permission==='clipboard-sanitized-write'||(permission==='media'&&microphoneApproved&&details.mediaType==='audio'&&details.securityOrigin===origin)));
+ windowSession.setPermissionRequestHandler((contents,permission,callback,details)=>{
   if(contents!==mainWindow?.webContents||!details.isMainFrame||details.requestingUrl!==origin+'/'||contents.getURL()!==origin+'/'){callback(false);return;}
   if(permission==='clipboard-sanitized-write'){callback(true);return;}
   if(permission!=='media'||!('mediaTypes' in details)||!details.mediaTypes?.length||details.mediaTypes.some(type=>type!=='audio')){callback(false);return;}

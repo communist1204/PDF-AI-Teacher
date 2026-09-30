@@ -31,7 +31,7 @@ function setEnvelope(res: Response, envelope: Envelope) {
 }
 function cancelledError() { return new HttpError(409, 'cancelled', '本次任务已取消，旧结果不会继续使用；已发生的服务用量可能仍会计费。'); }
 
-export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; realtimeProvider?: RealtimeProvider; chatGptAuth?: ChatGptCredentials; now?: () => number } = {}) {
+export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; realtimeProvider?: RealtimeProvider; chatGptAuth?: ChatGptCredentials; fetch?: typeof fetch; now?: () => number } = {}) {
   const config = options.config ?? readConfig();
   const now = options.now ?? Date.now;
   const app = express();
@@ -41,9 +41,9 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
   const cache = new AudioCache(config.cacheMaxBytes);
   const usingChatGpt = config.authMode === 'chatgpt';
   const teachingConfigured = !config.demoMode && (usingChatGpt ? Boolean(options.chatGptAuth) : Boolean(config.apiKey));
-  const provider = options.provider ?? (!config.demoMode && usingChatGpt && options.chatGptAuth ? new ChatGptTeachingProvider(config, options.chatGptAuth) : !config.demoMode && config.apiKey && !usingChatGpt ? new OpenAITeachingProvider(config) : undefined);
+  const provider = options.provider ?? (!config.demoMode && usingChatGpt && options.chatGptAuth ? new ChatGptTeachingProvider(config, options.chatGptAuth, options.fetch) : !config.demoMode && config.apiKey && !usingChatGpt ? new OpenAITeachingProvider(config, undefined, options.fetch) : undefined);
   const realtimeState = realtimeCapability(config);
-  const realtimeProvider = options.realtimeProvider ?? (realtimeState === 'untested' ? new OpenAIRealtimeProvider(config) : undefined);
+  const realtimeProvider = options.realtimeProvider ?? (realtimeState === 'untested' ? new OpenAIRealtimeProvider(config, undefined, options.fetch) : undefined);
   const realtimeConnections = new RealtimeConnections(realtimeProvider, now);
   const capabilities: AppConfig['capabilities'] = {
     text: teachingConfigured && config.chatModel ? 'untested' : 'unconfigured',

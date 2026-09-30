@@ -191,3 +191,12 @@ OAuth Responses 使用 store=false、stream=true、input 数组与 instructions�
 首次启动在调用 Electron setPath 前创建本软件专用数据目录，并给出失败提示；不要求预建目录。退出前取消上游任务，在有界等待内排空账号和加密文件写入队列；超时仍不承诺远端撤销或磁盘完成。账号退出使在途模型目录请求失效，避免旧账号数据回填。真实 exe 测试从不存在的 profile 开始，避免预创建目录掩盖首次启动问题。
 
 官方协议细节依据：[登录与动态注册](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[账号模型与推理](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)、[会话与撤销](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)、[预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)。这些资料支持实现选择，不代表本机账号已经授权或真实服务验收通过。
+
+
+## 桌面登录网络与反馈修复（2026-09-30 13:15）
+
+实际复现 Node fetch 请求公开 OIDC discovery 返回 403/HTML；同机 PowerShell 与 Electron Chromium 请求均能得到 200/JSON。错误发生在 openExternal 之前，不能归因于用户没点对按钮。采用 [Electron net/session fetch](https://www.electronjs.org/docs/latest/api/net) 的 Chromium 网络栈与既有系统网络配置；仅应用内注入，不修改全局代理、TLS 校验或系统安全设置。
+
+使用独立非持久化 provider session，强制 credentials=omit、cache=no-store、redirect=error，保留 AbortSignal 与流式 Response。网页登录 cookie 不作为凭证；OAuth 仍使用自己的 PKCE、state、nonce 与经验证的令牌。注入点覆盖 auth discovery/token/JWKS/refresh/models、ChatGPT Responses、独立 API Key 的问答/TTS/转写与可选 Realtime，网页开发版默认网络方式不变。SDK通过显式 Response 构造器识别 FormData，避免 Chromium 不支持的 data: 探测。
+
+登录等待/失败/成功/取消紧邻按钮并使用 live region；错误出现滚到反馈处，720p 可见。预检失败明确说明登录页尚未打开、HTTP 状态，不回显上游 HTML。保留失败后重试，不因失败切换计费路线。[OpenAI 官方登录流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) 的授权/验证步骤未缩减。

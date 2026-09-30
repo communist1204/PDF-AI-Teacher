@@ -20,7 +20,9 @@
     "desktop:package": "npm run desktop:build && node scripts/package-desktop.mjs",
     "test:desktop": "node scripts/verify-desktop.mjs",
     "desktop:runtime": "node node_modules/electron/install.js",
-    "test:desktop:restart": "node scripts/verify-desktop-restart.mjs"
+    "test:desktop:restart": "node scripts/verify-desktop-restart.mjs",
+    "test:desktop:network": "node scripts/verify-desktop-network.mjs",
+    "test:desktop:login": "node scripts/verify-desktop-login.mjs"
   },
   "dependencies": {
     "dotenv": "^18.0.4",

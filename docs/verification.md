@@ -287,3 +287,27 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 最小用户操作：双击桌面 PDF AI Teacher → 使用 ChatGPT 登录并在官方浏览器授权 → 核对可用解题模型并应用重启 → 打开 PDF 提问。若要自然 AI 朗读，再在本机高级设置填写可选语音 Key 并自行确认一次最小音频请求。真实 Key 不应发送到聊天。
 
 最终交付状态（11:41）：桌面快捷方式目标已核实，正常启动的 exe 保持打开，主窗口句柄存在，未带调试参数；外部访问 4319 返回预期的 403。见 [运行状态](desktop-running.json)。asar 白名单核查共 277 条目，未发现额外目录或测试凭证，.env 不存在；见 [发布包核查](desktop-package-check.json)。白名单脚本初稿漏列预期 LICENSES.txt，出现一次误报，补入许可文件后通过，未删掉软件许可。
+
+
+## 登录点击后无弹窗：真实复现与修复（2026-09-30 13:15）
+
+### 根因与补齐的证据
+
+上一轮桌面验收只检查登录入口存在，OAuth 为 mock，没有真正触发公开网络请求→系统浏览器这一整条路径，因此不能覆盖本次问题。实际复现：Node fetch 对公开发现地址返回 403、text/html（646ms）；同机 PowerShell 200（3.2s），Electron 独立 session.fetch 200/JSON（691ms）。原逻辑在读取发现配置失败后抛错，未执行 openExternal；UI 在设置底部显示错误，首屏看起来无反应。
+
+现使用桌面专用 Chromium 网络，保留官方地址、TLS 校验、无 cookie/无重定向及取消；通过 createApp 注入后续模型和声音请求，避免只修登录而漏掉问答。错误反馈移到登录按钮下方并可重试。没有更改全局代理或其他程序。
+
+### 本轮执行
+
+- typecheck / lint / build / desktop:package 均通过；最终 Vite 2018 模块，原大 chunk 提示仍存在。
+- Vitest：15 文件、318/318（1.26 秒）。新增 403 HTML 预检失败不打开浏览器、不泄露正文、可重试；新增 createApp 注入同一传输、OAuth 与独立声音 Key 分离。
+- 全部 Edge E2E：50/50（32.8 秒，7 workers）。新增 720p 失败反馈完全可见、按钮恢复、再次点击成功；网络/桥接结果模拟。
+- node scripts/verify-desktop-network.mjs --online：实际 Electron Chromium session + 本地 HTTP + SDK，请求不带已种下的测试 cookie、强制拒绝302跟随、取消关闭连接、form body、SSE、音频字节与 multipart 均通过。仅 discovery 请求真实 OpenAI 并收到200；无账号令牌、无付费请求。见 [网络 smoke](desktop-network-smoke.json)。去掉 --online 可仅跑本机。
+- node scripts/verify-desktop-login.mjs：实际打包 exe、真实点击登录按钮、真实公开 discovery、调用原始 shell.openExternal 成功；仅记录官方 origin/path，不保存完整查询参数。系统默认 Edge 后续窗口标题实际为「使用 ChatGPT 登录 PDF AI Teacher - OpenAI」。见 [登录启动证据](desktop-login-opened.json)。这证明官方登录页面已打开，未填写账号或完成授权；测试会话随后取消。
+- 最终真实桌面 smoke 与 app.relaunch 复跑通过：首次启动、单实例、Windows 加密、PDF/公式/笔记恢复、关闭服务仍正常。见更新后的 desktop-smoke.json / desktop-restart.json。
+
+已实际查看 [720p 失败反馈](screenshots/desktop-login-failure-720.png)，错误在登录按钮下方并完全可见；[真实登录等待](screenshots/desktop-login-opened.png) 是实际 exe 截图。默认浏览器页面以实际窗口标题确认；浏览器/Computer Use 工具启动失败（sandbox helper read failure），未取得其页面截图，未假报已检查授权完成状态。
+
+过程记录：网络会话改名时漏改一个 permission handler，首次 typecheck 失败，修正为 windowSession 后通过。第一版 Windows GUI 探测未等待子进程完整退出，未把空输出视为成功；改为 Node spawn 等待后拿到明确200。两项 UI 工具初始化失败已保留上述边界，不绕过授权或填写凭证。没有删测试。未授权的专业答案、声音与真人验收仍为未测。
+
+使用方式：软件已重新打包到原 exe 路径，桌面图标不需更换；重新打开软件再点击「使用 ChatGPT 登录」。刚才自动检查打开的旧测试页面已取消，应使用软件新打开的页面授权。

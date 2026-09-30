@@ -42,8 +42,8 @@ function callIdFromLocation(location: string | null) {
 }
 export class OpenAIRealtimeProvider implements RealtimeProvider {
   private readonly client: OpenAI;
-  constructor(private readonly config: ServerConfig, client?: OpenAI) {
-    this.client = client ?? new OpenAI({ apiKey: config.apiKey, baseURL: 'https://api.openai.com/v1', maxRetries: 0, timeout: config.requestTimeoutMs });
+  constructor(private readonly config: ServerConfig, client?: OpenAI, fetcher?: typeof fetch) {
+    this.client = client ?? new OpenAI({ apiKey: config.apiKey, baseURL: 'https://api.openai.com/v1', fetch: fetcher, maxRetries: 0, timeout: config.requestTimeoutMs });
   }
   async connect(sdp: string, signal: AbortSignal): Promise<RealtimeExchange> {
     const response = await this.client.realtime.calls.create({ sdp, session: realtimeSession(this.config) }, { signal });

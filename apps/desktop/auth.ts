@@ -88,7 +88,7 @@ export class ChatGptAuthManager {
     const raw = await response.text();
     if (raw.length > 2 * 1024 * 1024) throw safeFailure();
     let data: unknown;
-    try { data = raw ? JSON.parse(raw) : null; } catch { throw safeFailure(); }
+    try { data = raw ? JSON.parse(raw) : null; } catch { throw new AuthError(`ChatGPT 服务返回了非 JSON 内容（HTTP ${response.status}）。请检查网络后重试；未保存登录凭证。`); }
     return { response, data };
   }
   private async metadata(signal?: AbortSignal) {
@@ -133,7 +133,10 @@ export class ChatGptAuthManager {
     timer.unref();
     let server: Server | undefined;
     try {
-      const metadata = await this.metadata(controller.signal);
+      const metadata = await this.metadata(controller.signal).catch(error => {
+        if (controller.signal.aborted) throw controller.signal.reason;
+        throw new AuthError('登录页尚未打开：' + (error instanceof AuthError ? error.message : '无法连接官方登录服务，请检查网络后重试。'));
+      });
       const state = randomValue(); const nonce = randomValue(); const verifier = randomValue();
       let redirectUri = ''; let consumed = false;
       const callback = new Promise<{ code: string; clientId: string }>((resolve, reject) => {

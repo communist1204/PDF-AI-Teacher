@@ -46,8 +46,8 @@ export function speechRequest(config: ServerConfig, text: string, speed: number)
 
 export class OpenAITeachingProvider implements TeachingProvider {
   private readonly client: OpenAI;
-  constructor(private readonly config: ServerConfig, client?: OpenAI) {
-    this.client = client ?? new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl, timeout: config.requestTimeoutMs, maxRetries: 0 });
+  constructor(private readonly config: ServerConfig, client?: OpenAI, fetcher?: typeof fetch) {
+    this.client = client ?? new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl, fetch: fetcher, timeout: config.requestTimeoutMs, maxRetries: 0 });
   }
 
   async ask(request: AskRequest, model: string, signal: AbortSignal): Promise<ProviderAnswer> {
@@ -139,7 +139,7 @@ export function chatGptProviderError(error: unknown, requestId?: string): HttpEr
 export class ChatGptTeachingProvider implements TeachingProvider {
   private readonly audioProvider?: OpenAITeachingProvider;
   constructor(private readonly config: ServerConfig, private readonly auth: ChatGptCredentials, private readonly fetcher?: typeof fetch) {
-    if (config.apiKey) this.audioProvider = new OpenAITeachingProvider(config, fetcher ? new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl, fetch: fetcher, maxRetries: 0 }) : undefined);
+    if (config.apiKey) this.audioProvider = new OpenAITeachingProvider(config, undefined, fetcher);
   }
   async ask(request: AskRequest, model: string, signal: AbortSignal): Promise<ProviderAnswer> {
     let requestId: string | undefined;

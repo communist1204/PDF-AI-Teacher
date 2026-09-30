@@ -1,0 +1,18 @@
+{
+  "date": "2026-09-30T05:11:38.409Z",
+  "transport": "isolated Chromium session.fetch",
+  "cookiesOmitted": true,
+  "redirectRejected": true,
+  "abortClosesRequest": true,
+  "formEncodedBody": true,
+  "sdkSse": true,
+  "sdkAudioBytes": true,
+  "sdkMultipart": true,
+  "discovery": {
+    "status": 200,
+    "validIssuer": true,
+    "validAuthorizationEndpoint": true
+  },
+  "realAuthorization": false,
+  "paidCalls": 0
+}
