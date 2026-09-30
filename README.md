@@ -45,13 +45,13 @@ npm.cmd run dev
 
 ## Qwen3 朗读（新增）
 
-这台电脑现已安装 Qwen3-TTS 1.7B CustomVoice，支持中文语气描述。声音设置 → 朗读方式 →「Qwen3 本地语音」，可选 Serena / Vivian / Uncle Fu；应用并重启后生效。当前电脑已选好 Qwen3 / Serena，双击原图标、重新选一小段就能试听。免费、CPU运行，不用 Key 或充值，理论解题设置独立。
+这台电脑现已安装 Qwen3-TTS 1.7B CustomVoice，支持中文语气描述。声音设置 → 朗读方式 →「Qwen3 本地语音」，可选 Serena / Vivian / Uncle Fu；应用并重启后生效。当前电脑已选好 Qwen3 / Serena，双击原图标、重新选一小段就能试听。免费本机运行，不用 Key 或充值，理论解题设置独立。声音设置中新增 CPU / NVIDIA GPU 运算设备选择；此电脑 RTX 5080 已有独立 GPU 运行库，模型仍为 Qwen3 / Serena。
 
 跨行的同一句不再按每行拆音频；日历年份「2026年」送去朗读时转成「二零二六年」，PDF和字幕仍保留原文。有限规则不能处理所有歧义、公式与多音字，可用「校对朗读文本」。断句升级后请重新选段，旧句索引不再强行恢复。
 
-本机CPU短句约6秒生成，约7.5秒的较长样音需12–13秒；可能等待下一句，不能承诺连续零等待。先用1×试听 [Serena](docs/audio/qwen-serena.wav)、[Vivian](docs/audio/qwen-vivian.wav)、[Uncle Fu](docs/audio/qwen-uncle_fu.wav)，再调慢。实际听感、读音准确性与OpenAI对比仍待人耳判断。Kokoro轻量声音仍可切回。
+RTX 5080 原生实测：34字完整句约2.0秒生成9.2秒音频，107字长句约3.1秒生成25.8秒音频；同34字CPU两线程约13.3秒。实际等待还受句长、显卡负载影响。等待时显示真实经过秒数，可随时停止。中文语气参数的 Windows 编码问题已修复。先用1×试听 [GPU短句](docs/audio/qwen-cuda-short-cold.wav) 和 [GPU教材长句](docs/audio/qwen-cuda-long.wav)。实际听感、读音准确性与OpenAI对比仍待人耳判断。Kokoro轻量声音仍可切回。
 
-普通使用已带好模型。开发者重新构建时，使用现有Visual Studio C++ Build Tools（默认C:/BuildTools，可用进程环境PDF_AI_VS_ROOT指定），先运行 npm.cmd run tts:build:qwen，再运行 npm.cmd run tts:setup:qwen，最后桌面打包。模型约1.47GB，下载按固定revision与SHA256校验；qwen-tts-runtime留在asar外。当前二进制针对本机CPU指令集编译，其他电脑须重编并验证。网页开发版在私有.env设置 TTS_ENGINE=qwen、QWEN_TTS_VOICE=serena、可选QWEN_TTS_INSTRUCTIONS；无需改解题模型。
+普通使用已带好模型。开发者重新构建时，使用现有Visual Studio C++ Build Tools（默认C:/BuildTools，可用进程环境PDF_AI_VS_ROOT指定），先运行 npm.cmd run tts:build:qwen，再运行 npm.cmd run tts:setup:qwen，最后桌面打包。GPU版增加 npm.cmd run tts:build:qwen:cuda，使用已有CUDA12.9，当前构建仅验证RTX5080/SM120a，不修改系统CUDA或Conda。模型约1.47GB，下载按固定revision与SHA256校验；qwen-tts-runtime留在asar外。当前二进制针对本机CPU指令集编译，其他电脑须重编并验证。网页开发版在私有.env设置 TTS_ENGINE=qwen、QWEN_TTS_DEVICE=cuda（无兼容GPU时cpu）、QWEN_TTS_VOICE=serena、可选QWEN_TTS_INSTRUCTIONS；无需改解题模型。
 
 ## 免费本地中文朗读（Kokoro轻量选项）
 

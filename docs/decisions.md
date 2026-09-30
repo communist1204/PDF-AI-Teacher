@@ -250,3 +250,16 @@ OAuth Responses 使用 store=false、stream=true、input 数组与 instructions�
 前后端 speech.engine=qwen 复用唯一 AudioCoordinator、会话版本、防过期、句书签、1×合成/播放器调速和有界缓存，仅免费模式预生成下一句；不会自动切到付费或系统声音。解题账号与模型不随声音改动。CPU生成慢于实时，预取不保证句间零等待；本轮没有侵占GPU以追求速度。
 
 PDF 单换行视为物理排版，中文相邻不插空格、拉丁文字保留词间空格，段落空行/列表/独立公式保持边界，最多300源字符。年份只对1000–2999后接「年」且未命中时长/编号/代码数学上下文的有限情形逐位读；sourceText 完整可还原。采用显式读法处理以免把模型自然度能力误作可靠数字理解。断句及读法改变要求 sentence-v2，不沿用旧句索引。
+
+
+## GPU 朗读、Windows UTF8 与业界方案（2026-09-30）
+
+用户明确同意检查GPU，覆盖最初PRD“不要求GPU”的默认部署假设；仍保留CPU选项。只用已有CUDA12.9编译，GGML_BACKEND=CUDA0仅设于本应用拥有的语音子进程，关闭其他GPU后端、静态cudart、动态cuBLAS DLL与exe同目录，不修改PATH。当前SM120a构建只验证本机RTX5080，不声称兼容所有NVIDIA卡。manifest记录二进制和两个DLL哈希，保留原CUDA EULA。
+
+原故障并非单一CPU性能问题。上游CLI main未调用既有utf8_init；Windows argv中的中文语气被错误解码，而stdin原文是UTF8。独立补丁修复后同文seed42 CPU/GPU均正常EOS；保留失败和修复报告，不通过换短文本掩盖。CPU/GPU浮点后端生成长度存在差异，同seed不保证逐样本一致，更不等于声音质量一致。
+
+保持一段完整句子输入、下一句预生成、统一播放器与取消。原生流式0.87秒首PCM复验已通过，但浏览器增量播放、缓存完整性、暂停续播和背压尚未联调，实验适配器不合入产品。本轮交付稳定整句GPU生成，避免为追求首包时间再次按PDF换行切句。
+
+专用云TTS也是可选方案：[豆包HTTP Chunked接口](https://docs.volcengine.com/docs/DoubaoVoice/unidirectional-streaming-text-to-speech-http?lang=zh)接受完整文本并返回流式音频，[官方概述](https://docs.volcengine.com/docs/DoubaoVoice/ProductOverview-7?lang=zh)的约600ms首包只是供应商参考；[腾讯实时合成](https://cloud.tencent.com/document/product/1073/94308)使用WebSocket。两者需独立账号/凭证和额度，不把消费者应用免费朗读等同于第三方API永久免费。腾讯[2026年8月计费说明](https://cloud.tencent.com/document/product/1073/34112)按音色等级区分免费量与期限，不能把基础音色额度套给超自然音色。未开通或付费测试。微信官方资料有文章朗读功能，但未找到当前底层模型及缓存方式的可靠公开说明，故不推断。
+
+离线候选[CosyVoice3](https://github.com/QwenAudio/CosyVoice)、[VoxCPM](https://github.com/OpenBMB/VoxCPM)有流式实现，论文/项目硬件延迟不是此Windows本机体验；未安装第二套Python/GPU环境。鉴于当前Qwen GPU已明显加速，先让用户对同文实际试听，再决定是否引入另一个引擎。不能宣称本机音色已超越OpenAI、豆包或腾讯。

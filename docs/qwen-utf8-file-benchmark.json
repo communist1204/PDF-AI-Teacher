@@ -1,0 +1,51 @@
+{
+  "note": "Single-run below-normal-priority CPU. Existing user processes untouched. Audio not listened to.",
+  "results": [
+    {
+      "threads": 2,
+      "text": "二零二六年，我们先理解这个公式的含义，再看一个简单的例子，不用着急。",
+      "chars": 34,
+      "code": 0,
+      "readyMs": 705.9617000000001,
+      "totalMs": 13321.1669,
+      "audioSeconds": 8.64,
+      "rtf": 1.541801724537037,
+      "timedOut": false,
+      "eos": true,
+      "capped": false,
+      "perf": [
+        "[Perf] PromptBuild 3.8 ms\r",
+        "[Perf] Prefill 700.7 ms (T_ctx prefill)\r",
+        "[Perf] TTFA 724.8 ms (first frame codes)\r",
+        "[Perf] TalkerDecode 2536.3 ms (108 frames, 23.48 ms/frame)\r",
+        "[Perf] CodePredictor 2205.4 ms (20.42 ms/frame)\r",
+        "[Perf] HostCompose 2.8 ms (c0 sample + next emb)\r",
+        "[Perf] CodecDecode 6987.8 ms\r",
+        "[Perf] Total 12438.0 ms (108 frames, 43.93 ms/frame AR, audio 8.64 s, RTF 1.440)\r"
+      ]
+    },
+    {
+      "threads": 4,
+      "text": "二零二六年，我们先理解这个公式的含义，再看一个简单的例子，不用着急。",
+      "chars": 34,
+      "code": 0,
+      "readyMs": 668.0679999999993,
+      "totalMs": 8420.0616,
+      "audioSeconds": 8.64,
+      "rtf": 0.9745441666666667,
+      "timedOut": false,
+      "eos": true,
+      "capped": false,
+      "perf": [
+        "[Perf] PromptBuild 2.6 ms\r",
+        "[Perf] Prefill 392.1 ms (T_ctx prefill)\r",
+        "[Perf] TTFA 407.5 ms (first frame codes)\r",
+        "[Perf] TalkerDecode 2037.9 ms (108 frames, 18.87 ms/frame)\r",
+        "[Perf] CodePredictor 1397.1 ms (12.94 ms/frame)\r",
+        "[Perf] HostCompose 2.9 ms (c0 sample + next emb)\r",
+        "[Perf] CodecDecode 3740.8 ms\r",
+        "[Perf] Total 7574.6 ms (108 frames, 31.83 ms/frame AR, audio 8.64 s, RTF 0.877)\r"
+      ]
+    }
+  ]
+}

@@ -96,3 +96,15 @@ describe('Qwen local HTTP route (mock engine; no paid API)', () => {
 });
 
 
+
+
+describe('Qwen device configuration (no real hardware)',()=>{
+ it('preserves old CPU default and reports an explicit CUDA choice',async()=>{
+  expect(readConfig({TTS_ENGINE:'qwen'}).qwenTtsDevice).toBe('cpu');
+  expect(readConfig({TTS_ENGINE:'qwen',QWEN_TTS_DEVICE:'cuda'}).qwenTtsDevice).toBe('cuda');
+  expect(()=>readConfig({QWEN_TTS_DEVICE:'automatic'})).toThrow('QWEN_TTS_DEVICE');
+  const h=harness({qwenTtsDevice:'cuda'});expect((await browser(h.app)).config.speech?.device).toBe('cuda');
+  const client=await browser(h.app);await post(h.app,client,'/api/tts',{text:'GPU只负责本机朗读。',speed:1}).expect(200);
+  expect(h.qwen.speak).toHaveBeenCalledOnce();expect(h.cloud.speak).not.toHaveBeenCalled();
+ });
+});

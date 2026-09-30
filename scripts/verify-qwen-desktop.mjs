@@ -8,9 +8,12 @@ import { clearTimeout } from 'node:timers';
 // Real packaged-app smoke test. No response mocks, real user profile, API key, or microphone.
 // Run from the project root after packaging: node scripts/verify-qwen-desktop.mjs
 if (process.argv.includes('--help')) {
-  console.log('Usage: node scripts/verify-qwen-desktop.mjs [--executable <packaged.exe>]\nUses a fresh test-results/qwen-desktop-profile/<run-id> profile; requires free port 4319 and packaged Qwen resources. Five-minute overall limit, 90-second generation wait. Audio is muted; listening quality is not tested.');
+  console.log('Usage: node scripts/verify-qwen-desktop.mjs [--executable <packaged.exe>] [--device cpu|cuda] [--long]\nUses a fresh test-results/qwen-desktop-profile/<run-id> profile; requires free port 4319 and packaged Qwen resources. Five-minute overall limit, 90-second generation wait. Audio is muted; listening quality is not tested.');
   process.exit(0);
 }
+const deviceIndex=process.argv.indexOf('--device');
+const device=deviceIndex>=0?process.argv[deviceIndex+1]:'cpu';if(!['cpu','cuda'].includes(device))throw Error('Unsupported test device');
+const longSample=process.argv.includes('--long');
 const executableIndex = process.argv.indexOf('--executable');
 if (executableIndex >= 0 && !process.argv[executableIndex + 1]) throw Error('--executable requires a packaged executable path');
 const executablePath = resolve(executableIndex >= 0 ? process.argv[executableIndex + 1] : 'release/PDF AI Teacher-win32-x64/PDF AI Teacher.exe');
@@ -28,7 +31,7 @@ const requests = [];
 const requestRecords = new WeakMap();
 const remoteRendererRequests = [];
 const report = {
-  date: new Date().toISOString(), status: 'running', executablePath, profile,
+  date: new Date().toISOString(), status: 'running', executablePath, profile, device, longSample,
   checks: {}, requests, pageErrors, remoteRendererRequests,
   humanListening: '未验收；真实 HTMLAudio 播放使用静音，不代表音色、语气或教材朗读质量通过真人验收。',
   realAccountAndPaidApi: '未测；只使用全新隔离目录、无 Key 和演示解题模式。',
@@ -102,6 +105,7 @@ async function run() {
   await page.getByRole('button', { name: '声音设置', exact: true }).click();
   await page.getByRole('combobox', { name: '使用方式', exact: true }).selectOption('demo');
   await page.getByRole('combobox', { name: '朗读方式', exact: true }).selectOption('qwen');
+  await page.getByRole('combobox',{name:'Qwen3 运算设备',exact:true}).selectOption(device);
   await page.getByRole('combobox', { name: 'Qwen3 中文音色', exact: true }).selectOption('serena');
   await page.getByRole('textbox', { name: 'Qwen3 朗读语气', exact: true }).fill('温和自然地用中文朗读，按语义停顿，不增添或改动原文。');
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
@@ -112,8 +116,8 @@ async function run() {
   const configured = await readPublicSettings();
   expect(configured.ttsEngine).toBe('qwen'); expect(configured.qwenTtsVoice).toBe('serena'); expect(configured.qwenTtsReady).toBe(true); expect(configured.restartRequired).toBe(false);
   const config = await page.evaluate(async () => (await fetch('/api/config')).json());
-  expect(config.mode).toBe('demo'); expect(config.speech.engine).toBe('qwen'); expect(config.speech.ready).toBe(true); expect(config.models.tts).toMatch(/Qwen3/i);
-  report.configuration = { mode: config.mode, engine: config.speech.engine, model: config.models.tts, voice: config.speech.voice, ready: config.speech.ready, noApiKey: true };
+  expect(config.mode).toBe('demo'); expect(config.speech.engine).toBe('qwen'); expect(config.speech.device).toBe(device); expect(config.speech.ready).toBe(true); expect(config.models.tts).toMatch(/Qwen3/i);
+  report.configuration = { mode: config.mode, engine: config.speech.engine, model: config.models.tts, voice: config.speech.voice, device:config.speech.device, ready: config.speech.ready, noApiKey: true };
   report.checks.settingsSavedAndReopened = true;
   await expect(page.locator('.audio-kind')).toHaveText('Qwen3 本地 AI 语音');
   await page.evaluate(() => {
@@ -133,8 +137,8 @@ async function run() {
   await page.mouse.move(bounds.x + 1, bounds.y + bounds.height / 2); await page.mouse.down();
   await page.mouse.move(bounds.x + bounds.width - 1, bounds.y + bounds.height / 2, { steps: 12 }); await page.mouse.up();
   await expect(page.locator('.selection-preview')).toContainText('指数移动平均');
-  const corrected = '2026年，我们\n一起读书。';
-  const expectedSpeech = '二零二六年，我们一起读书。';
+  const corrected = longSample ? '2026年，我们学习神经网络时，先要理解梯度描述的是损失如何随着参数变化，\n然后沿着能够降低损失的方向逐步更新参数，同时保持合适的学习率，并通过验证集观察模型能否处理没有见过的数据，这样才能判断训练是否真的有效，而不是只记住了已有的样本。' : '2026年，我们\n一起读书。';
+  const expectedSpeech = corrected.replace(/\n/g,'').replace('2026年','二零二六年');
   await correctText(corrected);
   report.checks.realPdfTextSelection = true;
   await page.getByRole('combobox', { name: '语速', exact: true }).selectOption('0.25');

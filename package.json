@@ -25,6 +25,7 @@
     "test:desktop:login": "node scripts/verify-desktop-login.mjs",
     "tts:setup": "node scripts/setup-local-tts.mjs",
     "tts:build:qwen": "node scripts/build-qwen-tts.mjs",
+    "tts:build:qwen:cuda": "node scripts/build-qwen-tts-cuda.mjs",
     "tts:setup:qwen": "node scripts/setup-qwen-tts.mjs"
   },
   "dependencies": {

@@ -17,6 +17,7 @@ export interface ServerConfig {
   teachingTimeoutMs: number;
   ttsEngine?: 'local' | 'qwen' | 'openai' | 'system';
   qwenTtsVoice?: string;
+  qwenTtsDevice?: 'cpu' | 'cuda';
   qwenTtsInstructions?: string;
   localTtsVoice?: string;
   ttsModel: string;
@@ -66,6 +67,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   if (env.LOCAL_TTS_VOICE && !['zf_001', 'zf_002', 'zf_003', 'zm_010', 'zm_011', 'zm_012'].includes(env.LOCAL_TTS_VOICE)) throw new Error('本地中文音色无效。');
   const cloudSpeech = !['local','qwen','system'].includes(env.TTS_ENGINE || '');
   if (env.QWEN_TTS_VOICE && !['serena','vivian','uncle_fu'].includes(env.QWEN_TTS_VOICE)) throw new Error('Qwen3 中文音色无效。');
+  if(env.QWEN_TTS_DEVICE && !['cpu','cuda'].includes(env.QWEN_TTS_DEVICE))throw new Error('QWEN_TTS_DEVICE 必须为 cpu 或 cuda。');
   const qwenTtsInstructions = env.QWEN_TTS_INSTRUCTIONS?.trim() || DEFAULT_QWEN_TTS_INSTRUCTIONS;
   if(qwenTtsInstructions.length>1000) throw new Error('Qwen3 朗读语气请限制在1000字以内。');
   const ttsModel = env.TTS_MODEL?.trim() || '';
@@ -92,6 +94,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     teachingTimeoutMs: integer(env.TEACHING_TIMEOUT_MS, 180000, 1000, 600000, 'TEACHING_TIMEOUT_MS'),
     ttsEngine: env.TTS_ENGINE as ServerConfig['ttsEngine'],
     localTtsVoice: env.LOCAL_TTS_VOICE || 'zf_001',
+    qwenTtsDevice: (env.QWEN_TTS_DEVICE || 'cpu') as 'cpu' | 'cuda',
     qwenTtsVoice: env.QWEN_TTS_VOICE || DEFAULT_QWEN_TTS_VOICE, qwenTtsInstructions,
     ttsModel,
     transcriptionModel: env.TRANSCRIPTION_MODEL?.trim() || '',

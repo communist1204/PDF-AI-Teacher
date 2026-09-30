@@ -63,5 +63,9 @@ for (const name of ['qwen-tts.exe', ...runtimeDlls]) {
 writeFileSync(resolve(build, 'Release/manifest.json'), JSON.stringify({ source: 'https://github.com/ServeurpersoCom/qwentts.cpp', commit, ggmlCommit, device: 'CUDA0', cudaVersion: '12.9', sm: '120a', windowsUtf8Argv: true, files }, null, 2));
 if (!existsSync(exe)) throw new Error('Native CLI output is missing.');
 writeFileSync(resolve(build, 'build-provenance.json'), JSON.stringify({ source: 'https://github.com/ServeurpersoCom/qwentts.cpp', commit, ggmlCommit, cpuOnly: false, gpu: 'NVIDIA SM120a', cudaVersion: '12.9', defaultThreads: 2, allowedThreads: [2, 4], env: 'PDF_AI_TTS_THREADS', cmake, exe, patches: patches.map(patch => readFileSync(patch, 'utf8')) }, null, 2));
-console.log(`CUDA Qwen TTS built: ${exe}`);
+const runtime = resolve(root, 'qwen-tts-runtime/bin-cuda');
+mkdirSync(runtime, { recursive: true });
+for (const name of ['qwen-tts.exe', ...runtimeDlls, 'manifest.json', 'LICENSE-NVIDIA-CUDA.txt']) copyFileSync(resolve(build, 'Release', name), resolve(runtime, name));
+copyFileSync(resolve(build, 'build-provenance.json'), resolve(runtime, 'build-provenance.json'));
+console.log(`CUDA Qwen TTS installed: ${runtime}`);
 console.log('Child environment GGML_BACKEND=CUDA0, PDF_AI_TTS_THREADS=2 (default) or 4. Input UTF-8 stdin; --max-new caps audio frames. No model inference has been performed by this script.');

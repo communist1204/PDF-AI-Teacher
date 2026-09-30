@@ -140,3 +140,39 @@ describe('bounded Qwen CPU thread options', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 });
+
+
+describe('explicit Qwen GPU selection (mock process, no GPU inference)',()=>{
+ it('requires the separate CUDA runtime instead of silently using the CPU binary',async()=>{
+  const value=provider({device:'cuda'});expect(value.ready()).toBe(false);
+  await expect(value.speak('你好',1,new AbortController().signal)).rejects.toMatchObject({code:'qwen_tts_missing'});expect(spawnMock).not.toHaveBeenCalled();
+ });
+ it('selects CUDA0 only within its own child environment and preserves the existing WAV path',async()=>{
+  for(const name of ['qwen-tts.exe','cublas64_12.dll','cublasLt64_12.dll','manifest.json'])resources.set(join(options.runtimePath,'bin-cuda',name),100);
+  vi.stubEnv('CUDA_PATH','do-not-inherit-cuda');vi.stubEnv('PATH','do-not-inherit-path');vi.stubEnv('OPENAI_API_KEY','private-fake-value');
+  const run=await running(provider({device:'cuda'}));const [exe,,settings]=spawnMock.mock.calls[0];
+  expect(exe).toBe(join(options.runtimePath,'bin-cuda','qwen-tts.exe'));expect(settings.cwd).toBe(join(options.runtimePath,'bin-cuda'));
+  expect(settings.env.GGML_BACKEND).toBe('CUDA0');expect(JSON.stringify(settings.env)).not.toMatch(/do-not-inherit|private-fake-value/);
+  await run.child.complete();expect((await run.promise).audio).toEqual(wave());
+ });
+ it('rejects unsupported devices without spawning',()=>{
+  expect(()=>provider({device:'automatic' as 'cpu'})).toThrow('GPU');expect(spawnMock).not.toHaveBeenCalled();
+ });
+});
+
+describe('complete CUDA runtime resources',()=>{
+ it.each(['cublas64_12.dll','cublasLt64_12.dll'])('reports missing GPU resources when %s is absent',async missing=>{
+  for(const name of ['qwen-tts.exe','cublas64_12.dll','cublasLt64_12.dll','manifest.json'])resources.set(join(options.runtimePath,'bin-cuda',name),100);
+  resources.delete(join(options.runtimePath,'bin-cuda',missing));
+  const value=provider({device:'cuda'});expect(value.ready()).toBe(false);
+  await expect(value.speak('你好',1,new AbortController().signal)).rejects.toMatchObject({code:'qwen_tts_missing'});expect(spawnMock).not.toHaveBeenCalled();
+ });
+});
+
+describe('GPU execution failure',()=>{
+ it('returns an explicit failure without spawning a CPU retry',async()=>{
+  for(const name of ['qwen-tts.exe','cublas64_12.dll','cublasLt64_12.dll','manifest.json'])resources.set(join(options.runtimePath,'bin-cuda',name),100);
+  const run=await running(provider({device:'cuda'}));await run.child.complete(wave(),1);
+  await expect(run.promise).rejects.toMatchObject({code:'qwen_tts_failed',message:expect.stringContaining('GPU')});expect(spawnMock).toHaveBeenCalledOnce();
+ });
+});

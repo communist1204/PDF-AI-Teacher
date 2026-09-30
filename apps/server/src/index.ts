@@ -11,7 +11,7 @@ import { LocalTtsProvider } from './localTts';
 const config = readConfig();
 const runtimePath = resolve(process.cwd(), 'local-tts-runtime');
 const localTts = config.ttsEngine === 'local' ? new LocalTtsProvider({ workerPath: resolve(runtimePath, 'local-tts-worker.cjs'), runtimePath, modelDir: resolve(runtimePath, 'model'), voice: config.localTtsVoice ?? 'zf_001', threads: 2 }) : undefined;
-const qwenTts = config.ttsEngine === 'qwen' ? new QwenTtsProvider({runtimePath:resolve('qwen-tts-runtime'),workPath:resolve('.model-cache/qwen-jobs'),voice:config.qwenTtsVoice??'serena',instructions:config.qwenTtsInstructions??''}) : undefined;
+const qwenTts = config.ttsEngine === 'qwen' ? new QwenTtsProvider({runtimePath:resolve('qwen-tts-runtime'),workPath:resolve('.model-cache/qwen-jobs'),device:config.qwenTtsDevice??'cpu',voice:config.qwenTtsVoice??'serena',instructions:config.qwenTtsInstructions??''}) : undefined;
 const app = createApp({ config, localTts, qwenTts });
 const server = createServer(app);
 const root = fileURLToPath(new URL('../../../', import.meta.url));

@@ -9,14 +9,17 @@ export const QWEN_CODEC = 'qwen-tokenizer-12hz-Q8_0.gguf';
 const LIMIT_MARKER = 'PDF_AI_TTS_FRAME_LIMIT_REACHED';
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 const cancelled = () => new HttpError(409, 'qwen_tts_cancelled', 'Qwen3 本地朗读已停止，未产生 API 费用。');
-const failed = () => new HttpError(503, 'qwen_tts_failed', 'Qwen3 本地语音未能完成生成，请重试短句；没有切换到其他语音服务。');
-export interface QwenTtsOptions { runtimePath: string; workPath: string; voice: string; instructions: string; threads?: 2 | 4; }
+const failed = (device?: 'cpu' | 'cuda') => new HttpError(503, 'qwen_tts_failed', device==='cuda'?'Qwen3 GPU 语音生成失败。可在声音设置改用 CPU 或轻量本地声音；没有自动切换设备或调用付费服务。':'Qwen3 本地语音未能完成生成，请重试短句；没有切换到其他语音服务。');
+export interface QwenTtsOptions { runtimePath: string; workPath: string; voice: string; instructions: string; threads?: 2 | 4; device?: 'cpu' | 'cuda'; }
 function fileExists(path: string, size = 1) { try { const s = statSync(path); return s.isFile() && s.size >= size; } catch { return false; } }
-function environment(threads: 2 | 4): NodeJS.ProcessEnv {
+export function qwenCudaRuntimeReady(runtimePath: string): boolean {
+ return ['qwen-tts.exe','cublas64_12.dll','cublasLt64_12.dll','manifest.json'].every(name=>fileExists(join(runtimePath,'bin-cuda',name)));
+}
+function environment(threads: 2 | 4, device: 'cpu' | 'cuda'): NodeJS.ProcessEnv {
  const result: NodeJS.ProcessEnv = {};
  for (const [key, value] of Object.entries(process.env)) if (['systemroot','windir','temp','tmp'].includes(key.toLowerCase())) result[key] = value;
- // Per-process settings only. This build contains no GPU backend.
- result.GGML_BACKEND = 'CPU'; result.PDF_AI_TTS_THREADS = String(threads);
+ // Per-process selection only; never change system CUDA/PATH or inherit API secrets.
+ result.GGML_BACKEND = device === 'cuda' ? 'CUDA0' : 'CPU'; result.PDF_AI_TTS_THREADS = String(threads);
  return result;
 }
 export function validateQwenWave(audio: Buffer): boolean {
@@ -25,7 +28,7 @@ export function validateQwenWave(audio: Buffer): boolean {
   && audio.readUInt32LE(24)===24000 && audio.readUInt32LE(28)===48000 && audio.readUInt16LE(32)===2 && audio.readUInt16LE(34)===16
   && audio.toString('ascii',36,40)==='data' && audio.readUInt32LE(40)===audio.length-44 && audio.readUInt32LE(4)===audio.length-8 && (audio.length-44)%2===0;
 }
-/** CPU-only child. Text enters stdin, never a shell/command line; temporary audio is deleted. */
+/** Explicit CPU or CUDA child. Text enters stdin, never a shell/command line; temporary audio is deleted. */
 export class QwenTtsProvider {
  private readonly options: QwenTtsOptions;
  private current?: { cancel: () => void };
@@ -34,11 +37,13 @@ export class QwenTtsProvider {
   if (!['serena','vivian','uncle_fu'].includes(options.voice)) throw new HttpError(400,'qwen_tts_voice','请选择列表中的 Qwen3 中文音色。');
   if (options.instructions.length > 1000 || options.instructions.includes('\0')) throw new HttpError(400,'qwen_tts_style','Qwen3 朗读语气请限制在 1000 字以内。');
   if (options.threads !== undefined && options.threads !== 2 && options.threads !== 4) throw new HttpError(400,'qwen_tts_threads','Qwen3 CPU 线程数只允许 2 或 4。');
+  if(options.device && !['cpu','cuda'].includes(options.device))throw new HttpError(400,'qwen_tts_device','请选择 CPU 或 NVIDIA GPU。');
   this.options = {...options,runtimePath:resolve(options.runtimePath),workPath:resolve(options.workPath)};
  }
+ private executableDirectory(){return join(this.options.runtimePath,this.options.device==='cuda'?'bin-cuda':'bin');}
  ready() {
   const p=this.options.runtimePath;
-  return !this.disposed && fileExists(join(p,'bin','qwen-tts.exe'))
+  return !this.disposed && fileExists(join(this.executableDirectory(),'qwen-tts.exe')) && (this.options.device!=='cuda'||qwenCudaRuntimeReady(p))
    && fileExists(join(p,'model',QWEN_TALKER),1182631296) && fileExists(join(p,'model',QWEN_CODEC),291150624)
    && fileExists(join(p,'model','manifest.json'));
  }
@@ -66,29 +71,29 @@ export class QwenTtsProvider {
     job.cancel=abort;
     const timer=setTimeout(()=>{stop(new HttpError(504,'qwen_tts_timeout','Qwen3 在本机生成时间过长，已停止。请缩短选段，或切换轻量本地声音。'));},300000);timer.unref();
     try {
-     child=spawn(join(this.options.runtimePath,'bin','qwen-tts.exe'),[
+     child=spawn(join(this.executableDirectory(),'qwen-tts.exe'),[
       '--model',join(this.options.runtimePath,'model',QWEN_TALKER),'--codec',join(this.options.runtimePath,'model',QWEN_CODEC),
       '--speaker',this.options.voice,'--lang','Chinese','--instruct',this.options.instructions,
       '--max-new','1800','--seed','42','-o',output,
-     ],{cwd:join(this.options.runtimePath,'bin'),env:environment(this.options.threads ?? 2),windowsHide:true,stdio:['pipe','pipe','pipe'],shell:false});
+     ],{cwd:this.executableDirectory(),env:environment(this.options.threads ?? 2,this.options.device ?? 'cpu'),windowsHide:true,stdio:['pipe','pipe','pipe'],shell:false});
      child.stdout.resume();child.stderr.on('data',(data:Buffer)=>{diagnostic+=data.toString('utf8');hitLimit ||= diagnostic.includes(LIMIT_MARKER);diagnostic=diagnostic.slice(-LIMIT_MARKER.length);});
-     child.once('error',()=>finish(failed()));child.stdin.on('error',()=>stop(failed()));
+     child.once('error',()=>finish(failed(this.options.device)));child.stdin.on('error',()=>stop(failed(this.options.device)));
      child.once('close',code=>{
       if(terminationError)return finish(terminationError);
       if(signal.aborted||interrupted)return finish(cancelled());
       if(hitLimit)return finish(new HttpError(422,'qwen_tts_truncated','这段语音达到生成上限，未把截断音频当成读完。请缩短选段后重试。'));
-      finish(code===0?undefined:failed());
+      finish(code===0?undefined:failed(this.options.device));
      });
      signal.addEventListener('abort',abort,{once:true});if(signal.aborted||interrupted){abort();return;}
      child.stdin.end(text,'utf8');
-    } catch { finish(failed()); }
+    } catch { finish(failed(this.options.device)); }
    });
    if (signal.aborted||interrupted||this.disposed) throw cancelled();
-   const size=(await stat(output)).size;if(size>MAX_AUDIO_BYTES||size<46)throw failed();
-   const audio=await readFile(output);if(!validateQwenWave(audio))throw failed();
+   const size=(await stat(output)).size;if(size>MAX_AUDIO_BYTES||size<46)throw failed(this.options.device);
+   const audio=await readFile(output);if(!validateQwenWave(audio))throw failed(this.options.device);
    if(signal.aborted||interrupted||this.disposed)throw cancelled();
    return {audio};
-  } catch (error) { if (error instanceof HttpError) throw error; throw failed(); }
+  } catch (error) { if (error instanceof HttpError) throw error; throw failed(this.options.device); }
   finally {
    if(this.current===job)this.current=undefined;
    // This path comes only from our own mkdtemp under the fixed work directory.

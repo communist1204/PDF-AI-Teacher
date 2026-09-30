@@ -37,3 +37,18 @@ describe('independent free speech configuration',()=>{
   expect(serverConfigFor({...defaultPreferences,ttsEngine:engine,ttsModel:''},'',4319).ttsEngine).toBe(engine);
  });
 });
+
+
+describe('Qwen device preference migration',()=>{
+ it('leaves old preferences on CPU and preserves an explicit CUDA selection',async()=>temporary(async file=>{
+  const vault=new SettingsVault(file,cipher);await vault.load();
+  await vault.update({apiKey:'fake-key',preferences:{...defaultPreferences,ttsEngine:'qwen',qwenTtsDevice:'cuda',chatModel:'expert-model'}});
+  const restored=new SettingsVault(file,cipher);await restored.load();expect(restored.get().preferences.qwenTtsDevice).toBe('cuda');
+  const legacy=JSON.parse(cipher.decrypt(await readFile(file)));delete legacy.preferences.qwenTtsDevice;await writeFile(file,cipher.encrypt(JSON.stringify(legacy)));
+  const migrated=new SettingsVault(file,cipher);await migrated.load();expect(migrated.get().preferences.qwenTtsDevice).toBe('cpu');expect(migrated.get().preferences.chatModel).toBe('expert-model');expect(migrated.get().apiKey).toBe('fake-key');
+ }));
+ it('passes only a validated CPU/CUDA choice into the local service configuration',()=>{
+  expect(serverConfigFor({...defaultPreferences,ttsEngine:'qwen',qwenTtsDevice:'cuda'},'',4319).qwenTtsDevice).toBe('cuda');
+  expect(SaveSettingsSchema.safeParse({...defaultPreferences,qwenTtsDevice:'auto'}).success).toBe(false);
+ });
+});

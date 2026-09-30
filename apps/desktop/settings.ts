@@ -9,6 +9,7 @@ import type { DesktopPreferences } from '../../packages/shared/desktop';
 export const PreferenceSchema = z.object({
   mode: z.enum(['demo','chatgpt','api']),
   ttsEngine:z.enum(['local','qwen','openai','system']).default('local'),
+  qwenTtsDevice:z.enum(['cpu','cuda']).default('cpu'),
   qwenTtsVoice:z.enum(['serena','vivian','uncle_fu']).default('serena'),
   qwenTtsInstructions:z.string().trim().max(1000).default(DEFAULT_QWEN_TTS_INSTRUCTIONS),
   localTtsVoice:z.enum(['zf_001','zf_002','zf_003','zm_010','zm_011','zm_012']).default('zf_001'),
@@ -20,7 +21,7 @@ export const PreferenceSchema = z.object({
   ttsInstructions:z.string().trim().max(3000),
 }).strict();
 export const SaveSettingsSchema = PreferenceSchema.extend({apiKey:z.string().trim().max(500).optional(),clearApiKey:z.boolean().optional()}).strict();
-export const defaultPreferences:DesktopPreferences = {ttsEngine:'local',qwenTtsVoice:DEFAULT_QWEN_TTS_VOICE,qwenTtsInstructions:DEFAULT_QWEN_TTS_INSTRUCTIONS,localTtsVoice:'zf_001',mode:'demo',chatModel:'gpt-6-astra',visionModel:'gpt-6-astra',reasoningEffort:'xhigh',ttsModel:'gpt-4o-mini-tts',ttsVoice:'marin',ttsInstructions:'像面对面陪读的中文老师，温和自然，按句意停顿，避免播音腔。'};
+export const defaultPreferences:DesktopPreferences = {ttsEngine:'local',qwenTtsDevice:'cpu',qwenTtsVoice:DEFAULT_QWEN_TTS_VOICE,qwenTtsInstructions:DEFAULT_QWEN_TTS_INSTRUCTIONS,localTtsVoice:'zf_001',mode:'demo',chatModel:'gpt-6-astra',visionModel:'gpt-6-astra',reasoningEffort:'xhigh',ttsModel:'gpt-4o-mini-tts',ttsVoice:'marin',ttsInstructions:'像面对面陪读的中文老师，温和自然，按句意停顿，避免播音腔。'};
 export interface PrivateSettings {version:1;hostId:string;port:number;preferences:DesktopPreferences;apiKey:string;auth:unknown|null}
 export interface Cipher {available():boolean;encrypt(value:string):Buffer;decrypt(value:Buffer):string}
 export class SettingsVault {
@@ -50,5 +51,5 @@ export class SettingsVault {
 }
 
 export function serverConfigFor(preferences:DesktopPreferences,apiKey:string,port:number){
- return readConfig({TTS_ENGINE:preferences.ttsEngine??'local',LOCAL_TTS_VOICE:preferences.localTtsVoice??'zf_001',QWEN_TTS_VOICE:preferences.qwenTtsVoice,QWEN_TTS_INSTRUCTIONS:preferences.qwenTtsInstructions,APP_PORT:String(port),DEMO_MODE:String(preferences.mode==='demo'),OPENAI_API_KEY:apiKey,CHAT_MODEL:preferences.chatModel,VISION_MODEL:preferences.visionModel,CHAT_REASONING_EFFORT:preferences.reasoningEffort,VISION_REASONING_EFFORT:preferences.reasoningEffort,TTS_MODEL:preferences.ttsModel,TTS_VOICE:preferences.ttsVoice,TTS_INSTRUCTIONS:preferences.ttsInstructions,TEACHING_MAX_OUTPUT_TOKENS:'32000',TEACHING_TIMEOUT_MS:'300000'});
+ return readConfig({TTS_ENGINE:preferences.ttsEngine??'local',LOCAL_TTS_VOICE:preferences.localTtsVoice??'zf_001',QWEN_TTS_DEVICE:preferences.qwenTtsDevice??'cpu',QWEN_TTS_VOICE:preferences.qwenTtsVoice,QWEN_TTS_INSTRUCTIONS:preferences.qwenTtsInstructions,APP_PORT:String(port),DEMO_MODE:String(preferences.mode==='demo'),OPENAI_API_KEY:apiKey,CHAT_MODEL:preferences.chatModel,VISION_MODEL:preferences.visionModel,CHAT_REASONING_EFFORT:preferences.reasoningEffort,VISION_REASONING_EFFORT:preferences.reasoningEffort,TTS_MODEL:preferences.ttsModel,TTS_VOICE:preferences.ttsVoice,TTS_INSTRUCTIONS:preferences.ttsInstructions,TEACHING_MAX_OUTPUT_TOKENS:'32000',TEACHING_TIMEOUT_MS:'300000'});
 }

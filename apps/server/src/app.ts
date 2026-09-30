@@ -164,7 +164,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
       style: !config.ttsInstructionsSupported ? '使用模型默认语气' : config.ttsInstructions === [DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') ? '自然温和，按语义停顿' : '本机自定义语气',
       instructionsSupported: config.ttsInstructionsSupported,
     }, maxRequests: config.maxRequests };
-    if (usingLocalTts || usingSystemTts) body.speech = { engine: config.ttsEngine, ready: usingSystemTts || localReady, voice: usingLocalTts ? localVoice : '系统所选声音', style: usingQwenTts ? '中文自然陪读，可自定义语气' : usingLocalTts ? '本地中文语音；不使用语气提示词' : '系统默认', instructionsSupported: usingQwenTts };
+    if (usingLocalTts || usingSystemTts) body.speech = { engine: config.ttsEngine, ready: usingSystemTts || localReady, voice: usingLocalTts ? localVoice : '系统所选声音', style: usingQwenTts ? '中文自然陪读，可自定义语气' : usingLocalTts ? '本地中文语音；不使用语气提示词' : '系统默认', instructionsSupported: usingQwenTts, ...(usingQwenTts ? {device:config.qwenTtsDevice??'cpu'} : {}) };
     else if (config.ttsEngine) body.speech!.engine = config.ttsEngine;
     res.json(body);
   });

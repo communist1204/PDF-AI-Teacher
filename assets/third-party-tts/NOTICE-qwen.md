@@ -20,3 +20,7 @@ Pinned model files:
 | qwen-tokenizer-12hz-Q8_0.gguf | 291150624 | 1883beeed99348fc35e23dd225e9082f93f6f8c109330a33d935baa8acdbfd94 |
 
 The build script performs a native C ABI probe but does not generate audio, read private settings, or test listening quality. Real synthesis, elapsed time, cancellation, and user listening must be recorded separately.
+
+Windows CLI correction: scripts/qwen-tts-windows-utf8.patch calls the upstream utf8_init before parsing command-line arguments. Both CPU and CUDA builds include it, preserving Chinese style instructions.
+
+Optional CUDA recipe: node scripts/build-qwen-tts-cuda.mjs uses the already-installed CUDA 12.9 and builds for NVIDIA SM120a (RTX 5080), with static cudart, MSVC and GGML plus CUDA graphs. It copies only the required cuBLAS redistributable DLLs into qwen-tts-runtime/bin-cuda alongside the executable; each hash is recorded in manifest.json. The unmodified NVIDIA CUDA EULA is distributed in bin-cuda/LICENSE-NVIDIA-CUDA.txt. CUDA redistributables remain under NVIDIA terms, not this project’s MIT/Apache licenses. No driver/toolkit installation or global PATH edits are performed. Other GPU architectures require a separate build and actual verification.
