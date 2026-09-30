@@ -41,6 +41,8 @@ const accountUrls={
  'api-keys':'https://platform.openai.com/api-keys',
  billing:'https://platform.openai.com/settings/organization/billing/overview',
  chatgpt:'https://chatgpt.com/',
+ 'doubao-guide':'https://docs.volcengine.com/docs/DoubaoVoice/unidirectional-streaming-text-to-speech-http?lang=zh',
+ 'doubao-console':'https://console.volcengine.com/speech/new/setting/apikeys',
 };
 function assertSender(event:IpcMainInvokeEvent){
  if(!mainWindow||event.sender!==mainWindow.webContents||event.senderFrame!==mainWindow.webContents.mainFrame||event.senderFrame.url!==origin+'/')throw Error('拒绝非本软件设置页面的操作。');
@@ -51,7 +53,7 @@ async function openAuthorization(url:string){
 }
 async function publicSettings():Promise<DesktopSettings>{
  if(auth.snapshot().status==='signed_in'&&!models.length)await refreshModels();const data=vault.get();const snapshot=auth.snapshot();
- return {...data.preferences,hasApiKey:!!data.apiKey,localTtsReady:localTts?.ready()??false,qwenTtsReady:qwenTts?.ready()??false,qwenCudaReady:qwenCudaRuntimeReady(app.isPackaged?join(process.resourcesPath,'qwen-tts-runtime'):resolve(app.getAppPath(),'../qwen-tts-runtime')),encryptionAvailable:vault.available(),auth:snapshot,models:[...models],restartRequired};
+ return {...data.preferences,hasApiKey:!!data.apiKey,hasDoubaoApiKey:!!data.doubaoApiKey,localTtsReady:localTts?.ready()??false,qwenTtsReady:qwenTts?.ready()??false,qwenCudaReady:qwenCudaRuntimeReady(app.isPackaged?join(process.resourcesPath,'qwen-tts-runtime'):resolve(app.getAppPath(),'../qwen-tts-runtime')),encryptionAvailable:vault.available(),auth:snapshot,models:[...models],restartRequired};
 }
 function handle(channel:string,action:(...args:unknown[])=>unknown){
  ipcMain.handle(channel,async(event,...args)=>{assertSender(event);try{if(shuttingDown)throw Error('软件正在退出，请重新打开后操作。');return await action(...args);}catch(error){
@@ -83,7 +85,7 @@ async function start(){
  auth=new ChatGptAuthManager({readAuth:async()=>vault.get().auth as AuthStore|null,writeAuth:async value=>{await vault.update({auth:value});},openExternal:openAuthorization,fetch:desktopFetch});
  await auth.initialize();
  const data=vault.get(),prefs=data.preferences;
- const config=serverConfigFor(prefs,data.apiKey,data.port);
+ const config=serverConfigFor(prefs,data.apiKey,data.port,data.doubaoApiKey);
  config.authMode=prefs.mode==='chatgpt'?'chatgpt':'api_key';
  const runtimePath=app.isPackaged?join(process.resourcesPath,'local-tts-runtime'):resolve(app.getAppPath(),'../local-tts-runtime');
  localTts=new LocalTtsProvider({workerPath:join(runtimePath,'local-tts-worker.cjs'),runtimePath,modelDir:join(runtimePath,'model'),voice:prefs.localTtsVoice??'zf_001',threads:2});
@@ -118,11 +120,11 @@ async function start(){
  handle('desktop:settings',publicSettings);
  handle('desktop:save',async input=>{
   const parsed=SaveSettingsSchema.safeParse(input);if(!parsed.success)throw Error('配置格式不正确，请检查模型名称与推理强度。');
-  const {apiKey,clearApiKey,...preferences}=parsed.data;
-  const current=vault.get();const nextKey=clearApiKey?'':apiKey||current.apiKey;
+  const {apiKey,clearApiKey,doubaoApiKey,clearDoubaoApiKey,...preferences}=parsed.data;
+  const current=vault.get();const nextKey=clearApiKey?'':apiKey||current.apiKey;const nextDoubaoKey=clearDoubaoApiKey?'':doubaoApiKey||current.doubaoApiKey;
   if(preferences.mode==='api'&&!nextKey)throw Error('API 模式需要在本机填写 API Key。也可以选择 ChatGPT 登录。');
   if(preferences.mode==='chatgpt'&&auth.snapshot().status!=='signed_in')throw Error('请先使用 ChatGPT 账号登录。');
-  serverConfigFor(preferences,nextKey,current.port);await vault.update({preferences,apiKey:nextKey});restartRequired=true;return publicSettings();
+  serverConfigFor(preferences,nextKey,current.port,nextDoubaoKey);await vault.update({preferences,apiKey:nextKey,doubaoApiKey:nextDoubaoKey});restartRequired=true;return publicSettings();
  });
  handle('desktop:login',async accountId=>{if(accountId!==undefined&&(typeof accountId!=='string'||accountId.length>300))throw Error('账号选择无效。');await auth.login(accountId as string|undefined);await localApp?.locals.dispose?.();await refreshModels();const current=vault.get();await vault.update({preferences:{...current.preferences,mode:'chatgpt'}});restartRequired=true;return publicSettings();});
  handle('desktop:cancel-login',()=>auth.cancelLogin());
