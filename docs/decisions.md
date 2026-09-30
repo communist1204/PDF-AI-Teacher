@@ -174,3 +174,20 @@ Realtime 的首音等待仍有固定上限；开始播放后的看门狗按速�
 新增 CHAT_REASONING_EFFORT / VISION_REASONING_EFFORT，空白不传，以保留其他模型兼容性；专用 TEACHING_MAX_OUTPUT_TOKENS（默认16000）和 TEACHING_TIMEOUT_MS（默认180000）仅控制解题，不扩大 TTS/转写/实时请求期限。/api/config 只公开模型参数，不公开 Key。Responses SDK 7.23.0 的 ResponsesParser 对 incomplete 状态不解析半段JSON，本地已核对；服务显式报告截断并保留已知用量。
 
 「从头听」显式重置讲解句索引；暂停/续读保留原粒度。回答的完成提示依据实际播放完成的步骤集合。截图提问显示视觉模型；可选实时模式开启后保留既有文字同会话行为，并在界面明确告知会使用实时模型。
+
+## 桌面软件与官方 ChatGPT 登录（2026-09-30）
+
+用户明确要求双击图标启动本地软件，并希望直接登录 ChatGPT。本轮据此进入桌面封装范围，保留原 PRD 和网页开发方式。选用项目局部 Electron 44.5.0、@electron/packager 20.3.0、esbuild 0.28.2；内置 Express 服务与窗口同进程生命周期，固定 4319 与独立持久化分区。软件自带运行环境，不要求用户安装全局 Node，也不做系统常驻或改全局代理。
+
+重新核验 [Sign in with ChatGPT 本地应用计划授权](https://developers.openai.com/siwc/token-sharing-open-source)：官方提供本地动态客户端注册，商业伙伴 client ID 申请不是这一流程的先决条件。使用自己的 host ID、回环 callback、state/nonce/PKCE、签名 ID token 验证；不读取 ChatGPT/Codex 的已有 cookie/token。模型目录来自授权后的账号，不保证固定模型可用。OAuth 与 API Key 路径独立，拒绝自动跨计费路线重试。
+
+OAuth Responses 使用 store=false、stream=true、input 数组与 instructions，直到完成事件才接受完整教案；不发送该路径禁止的 max_output_tokens 等参数。教学等待上限仍有效，UI 区分预算配置与此路径实际支持。语音接口未获此授权文档确认，仍单独使用用户可选 API Key。
+
+桌面主窗口开启 contextIsolation、sandbox，关闭 Node 集成；IPC 校验主窗口/主 frame/精确来源，外链只走固定白名单；随机实例请求头拒绝其他浏览器访问内置服务。原 Host/Origin/会话/CSRF/限流不移除。权限检查默认拒绝媒体，仅用户明确确认的纯音频请求可用，摄像头拒绝。凭证只由主进程加密保存，使用 Electron safeStorage 的 Windows DPAPI；不宣称能隔离同一 Windows 账户下的恶意程序。
+
+打包采用白名单 staging，只包含生产前端、后端/桌面 bundle 和应用资产，不复制项目目录、.env、测试配置或账号数据。数据目录独立于 release，重建程序不删除学习记录。保存设置前调用与启动相同的配置校验，避免无效 TTS 指令导致下次无法启动。
+
+
+首次启动在调用 Electron setPath 前创建本软件专用数据目录，并给出失败提示；不要求预建目录。退出前取消上游任务，在有界等待内排空账号和加密文件写入队列；超时仍不承诺远端撤销或磁盘完成。账号退出使在途模型目录请求失效，避免旧账号数据回填。真实 exe 测试从不存在的 profile 开始，避免预创建目录掩盖首次启动问题。
+
+官方协议细节依据：[登录与动态注册](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[账号模型与推理](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)、[会话与撤销](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)、[预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)。这些资料支持实现选择，不代表本机账号已经授权或真实服务验收通过。

@@ -289,5 +289,6 @@ export class ChatGptAuthManager {
     }
     return this.snapshot();
   }
+  async flush() { let pending; do { pending = this.writes; await pending; } while (pending !== this.writes); }
   dispose() { this.closed = true; this.epoch++; this.cancelLogin(); for (const controller of this.controllers) controller.abort(); }
 }

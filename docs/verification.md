@@ -239,3 +239,51 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 日常服务只重启了已核实的本项目 PID 7956，新 PID 31632 监听 127.0.0.1:4317。23:50 的实际 Edge 检查：HTTP 200、默认文字入口可见、麦克风折叠、设置显示当前后端 16000 tokens / 180 秒；pageErrors=[]，没有 ask/TTS/转写/Realtime 请求。见 [dev-smoke.json](dev-smoke.json)。服务保持运行；电脑重启后仍需 npm.cmd run dev。
 
 未测：GPT-6 Astra 账号权限、真实复杂理论推导质量、真实 TTS 中文自然度和公式读法、真人听音；没有 .env、没有真实 Key、没有付费调用。README 与 .env.example 中的 Astra+xhigh+marin 是配置建议，未声称当前已启用。原 PRD 验收标准和此前 A06/A10/A12/A14/A15 等真人待验状态不变。
+
+
+## Windows 桌面与 ChatGPT 登录（2026-09-30）
+
+本轮范围来自用户明确要求：双击图标打开独立本地软件，使用 ChatGPT 账号登录；继续以文字理论问答和独立朗读为主。原 AGENTS/PRD/START_HERE 完成标准未修改。先检查了项目文件与 Node/npm/Git，再核对官方接口并实施；并行 auth 与 UI 在独立 worktree 完成后集成。
+
+### 最终执行结果
+
+| 检查 | 实际结果 | 证据边界 |
+|---|---|---|
+| typecheck / lint | 均退出 0 | 类型、规则检查；desktop:package 内再次执行 tsc |
+| npm.cmd test | 15 文件，316/316，1.21 秒 | 2026-09-30 11:37；含 OAuth/Responses 模拟与凭证退出保存回归 |
+| npm.cmd run test:e2e | 49/49，34.4 秒，7 workers | 实际 Edge 页面，新增三项桌面 bridge 场景；桥接与模型返回模拟 |
+| npm.cmd run desktop:package | 退出 0 | Vite + esbuild + Electron 44.5.0 Windows x64；保留 >500 kB chunk 提示 |
+| npm.cmd run test:desktop -- --packaged | 退出 0 | 11:37:50，实际 exe、首次不存在的 profile、真实 PDF/KaTeX、单实例、真实 Windows 加密、关闭重开恢复 |
+| npm.cmd run test:desktop:restart | 退出 0 | 11:37:52，实际 app.relaunch；设置应用、localStorage 保留、窗口关闭后端口退出 |
+| 生产网页 smoke | 退出 0 | 11:25:11，真实 SpeechSynthesis 收到 0.25，事件准备→发声→停止；0 pageErrors / 0 providerCalls |
+| 普通账户首次启动/快捷方式 | 通过 | 11:38:29，在正常应用数据目录启动；实际创建桌面图标，登录入口可见，账号 signed_out / demo |
+
+原始记录：[桌面 smoke](desktop-smoke.json)、[真实自动重启](desktop-restart.json)、[普通账户首次启动](desktop-first-run.json)、[生产网页](production-smoke.json)。最后两项桌面脚本不预建数据目录。测试凭证是显式 fake 值，未进行真实授权或付费调用。
+
+已实际打开并查看 [桌面工作台](screenshots/desktop-workspace.png)、[登录设置](screenshots/desktop-settings.png)、[720p 设置](screenshots/desktop-settings-720.png)、[普通账户首次打开](screenshots/desktop-first-run.png)。独立窗口没有浏览器地址栏；PDF、三栏黑板和提问入口正常，设置可滚动至保存/重启按钮；账号登录和独立声音配置含清楚说明。浏览器页面与原生窗口均有实际检查，不能仅用控制台无错误代替。
+
+### 测试层次
+
+- OAuth 的外部发现、授权码交换、令牌续期、撤销和模型目录为注入 mock；回调是实际动态回环 HTTP，JWT 使用实际测试密钥签名/校验。覆盖 state/nonce/PKCE、签名/issuer/audience/expiry、注册映射、账号切换时轮换凭证、取消/超时、失效/暂时错误、退出清理、关闭时等待已开始落盘。
+- ChatGPT Responses 模拟验证官方请求参数、stream 完成才接受 TeachingPlan、不完整响应拒绝、不会静默切换 API Key 计费。语音走独立 API Key provider，不将 OAuth token 发给音频路径。
+- vault 单元测试的 cipher 是测试替身；实际 exe 另用真实 Windows DPAPI 保存 fake 凭证，文件中没有其明文，公开设置不回传 Key，重开后成功读取存在状态，最后清除测试 Key。
+- 实际 exe 验证 nodeIntegration=false、contextIsolation=true、sandbox=true；额外浏览器直连内置端口返回 403。关闭窗口后请求失败，第二次启动恢复原书笔记；重复 exe 进程退出、原窗口仍为一个。
+- 重启测试只在测试进程启用动态本机调试端口；交付普通桌面启动不添加调试参数。账号、Key 和学习记录不打入 asar 或 Git。
+
+### 开发中失败与修复
+
+- 首次打包对下载缓存配置不当，重复下载 Electron 遇到 ECONNRESET；改用已下载的官方运行时缓存并校验随包 checksums，随后打包成功。首次在包生成前启动 exe 的测试失败随之解决。
+- 桌面 smoke 初稿使用旧笔记框名称/未展开笔记，断言失败；修正为实际可见入口后保留全部验证。真实重启脚本误用了不存在的 Browser.waitForEvent，改成 Browser 的 disconnected 事件等待后通过。
+- 新增脚本 lint 暴露浏览器全局变量与计时器声明、三元表达式规则问题；改为 window.localStorage、显式导入和 if/else，最终 lint 通过。未删除场景或屏蔽这些检查。
+- 类型检查和 auth 集成中曾有缺模块、SDK requestID 命名等失败，合并完成并按本机 SDK 类型修正后通过。
+- 最终只读复核发现预创建测试目录掩盖首次 setPath 风险，以及退出账号目录回填、退出未等待凭证写入问题。先建自身目录、使旧目录请求失效、退出有界排空写入队列，并以真实首次启动/重启和新增凭证轮换关闭用例回归。最终数量为 316/49。
+
+### 仍未验收
+
+没有真实 ChatGPT 授权、账号资格/模型列表、真实 Responses、专业理论质量、供应商 TTS 中文自然度或真人听音证据。登录能力按官方本地应用协议实现，不表示每个账号均有资格或额度；默认 Astra/xhigh 仅建议，授权后以账号列表和支持参数为准。自然语音依旧需要用户本机可选 API Key；不把 ChatGPT 登录和 TTS 授权等同，不收集现有 ChatGPT/Codex token。
+
+本地程序没有购买代码签名证书，其他电脑分发/安装提示未测；本机已实际双击等效启动。尚未做 20 分钟真人学习、复杂长书/扫描书的完整验收，原 A06/A10/A12/A14/A15 等真人待验状态保留。原网页数据与桌面分区隔离，可先从网页导出 JSON 再导入桌面；不保存原 PDF 文件，重新打开同一本书恢复记录。
+
+最小用户操作：双击桌面 PDF AI Teacher → 使用 ChatGPT 登录并在官方浏览器授权 → 核对可用解题模型并应用重启 → 打开 PDF 提问。若要自然 AI 朗读，再在本机高级设置填写可选语音 Key 并自行确认一次最小音频请求。真实 Key 不应发送到聊天。
+
+最终交付状态（11:41）：桌面快捷方式目标已核实，正常启动的 exe 保持打开，主窗口句柄存在，未带调试参数；外部访问 4319 返回预期的 403。见 [运行状态](desktop-running.json)。asar 白名单核查共 277 条目，未发现额外目录或测试凭证，.env 不存在；见 [发布包核查](desktop-package-check.json)。白名单脚本初稿漏列预期 LICENSES.txt，出现一次误报，补入许可文件后通过，未删掉软件许可。

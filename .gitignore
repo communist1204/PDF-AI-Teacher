@@ -9,3 +9,9 @@ test-results/
 playwright-report/
 *.log
 
+
+desktop-build/
+release/
+.electron-cache/
+.desktop-data/
+*.lnk

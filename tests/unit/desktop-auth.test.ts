@@ -136,6 +136,20 @@ describe('desktop ChatGPT OAuth (official endpoints mocked; real local callback 
       expect(h.persisted().activeAccountId).toBe(second.activeAccountId);
     } finally { h.manager.dispose(); }
   });
+  it('waits for a rotated credential already being persisted during application shutdown', async () => {
+    const h = await harness(); let release!: () => void;
+    try {
+      await h.manager.login(); h.advance(3600000);
+      h.gateWrite(new Promise<void>(resolve => { release = resolve; }));
+      const writesBefore = h.writeAuth.mock.calls.length;
+      const request = h.manager.getAccessToken(); const rejection = expect(request).rejects.toThrow();
+      await vi.waitFor(() => expect(h.writeAuth.mock.calls.length).toBeGreaterThan(writesBefore));
+      h.manager.dispose(); let flushed = false; const flush = h.manager.flush().then(() => { flushed = true; });
+      await Promise.resolve(); expect(flushed).toBe(false);
+      release(); await flush; await rejection;
+      expect(h.persisted().accounts[0].credentials?.refreshToken).toBe('mock-rotated-refresh');
+    } finally { release?.(); h.manager.dispose(); }
+  });
   it('clears unusable refresh tokens but retains client mapping for safe reauthorization', async () => {
     const h = await harness();
     try {
