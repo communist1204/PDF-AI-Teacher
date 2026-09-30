@@ -49,7 +49,7 @@ process.on('message', message => {
   if (!tts || !message || message.type !== 'speak' || typeof message.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(message.id)) return;
   if (typeof message.text !== 'string' || !message.text.trim() || message.text.length > 6000) { send({ type: 'error', id: message.id }); return; }
   try {
-    const audio = tts.generate({ text: message.text, generationConfig: new sherpa.GenerationConfig({ sid: voices[voice], speed: 1, silenceScale: 1 }) });
-    send({ type: 'audio', id: message.id, audio: wave(audio.samples, audio.sampleRate) });
+    const audio = tts.generate({ text: message.text, enableExternalBuffer: false, generationConfig: new sherpa.GenerationConfig({ sid: voices[voice], speed: 1, silenceScale: 1 }) });
+    send({ type: 'audio', id: message.id, audioBase64: wave(audio.samples, audio.sampleRate).toString('base64') });
   } catch { send({ type: 'error', id: message.id }); }
 });

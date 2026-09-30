@@ -78,23 +78,23 @@ describe('isolated local TTS provider', () => {
     const first = value.speak(' 第一段原文。 ', 0.25, signal); const child = children[0];
     expect(child.sent).toEqual([]); child.emit('message', { type: 'ready' });
     expect(child.sent[0]).toEqual({ type: 'speak', id: expect.any(String), text: ' 第一段原文。 ' });
-    child.emit('message', { type: 'audio', id: child.sent[0].id, audio: wav() });
+    child.emit('message', { type: 'audio', id: child.sent[0].id, audioBase64: wav().toString('base64') });
     expect((await first).audio).toEqual(wav());
     const second = value.speak('第二段。', 2, signal);
-    child.emit('message', { type: 'audio', id: child.sent[0].id, audio: wav() });
-    child.emit('message', { type: 'audio', id: child.sent[1].id, audio: wav() });
+    child.emit('message', { type: 'audio', id: child.sent[0].id, audioBase64: wav().toString('base64') });
+    child.emit('message', { type: 'audio', id: child.sent[1].id, audioBase64: wav().toString('base64') });
     await expect(second).resolves.toMatchObject({ audio: wav() });
     expect(forkMock).toHaveBeenCalledTimes(1); expect(child.kill).not.toHaveBeenCalled();
     const args = forkMock.mock.calls[0];
     expect(args[0]).toBe(options.workerPath); expect(args[1]).toEqual([directory, options.modelDir, 'zf_001', '2']);
-    expect(args[2]).toMatchObject({ execPath: process.execPath, execArgv: [], windowsHide: true, serialization: 'advanced', stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    expect(args[2]).toMatchObject({ execPath: process.execPath, execArgv: [], windowsHide: true, serialization: 'json', stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
     expect(args[2].env.ELECTRON_RUN_AS_NODE).toBe('1');
     expect(Object.keys(args[2].env).every(key => ['systemroot', 'windir', 'temp', 'tmp', 'pathext', 'lang', 'lc_all', 'path', 'electron_run_as_node'].includes(key.toLowerCase()))).toBe(true);
   });
   it('refuses overlap without replacing the first pending sentence', async () => {
     const value = provider(); const first = value.speak('第一句', 1, new AbortController().signal);
     await expect(value.speak('第二句', 1, new AbortController().signal)).rejects.toMatchObject({ code: 'local_tts_busy' });
-    const child = children[0]; child.emit('message', { type: 'ready' }); child.emit('message', { type: 'audio', id: child.sent[0].id, audio: wav() });
+    const child = children[0]; child.emit('message', { type: 'ready' }); child.emit('message', { type: 'audio', id: child.sent[0].id, audioBase64: wav().toString('base64') });
     await expect(first).resolves.toBeDefined(); expect(forkMock).toHaveBeenCalledTimes(1);
   });
   it('cancels its own child and ignores late messages/exit from the old process', async () => {
@@ -102,8 +102,8 @@ describe('isolated local TTS provider', () => {
     const first = value.speak('第一句', 1, controller.signal); const rejection = expect(first).rejects.toMatchObject({ code: 'local_tts_cancelled' });
     const old = children[0]; old.emit('message', { type: 'ready' }); controller.abort('private reason'); await rejection; expect(old.kill).toHaveBeenCalledOnce();
     const second = value.speak('第二句', 1, new AbortController().signal); const next = children[1]; next.emit('message', { type: 'ready' });
-    old.emit('message', { type: 'audio', id: next.sent[0].id, audio: wav() }); old.emit('exit', 1); old.emit('error', Error('sensitive native path'));
-    expect(next.kill).not.toHaveBeenCalled(); next.emit('message', { type: 'audio', id: next.sent[0].id, audio: wav() });
+    old.emit('message', { type: 'audio', id: next.sent[0].id, audioBase64: wav().toString('base64') }); old.emit('exit', 1); old.emit('error', Error('sensitive native path'));
+    expect(next.kill).not.toHaveBeenCalled(); next.emit('message', { type: 'audio', id: next.sent[0].id, audioBase64: wav().toString('base64') });
     await expect(second).resolves.toMatchObject({ audio: wav() });
   });
   it.each(['exit', 'error', 'worker-error', 'bad-audio'])('sanitizes %s and permits a fresh worker on retry', async event => {
@@ -112,10 +112,20 @@ describe('isolated local TTS provider', () => {
     const child = children[0]; child.emit('message', { type: 'ready' });
     if (event === 'exit') child.emit('exit', 123);
     else if (event === 'error') child.emit('error', Error('sk-native-secret'));
-    else child.emit('message', { type: event === 'worker-error' ? 'error' : 'audio', id: child.sent[0].id, message: 'sk-native-secret', audio: Buffer.from('sk-native-secret') });
+    else child.emit('message', { type: event === 'worker-error' ? 'error' : 'audio', id: child.sent[0].id, message: 'sk-native-secret', audioBase64: 'sk-native-secret' });
     await rejection;
-    const second = value.speak('重试', 1, new AbortController().signal); const next = children[1]; next.emit('message', { type: 'ready' }); next.emit('message', { type: 'audio', id: next.sent[0].id, audio: wav() });
+    const second = value.speak('重试', 1, new AbortController().signal); const next = children[1]; next.emit('message', { type: 'ready' }); next.emit('message', { type: 'audio', id: next.sent[0].id, audioBase64: wav().toString('base64') });
     await expect(second).resolves.toBeDefined();
+  });
+  it('rejects malformed, noncanonical, oversized base64 and inconsistent WAV headers', async () => {
+    const invalidWave = wav(); invalidWave.writeUInt32LE(1, 28);
+    const malformed: unknown[] = ['', '!!!!', wav().toString('base64') + '\n', wav().toString('base64') + '=', { type: 'Buffer', data: [1, 2] }, 'A'.repeat(Math.ceil(8 * 1024 * 1024 / 3) * 4 + 4), invalidWave.toString('base64')];
+    for (const audioBase64 of malformed) {
+      const value = provider(); const result = value.speak('fixture', 1, new AbortController().signal);
+      const rejection = expect(result).rejects.toMatchObject({ code: 'local_tts_failed' });
+      const child = children.at(-1)!; child.emit('message', { type: 'ready' });
+      child.emit('message', { type: 'audio', id: child.sent[0].id, audioBase64 }); await rejection;
+    }
   });
   it('settles initialization failure, timeout, spawn failure and disposal without retaining jobs', async () => {
     const initializing = provider(); const initial = initializing.speak('你好', 1, new AbortController().signal);
@@ -133,7 +143,7 @@ describe('isolated local TTS provider', () => {
     await writeFile(join(runtime, 'package.json'), JSON.stringify({ main: 'sherpa-onnx.js' }));
     await writeFile(join(runtime, 'sherpa-onnx.js'), `let calls=0; module.exports={GenerationConfig:class {constructor(value){Object.assign(this,value);}},OfflineTts:class {
       constructor(config){if(config.model.provider!=='cpu'||config.model.numThreads!==2||config.model.debug!==false||!config.ruleFsts.endsWith('number-zh.fst'))throw Error('private-config');}
-      generate({text,generationConfig}){if(generationConfig.sid!==3||generationConfig.speed!==1)throw Error('private-speed');if(text==='error')throw Error('source-text-secret');return {samples:new Float32Array([-1,0,.5,1,++calls/10]),sampleRate:24000};}
+      generate({text,generationConfig,enableExternalBuffer}){if(enableExternalBuffer!==false||generationConfig.sid!==3||generationConfig.speed!==1||generationConfig.silenceScale!==1)throw Error('private-speed');if(text==='error')throw Error('source-text-secret');return {samples:new Float32Array([-1,0,.5,1,++calls/10]),sampleRate:24000};}
     }};`);
     const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
     forkMock.mockImplementationOnce(actual.fork);

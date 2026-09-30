@@ -42,9 +42,20 @@ function isPcmWave(value: unknown): value is Buffer {
     && value.toString('ascii', 12, 16) === 'fmt ' && value.readUInt32LE(16) === 16
     && value.readUInt16LE(20) === 1 && value.readUInt16LE(22) === 1
     && value.readUInt32LE(24) >= 8000 && value.readUInt32LE(24) <= 96000
+    && value.readUInt32LE(28) === value.readUInt32LE(24) * 2 && value.readUInt16LE(32) === 2
     && value.readUInt16LE(34) === 16 && value.toString('ascii', 36, 40) === 'data'
     && value.readUInt32LE(40) === value.length - 44 && (value.length - 44) % 2 === 0
     && value.readUInt32LE(4) === value.length - 8;
+}
+
+function decodeWave(value: unknown): Buffer | undefined {
+  // JSON IPC is stable across Electron's and standalone Node's V8 builds.
+  // Check the encoded bound before allocation; canonical re-encoding rejects
+  // whitespace, invalid characters, missing/extra padding and non-zero pad bits.
+  if (typeof value !== 'string' || value.length < 64 || value.length % 4 !== 0 || value.length > Math.ceil(MAX_AUDIO_BYTES / 3) * 4) return;
+  const audio = Buffer.from(value, 'base64');
+  if (audio.toString('base64') !== value || !isPcmWave(audio)) return;
+  return audio;
 }
 
 /** A single persistent CPU worker; only the process created by this instance is ever stopped. */
@@ -98,7 +109,7 @@ export class LocalTtsProvider {
     try {
       child = fork(workerPath, [runtimePath, modelDir, voice, String(threads)], {
         execPath: executablePath, execArgv: [], windowsHide: true,
-        stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'advanced',
+        stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'json',
         env: childEnvironment(runtimePath),
       });
     } catch { this.fail(failed()); return; }
@@ -112,9 +123,10 @@ export class LocalTtsProvider {
       if (data.type === 'error' && (data.id === undefined || data.id === this.pending?.id)) { this.fail(failed()); return; }
       const pending = this.pending;
       if (data.type !== 'audio' || !pending || data.id !== pending.id || !pending.sent) return;
-      if (!isPcmWave(data.audio)) { this.fail(failed()); return; }
+      const audio = decodeWave(data.audioBase64);
+      if (!audio) { this.fail(failed()); return; }
       this.clearPending();
-      pending.resolve({ audio: data.audio });
+      pending.resolve({ audio });
     });
   }
 
