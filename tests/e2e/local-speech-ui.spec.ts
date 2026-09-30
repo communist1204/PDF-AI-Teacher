@@ -28,8 +28,8 @@ async function setup(page: Page, engine: SpeechEngine = 'local', ready = true, m
   await page.goto('/');
   return { localRequests, remoteRequests };
 }
-async function selectText(page: Page) {
-  await page.getByRole('button', {name: /示例/}).click(); await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
+async function selectText(page: Page, openSample = true) {
+  if (openSample) await page.getByRole('button', {name: /示例/}).click(); else await expect(page.locator('.textLayer span').first()).toBeVisible(); await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
   const text = page.locator('.textLayer span').filter({hasText:'指数移动平均将过去'}).first(); await expect(text).toBeVisible(); const box = (await text.boundingBox())!;
   await page.mouse.move(box.x + 1, box.y + box.height / 2); await page.mouse.down(); await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, {steps:12}); await page.mouse.up();
 }
@@ -65,7 +65,7 @@ test('问答仍为演示时本地 AI 朗读使用音频接口，暂停续读及�
   await page.getByRole('button',{name:'回原文继续',exact:true}).click(); await expect(page.getByTestId('reading-subtitle')).toHaveText(source??'');
   expect(localRequests.length).toBeGreaterThan(2); expect((await harness(page)).speechCalls).toEqual([]); expect(remoteRequests).toEqual([]);
   await page.getByRole('button',{name:'停止',exact:true}).click();
-  await page.reload(); await page.getByRole('button',{name:/示例/}).click(); await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
+  await page.reload(); await expect(page.locator('.textLayer span').first()).toBeVisible(); await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
   await page.getByRole('button',{name:'继续朗读',exact:true}).click(); await expect(page.locator('.audio-source strong')).toContainText('正在朗读'); expect((await harness(page)).speechCalls).toEqual([]);
   await page.getByRole('button',{name:'停止',exact:true}).click();
 });
@@ -75,7 +75,7 @@ test('未连接解题模型仍可本地朗读，缺少本地模型明确报错�
   await page.getByRole('button',{name:'朗读所选',exact:true}).click(); await expect(page.getByRole('alert')).toContainText('本地语音模型尚未就绪');
   expect(localRequests).toEqual([]); expect((await harness(page)).speechCalls).toEqual([]); expect(remoteRequests).toEqual([]);
   await page.route('**/api/config',async route=>{ const response=await route.fetch();const config=await response.json();await route.fulfill({json:{...config,mode:'unconfigured',speech:{engine:'local',ready:true,voice:'zf_001',style:'',instructionsSupported:false}}}); });
-  await page.reload(); await selectText(page); await page.getByRole('button',{name:'朗读所选',exact:true}).click(); await expect(page.locator('.audio-source strong')).toContainText('正在朗读'); expect(localRequests.length).toBeGreaterThan(0); expect((await harness(page)).speechCalls).toEqual([]);
+  await page.reload(); await selectText(page, false); await page.getByRole('button',{name:'朗读所选',exact:true}).click(); await expect(page.locator('.audio-source strong')).toContainText('正在朗读'); expect(localRequests.length).toBeGreaterThan(0); expect((await harness(page)).speechCalls).toEqual([]);
   await page.getByRole('button',{name:'停止',exact:true}).click();
 });
 

@@ -219,8 +219,7 @@ test('刷新恢复会话版本，本书笔记按指纹保留',async({page})=>{
   await expect(page.getByTestId('board-step').first()).toBeVisible();
   await page.locator('.notes summary').click();
   await page.getByRole('textbox',{name:'本书本地笔记',exact:true}).fill('我需要再想一下权重总和。');
-  await page.reload();
-  await page.getByRole('button',{name:/示例/}).click();
+  await page.reload();await expect(page.locator('.textLayer span').first()).toBeVisible();
   await expect(page.locator('.textLayer span').filter({hasText:'指数移动平均将过去'}).first()).toBeVisible();
   await page.locator('.notes summary').click();
   await expect(page.getByRole('textbox',{name:'本书本地笔记',exact:true})).toHaveValue('我需要再想一下权重总和。');

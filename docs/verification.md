@@ -439,3 +439,20 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 真实桌面首轮因720p下目标行未滚入PDF可见区域而拖选失败，0语音请求；保留test-results/speech-continuity-profile中的failed报告。脚本改为先scrollIntoViewIfNeeded后真实鼠标拖选，第二轮完整通过。未降低产品选区或播放断言。正常窗口外的HTTP请求被桌面guard拒绝，未放宽安全配置。
 
 当前边界：OpenAI及系统声音尚沿用原来的句首改速；本地Qwen/Kokoro和豆包支持原位改速。Qwen逐句生成的模型音色/语气变动与音频内部停顿仍不能承诺完全消除。豆包没有凭证所以没有真实试听；不把模拟响应、官方支持LaTeX或14ms软件交接当作自然人声保证。开发启动npm.cmd run dev，双击release/PDF AI Teacher-win32-x64/PDF AI Teacher.exe运行桌面；重建npm.cmd run desktop:package。
+
+
+## 2026-10-01：自动重开书籍/页码、模型公式认读验收
+
+- 环境：Node v24.19.0、npm 11.17.0、Git 2.50.1.windows.1；任务开始 Git clean，根 AGENTS/PRD/START_HERE 已读。
+- npm run typecheck：通过；npm run lint：通过；npm run build：通过；npm run desktop:package：通过（Vite仍有既有>500kB bundle体积警告，不影响产物）。
+- npm test：747/747 通过（28文件）。首次与E2E并行启动导致Playwright清理共用test-results，使Qwen fake-child写WAV报ENOENT；已改顺序执行，全量通过，未改测试断言掩盖错误。
+- npm run test:e2e：92/92 通过，51.6秒，真实Edge/IndexedDB/PDF.js/HTMLAudio。新增5项自动恢复场景和4项自动认读场景；GPT及TTS响应用显式mock，不代表真实模型准确性或听感。
+- 首轮全量E2E 87通过/5失败：2项旧测试仍在刷新后点击已消失的示例按钮，2项旧声音选择器匹配新增恢复卡，1项新增框选测试误用图片CSS。已更新自动恢复期望、独立恢复卡样式及真实图片定位，保留原验证断言；失败trace/screenshot/context留在.model-cache/reading-first-e2e-failures，最终全量通过。
+- 新认读流程验证：未识别公式打开窗口自动一次请求；body只有选区上下文/PNG及Envelope，无历史/额外整书；中文稿一键进入实际播放器；uncertain禁止采用；关闭取消且迟到响应不改内容/不播音；纯图片框选可以识别，已采用稿再次打开不重复请求。PNG裁剪与播放器是真实本机能力，模型结果为mock。
+- node scripts/verify-desktop-reading-reopen.mjs：真实生产打包EXE、隔离profile、无Key、无mock PDF。选择自制sample.pdf，翻到PDF第2页并写笔记，关闭窗口确认进程退出/4319释放，再重启同profile；不点击选书或导航，恢复同SHA/页2/笔记，canvas非空像素和文本层均验证。0模型/声音请求、0上游网络请求、0页面错误。报告：[desktop-reading-reopen.json](desktop-reading-reopen.json)。
+- 已目视检查720p自动识别窗口与真实桌面恢复画面。证据：[reading-assist-preview-720.png](screenshots/reading-assist-preview-720.png)、[desktop-reading-reopen-720.png](screenshots/desktop-reading-reopen-720.png)、[reading-restore-settings-720.png](screenshots/reading-restore-settings-720.png)。模型名mock-vision表示模拟，不是用户真实配置。
+- 未测：真实GPT对用户教材的识别准确率、真实账号/云费用、新朗读稿的真人听感、加密PDF自动重开密码流程、大PDF接近100MiB的实际磁盘压力。没有声称本轮验证了真实云接口。
+
+用户最少步骤：双击原软件图标；更新后先打开一次自己的书，之后自动恢复。遇到复杂公式点「朗读所选」，模型已配置时自动准备稿件，再点「使用并朗读」；未配置时进入GPT设置，Key只在本机填写。
+
+交付时已启动普通用户配置的新版桌面窗口，PID 26600，标题「PDF AI Teacher · 学习工作台」、Responding=true；没有测试profile/调试参数，没有改账号或声音配置。见 [reading-running.json](reading-running.json)。

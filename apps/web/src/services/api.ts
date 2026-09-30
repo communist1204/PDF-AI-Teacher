@@ -1,3 +1,4 @@
+import { ReadingAssistResponseSchema, type ReadingAssistRequest, type ReadingAssistResponse } from '../../../../packages/shared/readingAssist';
 import type { AppConfig, AskRequest, AskResponse, Envelope, TranscriptionRequest, TranscriptionResponse } from '../../../../packages/shared/protocol';
 import { sameEnvelope, TranscriptionResponseSchema, validatePlan } from '../../../../packages/shared/protocol';
 
@@ -27,6 +28,11 @@ export function apiClient(config: AppConfig) {
       const result: AskResponse = await (await post('/api/ask', request, signal)).json();
       if (!sameEnvelope(request, result)) throw new Error('已丢弃过期回答');
       result.plan = validatePlan(result.plan, request.context, request.contextRevision);
+      return result;
+    },
+    async readingAssist(request: ReadingAssistRequest, signal: AbortSignal): Promise<ReadingAssistResponse> {
+      const result = ReadingAssistResponseSchema.parse(await (await post('/api/reading-assist', request, signal)).json());
+      if (!sameEnvelope(request, result)) throw new Error('已丢弃过期的朗读稿');
       return result;
     },
     async speech(text: string, envelope: Envelope, speed: number, signal: AbortSignal) {

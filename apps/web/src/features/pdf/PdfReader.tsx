@@ -5,17 +5,21 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { DocumentRecord, PdfTarget } from '../../../../../packages/shared/protocol';
 import { clamp, displayToPageRect, orderedRect, pageToDisplayRect, pdfPageNumber, unionRects, type Rect } from './geometry';
 import { EXTRACTION_VERSION, extractPageText, sourceIdentity, type ExtractedPage, type TextRun } from './text';
+import { loadLastPdf, lastView, rememberPage, rememberPdf, MAX_PDF_BYTES } from '../library/lastPdf';
+import { captureSelection, type CaptureSelection } from './capture';
 import './pdf.css';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
-const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_FILE_BYTES = MAX_PDF_BYTES;
 type Outline = NonNullable<Awaited<ReturnType<PDFDocumentProxy['getOutline']>>>;
-type Loaded = { pdf: PDFDocumentProxy; record: DocumentRecord; canCopy: boolean };
+type Loaded = { pdf: PDFDocumentProxy; record: DocumentRecord; canCopy: boolean; blob: Blob };
 type Rendered = { viewport: PageViewport; extraction: ExtractedPage; pageIndex: number; documentId: string };
 export type ReaderAction = {type:'open-sample'|'select-excerpt';nonce:number};
 export type PdfReaderProps = {
   action?: ReaderAction;
-  onDocument: (document: DocumentRecord | null) => void;
+  onDocument: (document: DocumentRecord | null, openedPage?: number) => void;
+  restoreReading?: boolean;
+  onImageCapture?: (capture: CaptureSelection | null) => void;
   onTarget: (target: PdfTarget | null) => void;
   onPage: (pageIndex: number) => void;
   navigation?: { pageIndex: number; rect?: Rect; nonce: number };
@@ -101,6 +105,7 @@ export function PdfReader(props: PdfReaderProps) {
   const [loading, setLoading] = useState(false);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState('');
+  const [cacheStatus, setCacheStatus] = useState('');
   const [passwordPrompt, setPasswordPrompt] = useState('');
   const [password, setPassword] = useState('');
   const [outline, setOutline] = useState<Outline>([]);
@@ -149,7 +154,7 @@ export function PdfReader(props: PdfReaderProps) {
 
   function report(message: string) { setError(message); callbacks.current.onError?.(message); }
 
-  async function openPdf(source: () => Promise<{ blob: Blob; fileName: string }>) {
+  async function openPdf(source: () => Promise<{ blob: Blob; fileName: string; documentId?: string }>) {
     const ticket = ++loadTicket.current;
     clearLocalSelection();
     callbacks.current.onDocument(null);
@@ -160,7 +165,7 @@ export function PdfReader(props: PdfReaderProps) {
     loadTask.current = null;
     if (oldTask) await oldTask.destroy().catch(() => undefined);
     try {
-      const { blob, fileName } = await source();
+      const { blob, fileName, documentId: expectedId } = await source();
       if (ticket !== loadTicket.current) return;
       if (blob.size > MAX_FILE_BYTES) throw new Error('PDF：当前版本单文件上限为 100 MB，请选择更小的 PDF。');
       if (!blob.size) throw new Error('PDF：所选文件为空，请选择一个有效 PDF。');
@@ -171,6 +176,7 @@ export function PdfReader(props: PdfReaderProps) {
       const documentId = `sha256-${Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('')}`;
       if (ticket !== loadTicket.current) return;
       // Low-level display API only: no scripting manager, annotations, embedded links, or remote document URL.
+      if (expectedId && expectedId !== documentId) throw new Error('PDF：上次的 PDF 缓存校验失败，请重新选择原文件。');
       const task = getDocument({ data: bytes, cMapUrl: '/pdfjs/cmaps/', cMapPacked: true, standardFontDataUrl: '/pdfjs/standard_fonts/', wasmUrl: '/pdfjs/wasm/', enableXfa: false, disableAutoFetch: true, disableStream: true, disableRange: true, canvasMaxAreaInBytes: 64 * 1024 * 1024 });
       loadTask.current = task;
       task.onPassword = (update: (value: string) => void, reason: number) => {
@@ -186,9 +192,12 @@ export function PdfReader(props: PdfReaderProps) {
       const canCopy = !permissions || permissions.has(PermissionFlag.COPY);
       const record: DocumentRecord = { documentId, fileName, pageCount: pdf.numPages, pageLabels, extractionVersion: EXTRACTION_VERSION };
       setPasswordPrompt(''); setPassword(''); passwordUpdater.current = null;
-      setPageIndex(0); setPageEntry('1'); setRotation(0); setZoom('fit');
-      setLoaded({ pdf, record, canCopy });
-      callbacks.current.onDocument(record); callbacks.current.onPage(0);
+      let openedPage: number | undefined;
+      try { const saved = lastView(documentId); if (saved && saved.pageIndex < pdf.numPages) openedPage = saved.pageIndex; } catch { /* Learning records remain an independent fallback. */ }
+      const initialPage = openedPage ?? 0;
+      setPageIndex(initialPage); setPageEntry(String(initialPage + 1)); setRotation(0); setZoom('fit');
+      setLoaded({ pdf, record, canCopy, blob });
+      callbacks.current.onDocument(record, openedPage); callbacks.current.onPage(initialPage);
       void pdf.getOutline().then(items => { if (ticket === loadTicket.current) setOutline(items ?? []); }).catch(() => undefined);
     } catch (failure) {
       if (ticket === loadTicket.current) { setPasswordPrompt(''); passwordUpdater.current = null; report(errorMessage(failure)); }
@@ -203,6 +212,38 @@ export function PdfReader(props: PdfReaderProps) {
       return { blob: await response.blob(), fileName: '神经网络学习入门 · 自制练习.pdf' };
     });
   }
+
+  // Keep the startup task subordinate to any newer file selection or cancellation.
+  const reopen = useRef(openPdf); reopen.current = openPdf;
+  useEffect(() => {
+    let active = true; const ticket = loadTicket.current;
+    void loadLastPdf().then(saved => {
+      if (active && callbacks.current.restoreReading !== false && ticket === loadTicket.current && saved) void reopen.current(async () => saved);
+    }).catch(error => { if (active && ticket === loadTicket.current) setCacheStatus(error.message); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    if (!loaded || props.restoreReading === false) { setCacheStatus(''); return; }
+    let active = true;
+    setCacheStatus('正在本机保存这本书，下次可直接打开…');
+    void rememberPdf({ version: 1, documentId: loaded.record.documentId, fileName: loaded.record.fileName, blob: loaded.blob })
+      .then(() => { if (active) setCacheStatus('已记住这本书，下次自动回到最后浏览的页码。'); })
+      .catch(error => { if (active) setCacheStatus(error.message); });
+    return () => { active = false; };
+  }, [loaded, props.restoreReading]);
+  useEffect(() => {
+    if (!loaded || props.restoreReading === false) return;
+    try { rememberPage(loaded.record.documentId, pageIndex); }
+    catch (error) { setCacheStatus((error as Error).message); }
+  }, [loaded, pageIndex, props.restoreReading]);
+
+  useEffect(() => {
+    callbacks.current.onImageCapture?.(loaded?.canCopy ? async (target, signal) => {
+      if (target.documentId !== loaded.record.documentId) throw new Error('PDF 已更换，请重新选择原文。');
+      return captureSelection(loaded.pdf, target, signal);
+    } : null);
+    return () => callbacks.current.onImageCapture?.(null);
+  }, [loaded]);
 
   function cancelOpen() {
     loadTicket.current++; setLoading(false); setPasswordPrompt(''); setPassword(''); passwordUpdater.current = null;
@@ -467,6 +508,7 @@ export function PdfReader(props: PdfReaderProps) {
         </div>
       </>}
     </div>
+    {cacheStatus && <p className="pdf-extraction-note" role="status" data-testid="book-restore-status">{cacheStatus}</p>}
     {loaded && <div className="pdf-footer"><span>PDF 第 {pdfPageNumber(pageIndex)} 页{loaded.record.pageLabels?.[pageIndex] ? ` · 书面页码 ${loaded.record.pageLabels[pageIndex]}` : ' · 书面页码未标注'}</span><span>{mode === 'region' ? '拖动框选公式或图表' : '拖动选择原文'}</span></div>}
     {loaded && !loaded.canCopy && <p className="pdf-quality-warning">文档权限禁止复制，本应用仅显示页面，已禁用文字提取和区域截图。</p>}
     {loaded?.canCopy && rendered?.extraction.warning && <p className="pdf-quality-warning">{rendered.extraction.warning}</p>}

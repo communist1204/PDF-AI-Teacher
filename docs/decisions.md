@@ -277,3 +277,12 @@ PDF 单换行视为物理排版，中文相邻不插空格、拉丁文字保留�
 - 核验依据：[官方HTTP接口](https://docs.volcengine.com/docs/DoubaoVoice/unidirectional-streaming-text-to-speech-http?lang=zh)、[字节官方示例](https://github.com/bytedance/agentkit-samples/blob/main/skills/byted-text-to-speech/scripts/text_to_speech.py)。使用固定openspeech.bytedance.com的V3单向HTTP接口、X-Api-Key、新资源seed-tts-2.0；官方示例同时给出SSE变体，本实现使用NDJSON HTTP变体。公式参数enable_latex_tn/latex_parser=v2保留，但本应用优先发送可审核的中文读法。
 - 云响应有120秒超时/8MiB上限、完整结束帧验证和取消；PCM包成完整WAV。未接前端流式播放，不宣传“秒出声”。未知用量为null，不把原文字数当作供应商账单。无启动/保存自动试听、自动重试、无自动回退、不预生成云端下一句。
 - 没有核实每个新账号的Speech2.0免费额度，不能把旧版免费额度或腾讯其他音色额度套用。界面要求用户在[官方Key控制台](https://console.volcengine.com/speech/new/setting/apikeys)确认服务/音色/免费额度，免费用完可能计费；本软件无法读取云账户余额。当前没有真实豆包凭证与免费额度确认，真实接口和听感待验，不能承诺优于OpenAI。
+
+
+## 2026-10-01：最近一本 PDF 缓存与自动公式认读
+
+1. 选择独立 IndexedDB（pdf-ai-teacher-reader / last-pdf）保存一个 PDF Blob，而非开放任意文件系统读取接口或依赖原文件路径；与 PRD 7.4 可选 PDF blob 一致，浏览器/桌面共用。上限100 MiB，替换仅在成功解析后发生；读取重新计算SHA-256并核验。密码不保存，用户原文件不改，学习JSON不包含Blob。容量不足只影响自动开书，学习记录继续独立保存。
+2. 小型同步 last-view 仅含内容指纹和0-based浏览页，优先于较旧学习快照中的浏览页；原文朗读句书签/锁定教学目标仍独立。缓存异步恢复必须服从后来的手选文件/取消；写入与清理串行，关闭启动恢复不删除笔记。只有缓存指纹与last-view匹配才自动打开，避免新书缓存失败后悄悄恢复旧书。
+3. 复杂公式识别是专用 reading-assist 操作，不复用解题板书内容作为原文。沿用已核验的 Responses SDK 与现有 ChatGPT 适配器，专用严格JSON schema与提示词；请求只含所选Sources与可选选区PNG，PDF文字/图片皆为数据，不执行其中指令。不替换已选专业模型，不使用TTS模型解题。参考官方结构化输出文档：https://developers.openai.com/api/docs/guides/structured-outputs 。此次使用本地已安装SDK与fetch模拟核对实际请求体，没有新增非官方服务端点。
+4. 用户点击朗读后遇到未能本地转读的文字或纯图片，已配置模型时自动识别一次，生成稿可一键采用并朗读。只有待识别的原选区自动请求，手动重新识别需点按钮；再次打开已采用稿不重复调用。API模式按真实用量，ChatGPT模式按当前授权与计划；没有额外免费额度承诺。
+5. 沿用Origin/CSRF/会话预算、generation/contextRevision、AbortSignal上游取消与无自动重试。结构schema不验证数学意义；warnings非空、无图的乱码、不完整输出强制不确定。前端本地公式gate继续检查，未确认的稿件不能播放。可手工修正，但不再要求用户把每个公式都逐字改成中文。

@@ -32,7 +32,7 @@ test('逐段陪读先原文后教案、先板书后语音，打断后回原步�
   await page.getByRole('button',{name:'停止',exact:true}).click();
   await expect.poll(async()=>(await saved(page))[0]?.teachingProgress).toBeTruthy();
   await page.screenshot({path:'docs/screenshots/m2-classroom.png',fullPage:true});
-  await page.reload();await page.getByRole('button',{name:/示例/}).click();await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
+  await page.reload();await expect(page.locator('.textLayer span').first()).toBeVisible();await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
   await page.locator('.classroom-controls summary').click();await expect(page.locator('.classroom-progress')).toContainText('已中断');
   expect(await page.evaluate(()=>(window as unknown as {__speech:{texts:string[]}}).__speech.texts.length)).toBe(0);
   await page.getByRole('button',{name:'继续陪读',exact:true}).click();await expect(page.locator('.classroom-progress')).toContainText('正在讲解');
@@ -49,7 +49,7 @@ test('校对文本拥有新版本，刷新恢复书签但不自动发声',async(
   await expect(page.getByTestId('reading-subtitle')).toHaveText('然后继续第二句。');
   await page.getByRole('button',{name:'暂停朗读',exact:true}).click();
   await expect.poll(async()=>((await saved(page))[0]?.readingBookmark as {cursor:{sentenceIndex:number}})?.cursor.sentenceIndex).toBe(1);
-  await page.reload();await page.getByRole('button',{name:/示例/}).click();await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
+  await page.reload();await expect(page.locator('.textLayer span').first()).toBeVisible();await expect(page.locator('main')).toHaveAttribute('aria-busy','false');
   await expect(page.getByRole('button',{name:'继续朗读',exact:true})).toBeEnabled();
   expect(await page.evaluate(()=>(window as unknown as {__speech:{texts:string[]}}).__speech.texts.length)).toBe(0);
   await page.getByRole('button',{name:'继续朗读',exact:true}).click();await expect(page.getByTestId('reading-subtitle')).toHaveText('然后继续第二句。');

@@ -22,3 +22,7 @@
 .sentence-button{border:1px solid var(--border);border-radius:7px;background:#fff;color:#50745c;padding:8px 10px;font-size:11px;white-space:nowrap}.sentence-position{font-variant-numeric:tabular-nums;font-size:10px;color:#829078}@media(max-width:1250px){.playback-controls{gap:7px}.sentence-button{padding:7px;font-size:10px}.audio-bar{gap:10px}.audio-options{gap:10px}.subtitle{max-width:210px}}
 
 .reading-correction-dialog{max-height:calc(100dvh - 48px);overflow:auto}.reading-correction-dialog textarea{min-height:110px}.speech-preview{margin:14px 0;padding:14px;background:var(--green-pale,#f1f5ef);border-radius:10px}.speech-preview strong{font-size:13px}.speech-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:160px;overflow:auto;font:inherit;font-size:13px;line-height:1.8;margin:8px 0 0}.math-review-warning{color:#936e30;font-size:13px;line-height:1.7}
+
+.reading-assist-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}.reading-assist-actions small{color:var(--muted)}.reading-assist-message{font-size:14px;line-height:1.7;padding:10px 12px;background:var(--green-pale,#f2f6f1);border-radius:8px}
+
+.reading-storage-card{border-top:1px solid var(--border);padding:18px 0;margin-top:18px}.reading-storage-card p{font-size:13px;line-height:1.8}
