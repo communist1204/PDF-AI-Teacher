@@ -1,10 +1,7 @@
-diff --git a/src/backend.h b/src/backend.h
+﻿diff --git a/src/backend.h b/src/backend.h
 --- a/src/backend.h
 +++ b/src/backend.h
-@@ -23,12 +23,12 @@ struct BackendPair {
-     bool           has_gpu;
- };
- 
+@@ -27,7 +27,7 @@
 -// Physical core count heuristic (logical / 2 for HT/SMT).
 -// Used for GGML CPU thread count: GEMM shares SIMD units across hyperthreads,
 -// so one thread per physical core is optimal.
@@ -17,8 +14,6 @@ diff --git a/src/backend.h b/src/backend.h
 +    const char * value = std::getenv("PDF_AI_TTS_THREADS");
 +    return value && std::strcmp(value, "4") == 0 ? 4 : 2;
  }
- 
- // Standalone CPU backend via Registry API (DL-safe, no ggml-cpu.h needed).
 diff --git a/src/pipeline-tts.cpp b/src/pipeline-tts.cpp
 --- a/src/pipeline-tts.cpp
 +++ b/src/pipeline-tts.cpp
