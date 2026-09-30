@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -47,5 +47,10 @@ run(resolve(build, 'Release/test-abi-c.exe'), []);
 const exe = resolve(build, 'Release/qwen-tts.exe');
 if (!existsSync(exe)) throw new Error('Native CLI output is missing.');
 writeFileSync(resolve(build, 'build-provenance.json'), JSON.stringify({ source: 'https://github.com/ServeurpersoCom/qwentts.cpp', commit, ggmlCommit, cpuOnly: true, defaultThreads: 2, allowedThreads: [2, 4], env: 'PDF_AI_TTS_THREADS', cmake, exe, patch: readFileSync(patch, 'utf8') }, null, 2));
-console.log(`CPU-only Qwen TTS built: ${exe}`);
+const runtime = resolve(root, 'qwen-tts-runtime');
+mkdirSync(resolve(runtime, 'bin'), { recursive: true });
+copyFileSync(exe, resolve(runtime, 'bin/qwen-tts.exe'));
+copyFileSync(resolve(build, 'build-provenance.json'), resolve(runtime, 'build-provenance.json'));
+for (const name of ['LICENSE-cpp-httplib.txt','LICENSE-qwen-ggml.txt','LICENSE-qwen-model.txt','LICENSE-qwentts-cpp.txt','LICENSE-yyjson.txt','NOTICE-qwen.md']) copyFileSync(resolve(root, 'assets/third-party-tts', name), resolve(runtime, name));
+console.log(`CPU-only Qwen TTS installed: ${resolve(runtime, 'bin/qwen-tts.exe')}`);
 console.log('Child environment PDF_AI_TTS_THREADS=2 (default) or 4. Input UTF-8 stdin; --max-new caps audio frames. No model inference has been performed by this script.');

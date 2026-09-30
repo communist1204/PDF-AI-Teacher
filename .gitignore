@@ -19,3 +19,4 @@ release/
 models/
 .model-cache/
 local-tts-runtime/
+qwen-tts-runtime/

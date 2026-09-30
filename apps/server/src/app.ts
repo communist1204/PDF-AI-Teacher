@@ -32,7 +32,7 @@ function setEnvelope(res: Response, envelope: Envelope) {
 }
 function cancelledError() { return new HttpError(409, 'cancelled', '本次任务已取消，旧结果不会继续使用；已发生的服务用量可能仍会计费。'); }
 
-export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; localTts?: Pick<LocalTtsProvider, 'ready' | 'speak' | 'dispose'>; realtimeProvider?: RealtimeProvider; chatGptAuth?: ChatGptCredentials; fetch?: typeof fetch; now?: () => number } = {}) {
+export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; localTts?: Pick<LocalTtsProvider, 'ready' | 'speak' | 'dispose'>; qwenTts?: Pick<LocalTtsProvider, 'ready' | 'speak' | 'dispose'>; realtimeProvider?: RealtimeProvider; chatGptAuth?: ChatGptCredentials; fetch?: typeof fetch; now?: () => number } = {}) {
   const config = options.config ?? readConfig();
   const now = options.now ?? Date.now;
   const app = express();
@@ -40,10 +40,13 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
   app.set('trust proxy', false);
   const sessions = new Map<string, Session>();
   const cache = new AudioCache(config.cacheMaxBytes);
-  const usingLocalTts = config.ttsEngine === 'local';
-  const localReady = usingLocalTts && !!options.localTts?.ready();
+  const usingQwenTts = config.ttsEngine === 'qwen';
+  const usingLocalTts = config.ttsEngine === 'local' || usingQwenTts;
+  const localProvider = usingQwenTts ? options.qwenTts : options.localTts;
+  const localReady = usingLocalTts && !!localProvider?.ready();
+  const localVoice = usingQwenTts ? config.qwenTtsVoice ?? 'serena' : config.localTtsVoice ?? 'zf_001';
   const usingSystemTts = config.ttsEngine === 'system';
-  const ttsModel = usingLocalTts ? 'Kokoro-82M-v1.1-zh' : usingSystemTts ? 'Windows 本机语音' : config.ttsModel;
+  const ttsModel = usingQwenTts ? 'Qwen3-TTS-1.7B-CustomVoice-Q4_K_M' : usingLocalTts ? 'Kokoro-82M-v1.1-zh' : usingSystemTts ? 'Windows 本机语音' : config.ttsModel;
   const usingChatGpt = config.authMode === 'chatgpt';
   const teachingConfigured = !config.demoMode && (usingChatGpt ? Boolean(options.chatGptAuth) : Boolean(config.apiKey));
   const provider = options.provider ?? (!config.demoMode && usingChatGpt && options.chatGptAuth ? new ChatGptTeachingProvider(config, options.chatGptAuth, options.fetch) : !config.demoMode && config.apiKey && !usingChatGpt ? new OpenAITeachingProvider(config, undefined, options.fetch) : undefined);
@@ -161,7 +164,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
       style: !config.ttsInstructionsSupported ? '使用模型默认语气' : config.ttsInstructions === [DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') ? '自然温和，按语义停顿' : '本机自定义语气',
       instructionsSupported: config.ttsInstructionsSupported,
     }, maxRequests: config.maxRequests };
-    if (usingLocalTts || usingSystemTts) body.speech = { engine: config.ttsEngine, ready: usingSystemTts || localReady, voice: usingLocalTts ? config.localTtsVoice ?? 'zf_001' : '系统所选声音', style: usingLocalTts ? '本地中文语音；不使用语气提示词' : '系统默认', instructionsSupported: false };
+    if (usingLocalTts || usingSystemTts) body.speech = { engine: config.ttsEngine, ready: usingSystemTts || localReady, voice: usingLocalTts ? localVoice : '系统所选声音', style: usingQwenTts ? '中文自然陪读，可自定义语气' : usingLocalTts ? '本地中文语音；不使用语气提示词' : '系统默认', instructionsSupported: usingQwenTts };
     else if (config.ttsEngine) body.speech!.engine = config.ttsEngine;
     res.json(body);
   });
@@ -227,14 +230,14 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     if (!usingLocalTts && config.demoMode) throw new HttpError(409, 'demo_tts', '演示模式未调用付费 TTS。请使用明确标注的浏览器演示语音，或在本机配置真实 TTS。');
     if (!usingLocalTts && (!config.apiKey || !config.ttsModel || !provider)) throw new HttpError(503, 'not_configured', usingChatGpt ? 'ChatGPT 登录用于解题。OpenAI 朗读还需要独立语音 API Key，也可以在设置中选择免费本地朗读。' : 'TTS 模型或 API Key 未配置；未自动切换语音服务。');
     const contentType = usingLocalTts ? 'audio/wav' : 'audio/mpeg';
-    const cacheKey = cache.key(session.id, usingLocalTts ? ['local', ttsModel, config.localTtsVoice, request.text] : [config.baseUrl, speechRequest(config, request.text, request.speed)]);
+    const cacheKey = cache.key(session.id, usingLocalTts ? ['local', ttsModel, localVoice, usingQwenTts ? config.qwenTtsInstructions : '', request.text] : [config.baseUrl, speechRequest(config, request.text, request.speed)]);
     const cached = cache.get(cacheKey);
     if (cached) { res.set('x-audio-cache', 'hit').type(contentType).send(cached); return; }
     // Local CPU speech has no paid session quota. The provider serializes generation.
     if (!usingLocalTts) consumeRequest(session);
     const usage = newUsage(session, ttsModel, 'tts', request.text.length);
     if (usingLocalTts) usage.local = true;
-    const result = await runJob(session, request, req, res, usage, signal => usingLocalTts ? options.localTts!.speak(request.text, request.speed, signal) : provider!.speak(request.text, request.speed, signal));
+    const result = await runJob(session, request, req, res, usage, signal => usingLocalTts ? localProvider!.speak(request.text, request.speed, signal) : provider!.speak(request.text, request.speed, signal), usingQwenTts ? 305000 : config.requestTimeoutMs);
     if (!result.audio.length || result.audio.length > 8 * 1024 * 1024) throw new HttpError(502, 'invalid_audio', '语音返回为空或超出大小限制，未播放。');
     usage.requestId = safeRequestId(result.requestId) ?? usage.requestId;
     cache.set(session.id, cacheKey, result.audio);
@@ -360,6 +363,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
       }
       sessions.clear();
       options.localTts?.dispose();
+      options.qwenTts?.dispose();
       await Promise.allSettled(activeIds.map(id => realtimeConnections.disconnect(id)));
     })();
     return disposing;

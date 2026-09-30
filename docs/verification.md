@@ -355,3 +355,31 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 
 普通使用：双击原桌面PDF AI Teacher → 打开PDF选文字 → 朗读所选。无需充值/Key。设置→朗读声音→本地中文音色，可选六种并应用重启；先用1×比较，喜欢后再放慢。六个同文样音：[女声001](audio/kokoro-zf_001.wav)、[女声002](audio/kokoro-zf_002.wav)、[女声003](audio/kokoro-zf_003.wav)、[男声010](audio/kokoro-zm_010.wav)、[男声011](audio/kokoro-zm_011.wav)、[男声012](audio/kokoro-zm_012.wav)。用户只需给出喜欢的音色，以及读音或停顿不合适的具体句子，无需提供Key。
 交付运行状态（16:28）：正常桌面窗口已重新打开，使用原用户配置，未带测试profile或调试参数；没有自动播放或自动提出问题。见 [启动记录](local-tts-running.json)。
+
+
+## Qwen3 真实本机朗读与跨行年份修复（2026-09-30 17:12）
+
+| 检查 | 实际结果 |
+|---|---|
+| npm.cmd test | 21文件、423/423通过，17:08；新增36项断句/年份与27项Qwen生命周期/路由测试 |
+| npm.cmd run typecheck / lint | 通过，最终完整检查退出0 |
+| npm.cmd run build / desktop:package | 生产网页、Electron与桌面打包通过；既有大chunk提示保留 |
+| npm.cmd run test:e2e | 62/62通过，39.4秒；含5项Qwen界面场景，音频与bridge mock明确区分 |
+| node --import tsx scripts/verify-qwen-tts.mjs | 三音色真实CPU、2线程、seed42生成24kHz/PCM16 WAV；停止生成后临时目录为空；详见 qwen-tts-smoke.json |
+| node scripts/verify-qwen-desktop.mjs | 最终exe、隔离无Key profile，真实选区/校对、跨行整句、年份送入文本、WAV/HTMLAudio、0.25×/保音高、暂停原位续播、停止/取消、720p全部通过，0 pageErrors |
+| 原生构建 | 原有工具链、CPU-only、C ABI probe、依赖审计和补丁校验通过；未安装系统组件 |
+| 发布包 | 两份GGUF的完整SHA256、exe哈希、6份许可通过，asar288项未含私有配置或临时音频；见 qwen-package.json |
+
+真实桌面样句为校对后的「2026年，我们\n一起读书。」，只发送一次「二零二六年，我们一起读书。」；字幕保留原文本。首音6258ms，真实音频2.88秒，0.25×播放时间推进，暂停恢复没有第二次生成。生成期间停止的界面响应12ms，服务端记录免费任务取消，1500ms观察期无迟到播放；不以该短观察宣称全天候稳定。年份规则和送入内容已验证，人耳实际读音仍未验收。
+
+[真实桌面报告](qwen-desktop-smoke.json)、[三音色合成报告](qwen-tts-smoke.json)、[发布包校验](qwen-package.json)、[用户设置应用](qwen-applied.json)。已实际查看 [播放界面](screenshots/qwen-desktop-playing.png) 与 [720p声音设置](screenshots/qwen-desktop-settings-720.png)，Qwen标签、资源状态、语气输入和滚动布局可见。音频检查使用静音；没有冒充真人听感。
+
+同文样音：[Serena](audio/qwen-serena.wav)、[Vivian](audio/qwen-vivian.wav)、[Uncle Fu](audio/qwen-uncle_fu.wav)。句子为「2026年，我们一起阅读这本书，\n先理解概念，再看一个例子。」；原始1×合成约12.4–12.8秒，音频7.36–7.76秒。较早随机seed的Serena样本长达21.04秒，说明输出存在变异，未把时长当音质评分；最终固定seed用于复现，不自动修剪内部停顿或编造语义识别结论。
+
+过程问题与修正：完整lint初次发现新增import前保留BOM和验证脚本缺少global声明，已修复。Electron CDP对实际200音频的response.body返回空；再尝试fetch(blob:)被现有CSP拒绝，没有放宽产品CSP。最终验证捕获真实URL.createObjectURL的Blob并直接arrayBuffer读取，确认它就是实际播放器使用的WAV。中间一次CRLF文本替换未去掉原变量导致验证脚本重复声明，随后修正，失败记录保留在test-results隔离目录。E2E会清理test-results，所以最终可试听音频另保存在docs/audio。没有删除测试掩盖失败。
+
+取消回归包含读盘期间停止、子进程退出后才释放任务、超时、跨chunk/大量stderr后的截断标记，以及免费DEMO/缓存/禁止云回退。真实桌面使用正常原生模型补足模拟进程测试；真实账号、付费接口、专业回答、长书20分钟、中文多音字与「超过OpenAI」仍未验收。
+
+普通使用：双击原桌面图标。当前已通过软件UI选好Qwen3/Serena，解题设置及Key存在状态保留，未读取或输出密钥；重新选择一小段，先用1×朗读。模型都已打包，不需执行安装命令。开发者重建可用 npm.cmd run tts:build:qwen、npm.cmd run tts:setup:qwen、npm.cmd run desktop:package；仅前两步需要已有C++工具链/公共模型下载。
+
+交付状态（17:16）：已用原用户配置正常重开桌面窗口，无调试参数或测试profile，未自动播放；见 [正常启动记录](qwen-running.json)。工具环境本身带ELECTRON_RUN_AS_NODE=1，首次直接启动未出窗口；最终仅从该次启动子进程环境去掉此变量后，窗口标题和响应已确认，不修改系统环境。

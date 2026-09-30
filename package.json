@@ -23,7 +23,9 @@
     "test:desktop:restart": "node scripts/verify-desktop-restart.mjs",
     "test:desktop:network": "node scripts/verify-desktop-network.mjs",
     "test:desktop:login": "node scripts/verify-desktop-login.mjs",
-    "tts:setup": "node scripts/setup-local-tts.mjs"
+    "tts:setup": "node scripts/setup-local-tts.mjs",
+    "tts:build:qwen": "node scripts/build-qwen-tts.mjs",
+    "tts:setup:qwen": "node scripts/setup-qwen-tts.mjs"
   },
   "dependencies": {
     "dotenv": "^18.0.4",

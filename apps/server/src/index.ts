@@ -5,12 +5,14 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app';
 import { readConfig } from './config';
+import { QwenTtsProvider } from './qwenTts';
 import { LocalTtsProvider } from './localTts';
 
 const config = readConfig();
 const runtimePath = resolve(process.cwd(), 'local-tts-runtime');
 const localTts = config.ttsEngine === 'local' ? new LocalTtsProvider({ workerPath: resolve(runtimePath, 'local-tts-worker.cjs'), runtimePath, modelDir: resolve(runtimePath, 'model'), voice: config.localTtsVoice ?? 'zf_001', threads: 2 }) : undefined;
-const app = createApp({ config, localTts });
+const qwenTts = config.ttsEngine === 'qwen' ? new QwenTtsProvider({runtimePath:resolve('qwen-tts-runtime'),workPath:resolve('.model-cache/qwen-jobs'),voice:config.qwenTtsVoice??'serena',instructions:config.qwenTtsInstructions??''}) : undefined;
+const app = createApp({ config, localTts, qwenTts });
 const server = createServer(app);
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 let closeDevServer: (() => Promise<void>) | undefined;

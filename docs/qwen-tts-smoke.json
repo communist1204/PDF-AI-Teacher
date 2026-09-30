@@ -1,0 +1,39 @@
+{
+  "date": "2026-09-30T09:06:20.768Z",
+  "model": "Qwen3-TTS-1.7B-CustomVoice-Q4_K_M",
+  "cpuOnly": true,
+  "threads": 2,
+  "source": "2026年，我们一起阅读这本书，\n先理解概念，再看一个例子。",
+  "speech": "二零二六年，我们一起阅读这本书，先理解概念，再看一个例子。",
+  "results": [
+    {
+      "voice": "serena",
+      "elapsedSeconds": 12.63,
+      "audioSeconds": 7.6,
+      "peak": 0.334197998046875,
+      "rms": 0.04995429332288613,
+      "file": "docs/audio/qwen-serena.wav"
+    },
+    {
+      "voice": "vivian",
+      "elapsedSeconds": 12.84,
+      "audioSeconds": 7.76,
+      "peak": 0.49053955078125,
+      "rms": 0.07835429998503174,
+      "file": "docs/audio/qwen-vivian.wav"
+    },
+    {
+      "voice": "uncle_fu",
+      "elapsedSeconds": 12.41,
+      "audioSeconds": 7.36,
+      "peak": 0.528961181640625,
+      "rms": 0.07812005362465055,
+      "file": "docs/audio/qwen-uncle_fu.wav"
+    }
+  ],
+  "cancelSeconds": 1.7,
+  "cancelCleansTemporaryAudio": true,
+  "humanListening": "未验收；WAV与播放检查不代表听感、读音或忠实度已获真人认可",
+  "paidApiTested": false,
+  "seed": 42
+}

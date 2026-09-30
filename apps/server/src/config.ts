@@ -1,3 +1,4 @@
+import { DEFAULT_QWEN_TTS_INSTRUCTIONS, DEFAULT_QWEN_TTS_VOICE } from '../../../packages/shared/localSpeech';
 import { REASONING_EFFORTS, type TeachingReasoningEffort } from '../../../packages/shared/protocol';
 
 export interface ServerConfig {
@@ -14,7 +15,9 @@ export interface ServerConfig {
   visionReasoningEffort: TeachingReasoningEffort | null;
   teachingMaxOutputTokens: number;
   teachingTimeoutMs: number;
-  ttsEngine?: 'local' | 'openai' | 'system';
+  ttsEngine?: 'local' | 'qwen' | 'openai' | 'system';
+  qwenTtsVoice?: string;
+  qwenTtsInstructions?: string;
   localTtsVoice?: string;
   ttsModel: string;
   transcriptionModel: string;
@@ -59,9 +62,12 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) {
     throw new Error('OPENAI_BASE_URL 必须为 HTTPS 服务地址或本机回环 HTTP 地址，且不能包含凭证。');
   }
-  if (env.TTS_ENGINE && !['local', 'openai', 'system'].includes(env.TTS_ENGINE)) throw new Error('TTS_ENGINE 必须为 local、openai 或 system。');
+  if (env.TTS_ENGINE && !['local', 'qwen', 'openai', 'system'].includes(env.TTS_ENGINE)) throw new Error('TTS_ENGINE 必须为 local、qwen、openai 或 system。');
   if (env.LOCAL_TTS_VOICE && !['zf_001', 'zf_002', 'zf_003', 'zm_010', 'zm_011', 'zm_012'].includes(env.LOCAL_TTS_VOICE)) throw new Error('本地中文音色无效。');
-  const cloudSpeech = env.TTS_ENGINE !== 'local' && env.TTS_ENGINE !== 'system';
+  const cloudSpeech = !['local','qwen','system'].includes(env.TTS_ENGINE || '');
+  if (env.QWEN_TTS_VOICE && !['serena','vivian','uncle_fu'].includes(env.QWEN_TTS_VOICE)) throw new Error('Qwen3 中文音色无效。');
+  const qwenTtsInstructions = env.QWEN_TTS_INSTRUCTIONS?.trim() || DEFAULT_QWEN_TTS_INSTRUCTIONS;
+  if(qwenTtsInstructions.length>1000) throw new Error('Qwen3 朗读语气请限制在1000字以内。');
   const ttsModel = env.TTS_MODEL?.trim() || '';
   const supportSetting = cloudSpeech ? env.TTS_SUPPORTS_INSTRUCTIONS?.trim() : undefined;
   if (supportSetting && !['true', 'false'].includes(supportSetting)) throw new Error('TTS_SUPPORTS_INSTRUCTIONS 必须为 true 或 false，或留空自动判断。');
@@ -86,6 +92,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     teachingTimeoutMs: integer(env.TEACHING_TIMEOUT_MS, 180000, 1000, 600000, 'TEACHING_TIMEOUT_MS'),
     ttsEngine: env.TTS_ENGINE as ServerConfig['ttsEngine'],
     localTtsVoice: env.LOCAL_TTS_VOICE || 'zf_001',
+    qwenTtsVoice: env.QWEN_TTS_VOICE || DEFAULT_QWEN_TTS_VOICE, qwenTtsInstructions,
     ttsModel,
     transcriptionModel: env.TRANSCRIPTION_MODEL?.trim() || '',
     realtimeModel: env.REALTIME_MODEL?.trim() || '',

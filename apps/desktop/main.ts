@@ -9,6 +9,7 @@ import {createApp} from '../server/src/app';
 import {SettingsVault,SaveSettingsSchema,serverConfigFor} from './settings';
 import {ChatGptAuthManager,type AuthStore} from './auth';
 import {createDesktopFetch} from './network';
+import {QwenTtsProvider} from '../server/src/qwenTts';
 import {LocalTtsProvider} from '../server/src/localTts';
 import type {DesktopSettings} from '../../packages/shared/desktop';
 
@@ -28,6 +29,7 @@ let mainWindow:BrowserWindow|null=null;
 let server:Server|undefined;
 let localApp:ReturnType<typeof createApp>|undefined;
 let localTts:LocalTtsProvider|undefined;
+let qwenTts:QwenTtsProvider|undefined;
 let auth:ChatGptAuthManager;
 let vault:SettingsVault;
 let origin='';
@@ -49,7 +51,7 @@ async function openAuthorization(url:string){
 }
 async function publicSettings():Promise<DesktopSettings>{
  if(auth.snapshot().status==='signed_in'&&!models.length)await refreshModels();const data=vault.get();const snapshot=auth.snapshot();
- return {...data.preferences,hasApiKey:!!data.apiKey,localTtsReady:localTts?.ready()??false,encryptionAvailable:vault.available(),auth:snapshot,models:[...models],restartRequired};
+ return {...data.preferences,hasApiKey:!!data.apiKey,localTtsReady:localTts?.ready()??false,qwenTtsReady:qwenTts?.ready()??false,encryptionAvailable:vault.available(),auth:snapshot,models:[...models],restartRequired};
 }
 function handle(channel:string,action:(...args:unknown[])=>unknown){
  ipcMain.handle(channel,async(event,...args)=>{assertSender(event);try{if(shuttingDown)throw Error('软件正在退出，请重新打开后操作。');return await action(...args);}catch(error){
@@ -85,7 +87,9 @@ async function start(){
  config.authMode=prefs.mode==='chatgpt'?'chatgpt':'api_key';
  const runtimePath=app.isPackaged?join(process.resourcesPath,'local-tts-runtime'):resolve(app.getAppPath(),'../local-tts-runtime');
  localTts=new LocalTtsProvider({workerPath:join(runtimePath,'local-tts-worker.cjs'),runtimePath,modelDir:join(runtimePath,'model'),voice:prefs.localTtsVoice??'zf_001',threads:2});
- localApp=createApp({config,localTts,fetch:desktopFetch,chatGptAuth:prefs.mode==='chatgpt'?{getAccessToken:signal=>auth.getAccessToken(signal)}:undefined});
+ const qwenPath=app.isPackaged?join(process.resourcesPath,'qwen-tts-runtime'):resolve(app.getAppPath(),'../qwen-tts-runtime');
+ qwenTts=new QwenTtsProvider({runtimePath:qwenPath,workPath:join(app.getPath('userData'),'voice-work'),voice:prefs.qwenTtsVoice??'serena',instructions:config.qwenTtsInstructions??''});
+ localApp=createApp({config,localTts,qwenTts,fetch:desktopFetch,chatGptAuth:prefs.mode==='chatgpt'?{getAccessToken:signal=>auth.getAccessToken(signal)}:undefined});
  const token=(await import('node:crypto')).randomBytes(32).toString('hex');
  const guarded=express();
  guarded.use((req,res,next)=>{if(req.header('x-desktop-instance')!==token){res.status(403).send('此地址仅供 PDF AI Teacher 桌面窗口使用。');return;}next();});

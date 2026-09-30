@@ -233,3 +233,20 @@ OAuth Responses 使用 store=false、stream=true、input 数组与 instructions�
 核对本机SDK与[官方错误说明](https://developers.openai.com/api/docs/guides/error-codes)，SDK请求标识为requestID，旧request_id仅作受限兼容。支持顶层/嵌套code、type，不回显任意响应字段。429按明确code区分余额、项目/组织预算与临时速率；未知429保留原因不明，不直接推断欠费或限流。测试使用真实SDK+本地模拟响应，没有付费调用。
 
 最终复核补充：预生成失败按请求对象身份丢弃，不污染下一句；到达下一句才做普通前台尝试，禁止重试循环。local/system忽略隐藏云TTS语气配置，切回OpenAI仍严格校验。
+
+
+## Qwen3 第二种本地语音与语义读法（2026-09-30）
+
+用户反馈 Kokoro 的跨行卡顿和年份读法错误，因此同时处理应用分句与模型选择。依据 [Qwen 官方项目](https://github.com/QwenLM/Qwen3-TTS) 和 [1.7B CustomVoice 模型卡](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice)，选择具有中文和自然语言语气控制的 1.7B CustomVoice；不是语音识别模型，不承担专业理论解答。模型能力介绍不等于本机音质已经超越 OpenAI，没有付费同文对比。
+
+官方 Python/PyTorch 路径需要较大的独立运行时。现找到可在 Windows 原生 CPU 编译的 [qwentts.cpp](https://github.com/ServeurpersoCom/qwentts.cpp)，因此本轮改变上一轮「只研究 Qwen」的决定，实际部署社区 C++ 运行时及 GGUF 量化权重；不将社区实现标为官方二进制。没有安装 Python/Conda/WSL，未修改 CUDA、全局代理或科研进程。
+
+固定源码 6fae92914045cd83364d2845ceaa0f7969727319；GGML 40e16e4a814f7fe851a0c486fb9e8c722e957830。使用已有 C:/BuildTools 的 MSVC 19.44、CMake 3.31.6；全部 GPU backend 关闭、静态 VC 运行库，仅依赖 KERNEL32.dll/ADVAPI32.dll。GGML_NATIVE 构建使用本机 AVX512，当前 exe 是这台电脑的构建，不能承诺任意 Windows 电脑可用。补丁仅限制默认两线程（可明确选四线程）并标识触及生成帧上限，达到上限拒绝截断音频。构建脚本 scripts/build-qwen-tts.mjs 安装到 qwen-tts-runtime/bin；模型与编译器均不在 Git 里。
+
+量化来源 [Serveurperso/Qwen3-TTS-GGUF](https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/tree/b7ee2e8c7459c3bea99da23e3d178125a7d1713c)，固定 revision b7ee2e8c7459c3bea99da23e3d178125a7d1713c。talker 1,182,631,296 bytes，SHA256 cc328834a631bc08bf9f43e62fa23f8a1383d9b429864ce6690cfb172077fc4a；codec 291,150,624 bytes，SHA256 1883beeed99348fc35e23dd225e9082f93f6f8c109330a33d935baa8acdbfd94。安装脚本分段续传、检查 Content-Range 并核对完整 SHA256 后写 manifest。curl 本机无法连接，改为 Windows .NET HttpWebRequest 使用既有网络设置，无代理改写。模型 Apache-2.0、运行时及依赖许可放在 assets/third-party-tts/NOTICE-qwen.md 及软件资源目录。
+
+每次仅启动本应用拥有的隐藏 CLI 进程：原文 UTF-8 stdin，语气独立参数，输出私有临时 WAV，不启用未经认证的第三方 HTTP server。子进程仅继承必要 Windows 目录变量，不传 Key、PATH 或 NODE_OPTIONS；CPU 两线程，5分钟上限，取消只终止自有子进程，等待退出并清理临时文件。严格验证24kHz PCM16单声道WAV及8MiB上限，截断标记跨stderr片段保持，读取音频后再次检查取消。固定 seed=42 方便同文同风格复现，不据此保证逐字正确。
+
+前后端 speech.engine=qwen 复用唯一 AudioCoordinator、会话版本、防过期、句书签、1×合成/播放器调速和有界缓存，仅免费模式预生成下一句；不会自动切到付费或系统声音。解题账号与模型不随声音改动。CPU生成慢于实时，预取不保证句间零等待；本轮没有侵占GPU以追求速度。
+
+PDF 单换行视为物理排版，中文相邻不插空格、拉丁文字保留词间空格，段落空行/列表/独立公式保持边界，最多300源字符。年份只对1000–2999后接「年」且未命中时长/编号/代码数学上下文的有限情形逐位读；sourceText 完整可还原。采用显式读法处理以免把模型自然度能力误作可靠数字理解。断句及读法改变要求 sentence-v2，不沿用旧句索引。

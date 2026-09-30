@@ -1,0 +1,20 @@
+{
+  "date": "2026-09-30T09:11:35.835Z",
+  "cpuOnly": true,
+  "exeSha256": "56ad40e6fe78885b28bf9c5b73a24ae1a46ffc5446f0694e9781bc64df761b28",
+  "files": [
+    {
+      "name": "qwen-talker-1.7b-customvoice-Q4_K_M.gguf",
+      "bytes": 1182631296,
+      "sha256": "cc328834a631bc08bf9f43e62fa23f8a1383d9b429864ce6690cfb172077fc4a"
+    },
+    {
+      "name": "qwen-tokenizer-12hz-Q8_0.gguf",
+      "bytes": 291150624,
+      "sha256": "1883beeed99348fc35e23dd225e9082f93f6f8c109330a33d935baa8acdbfd94"
+    }
+  ],
+  "licenses": 6,
+  "appArchiveEntries": 288,
+  "privateArtifactsAbsent": true
+}

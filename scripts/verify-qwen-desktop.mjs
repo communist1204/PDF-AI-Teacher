@@ -118,6 +118,9 @@ async function run() {
   await expect(page.locator('.audio-kind')).toHaveText('Qwen3 本地 AI 语音');
   await page.evaluate(() => {
     window.__qwenDesktopAudio = [];
+    window.__qwenDesktopBlobs = new Map();
+    const createURL = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = blob => { const url=createURL(blob);window.__qwenDesktopBlobs.set(url,blob);return url; };
     const NativeAudio = Audio;
     window.Audio = class extends NativeAudio { constructor(src) { super(src); window.__qwenDesktopAudio.push(this); } };
   });
@@ -143,9 +146,11 @@ async function run() {
   await page.getByRole('button', { name: '朗读所选', exact: true }).click();
   const response = await firstResponse;
   expect(response.status()).toBe(200); expect(response.headers()['content-type']).toMatch(/^audio\/wav/);
-  const wav = await response.body(); expect(wav.length).toBeGreaterThan(44); expect(wav.toString('ascii', 0, 4)).toBe('RIFF'); expect(wav.toString('ascii', 8, 12)).toBe('WAVE');
   await expect(page.locator('.audio-source strong')).toContainText('正在朗读', { timeout: 10000 });
   await expect.poll(async () => (await getAudio())?.time, { timeout: 10000 }).toBeGreaterThan(0);
+  // Electron CDP reports an empty response.body() for this binary fetch. Inspect the exact blob consumed by the real player instead.
+  const wav = Buffer.from(await page.evaluate(async () => { const src=window.__qwenDesktopAudio.at(-1).src; if(!src.startsWith('blob:'))throw Error('Expected actual local playback blob'); return Array.from(new Uint8Array(await window.__qwenDesktopBlobs.get(src).arrayBuffer())); }));
+  expect(wav.length).toBeGreaterThan(44); expect(wav.toString('ascii',0,4)).toBe('RIFF'); expect(wav.toString('ascii',8,12)).toBe('WAVE');
   const playing = await getAudio(); expect(playing.duration).toBeGreaterThan(0.2); expect(playing.rate).toBe(0.25); expect(playing.preservesPitch).toBe(true); expect(playing.readyState).toBeGreaterThanOrEqual(2);
   expect(requests).toHaveLength(1); expect(requests[0].speechText).toBe(expectedSpeech); expect(requests[0].speechText).not.toMatch(/[\r\n]/); expect(requests[0].speechText).not.toContain('2026');
   const subtitle = await page.getByTestId('reading-subtitle').textContent(); expect(subtitle).toBe(corrected);
