@@ -16,7 +16,7 @@ export interface PlaybackHandle {
   pause(): void;
   stop(): void;
   dispose(): void;
-  /** Applied before play; the coordinator recreates an active sentence when its rate changes. */
+  /** Updates fixed-rate media in place; system/cloud changes may require a new sentence. */
   setRate(rate: number): void;
   setVolume(volume: number): void;
 }
@@ -84,7 +84,8 @@ export const browserPlaybackAdapter: PlaybackAdapter = {
         pause() { audio.pause(); },
         stop: release,
         dispose: release,
-        setRate(rate) { audio.playbackRate = rate / (input.generatedRate ?? input.rate); },
+        // Updating playbackRate preserves currentTime and does not resume paused audio.
+        setRate(rate) { if (!released) audio.playbackRate = rate / (input.generatedRate ?? input.rate); },
         setVolume(volume) { audio.volume = volume; },
       };
     }

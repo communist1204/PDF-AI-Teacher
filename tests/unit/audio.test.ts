@@ -864,3 +864,65 @@ describe('local lookahead failures do not poison resumed reading',()=>{
   expect(calls).toBe(2);expect(h.onError).not.toHaveBeenCalled();h.audio.dispose();
  });
 });
+
+describe('fixed 1x local audio changes speed without restarting', () => {
+  it('keeps the current handle and pending lookahead through playing and adopted-buffering rate changes', async () => {
+    const next = deferred<Blob>(); const signals: AbortSignal[] = [];
+    const request = vi.fn<AudioCoordinatorOptions['requestSpeech']>(async (text, _envelope, _rate, signal) => {
+      signals.push(signal); return text === '第二句。' ? next.promise : new Blob(['native 1x']);
+    });
+    const h = harness(request, { generatedSpeechRate: 1, prefetchLocalSpeech: true });
+    await h.audio.play(); const first = h.handles[0]; first.position = 6.25;
+    const bookmark = h.audio.getBookmark(); h.audio.setRate(3); await tick();
+    expect(h.handles).toHaveLength(1); expect(first).toMatchObject({ position: 6.25, plays: 1, stopped: false });
+    expect(first.setRate).toHaveBeenLastCalledWith(3);
+    expect(signals.every(signal => !signal.aborted)).toBe(true);
+    expect(request.mock.calls.map(call => call[0])).toEqual(['第一句。', '第二句。']);
+    expect(h.audio.getBookmark()).toEqual(bookmark);
+    first.input.onEnded(); await tick();
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'buffering', sentenceIndex: 1 });
+    h.audio.setRate(0.25); await tick();
+    expect(signals[1].aborted).toBe(false); expect(request).toHaveBeenCalledTimes(2);
+    next.resolve(new Blob(['next at native 1x'])); await vi.waitFor(() => expect(h.handles).toHaveLength(2));
+    expect(h.handles[1].input).toMatchObject({ text: '第二句。', generatedRate: 1 });
+    expect(h.handles[1].setRate).toHaveBeenLastCalledWith(0.25);
+    expect(request.mock.calls.map(call => call[0])).toEqual(['第一句。', '第二句。', '第三句。']);
+    expect(h.maxAudible()).toBe(1); expect(h.onError).not.toHaveBeenCalled();
+    h.audio.stop(); expect(signals[2].aborted).toBe(true); expect(h.audible()).toBe(0);
+  });
+
+  it('keeps a paused local handle and media position through several rate changes', async () => {
+    const h = harness(undefined, { generatedSpeechRate: 1 });
+    await h.audio.play(); const handle = h.handles[0]; handle.position = 8.5; h.audio.pause();
+    const bookmark = h.audio.getBookmark();
+    for (const rate of [3, 0.25, 2.5]) {
+      h.audio.setRate(rate); await tick();
+      expect(h.audio.getSnapshot()).toMatchObject({ status: 'paused', rate });
+      expect(handle).toMatchObject({ position: 8.5, plays: 1, stopped: false });
+      expect(handle.setRate).toHaveBeenLastCalledWith(rate); expect(h.audible()).toBe(0);
+    }
+    await h.audio.resume(); expect(h.handles).toHaveLength(1); expect(handle.position).toBe(8.5);
+    expect(handle.plays).toBe(2); expect(h.requestSpeech).toHaveBeenCalledOnce();
+    expect(h.audio.getBookmark()).toEqual(bookmark); expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it.each(['play', 'stop', 'rebind', 'realtime'] as const)('retains buffered generation on rate changes and still respects %s', async action => {
+    const pending = deferred<Blob>(); const request = vi.fn<AudioCoordinatorOptions['requestSpeech']>(() => pending.promise);
+    const h = harness(request, { generatedSpeechRate: 1 }); const playing = h.audio.play();
+    const signal = request.mock.calls[0][3];
+    h.audio.setRate(0.25); h.audio.setRate(3); await tick();
+    expect(request).toHaveBeenCalledOnce(); expect(signal.aborted).toBe(false);
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'buffering', rate: 3 });
+    const stopRemote = vi.fn();
+    if (action === 'stop') h.audio.stop();
+    if (action === 'rebind') h.audio.rebind({ ...envelope, generationId: 2 });
+    const lease = action === 'realtime' ? h.audio.claimExternalOutput(stopRemote) : null;
+    if (lease) { h.audio.setRate(0.5); expect(lease.isCurrent()).toBe(true); expect(stopRemote).not.toHaveBeenCalled(); }
+    pending.resolve(new Blob(['native 1x'])); await playing;
+    if (action === 'play') {
+      expect(h.handles).toHaveLength(1); expect(h.handles[0].setRate).toHaveBeenLastCalledWith(3);
+      expect(h.audio.getSnapshot().status).toBe('speaking');
+    } else { expect(signal.aborted).toBe(true); expect(h.handles).toHaveLength(0); expect(h.audible()).toBe(0); }
+    expect(h.onError).not.toHaveBeenCalled(); h.audio.dispose();
+  });
+});

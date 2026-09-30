@@ -423,10 +423,18 @@ export class AudioCoordinator {
     const nextRate = Math.max(MIN_SPEECH_RATE, Math.min(MAX_SPEECH_RATE, rate));
     if (nextRate === this.state.rate) return;
     this.state.rate = nextRate;
-    // Browser speech engines may ignore a changed active utterance.rate. A clip
-    // generated at 2x also cannot safely be slowed to 0.25x by every media engine.
-    // Restart this unfinished sentence at the requested synthesis rate instead.
-    // cancel() invalidates its callbacks before it can end or overlap a new voice.
+    // Local engines always synthesize at 1x. Adjust only the media timeline:
+    // preserve currentTime, a paused handle, in-flight generation and lookahead.
+    // startSentence applies the latest state.rate after a pending result arrives.
+    if (this.state.mode === 'live' && this.options.generatedSpeechRate === 1) {
+      this.active?.setRate(nextRate);
+      this.emit();
+      return;
+    }
+    // System utterances may ignore live rate changes. Cloud clips were generated
+    // at their requested rate: 3x -> 0.25x would require a potentially unsupported
+    // media rate of 1/12. Keep the explicit sentence restart for these engines.
+    // cancel() invalidates callbacks before an old voice can end or overlap.
     const restart = this.state.status === 'speaking' || this.state.status === 'buffering';
     if (this.active || this.request) this.cancel();
     if (restart) void this.startSentence();
