@@ -477,3 +477,26 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 |真实云/听感|本轮未测真实豆包接口、首音延迟、音色/韵律或人耳连续听感；不把静音WAV模拟当成真实语音，不保证所有网络无缝。|
 
 程序已恢复到普通用户配置运行，见prose-reading-running.json。已有账号和音色不变。以后双击原图标即可；选两三句混合文字并点击「朗读所选」实听，不需手改公式或等待GPT。公式过滤是本地启发式，损坏PDF若丢失全部数学标记仍可能漏检。旧严格读法的句锚点不沿用；书/页码照常恢复。暂停可能让最多一条已发出的下一句合成完成，停止前已产生的额度不能撤销。
+
+
+## 2026-10-01：截图板书响应与选文听书并行
+
+环境：Windows，Node24.19.0/npm11.17.0/Git2.50.1；任务开始Git干净，AGENTS/PRD/START_HERE已读取。代理使用独立worktree并划分文件，完成后cherry-pick集成。未修改其他项目、Conda/CUDA、代理或训练进程。
+
+|检查|实际结果|
+|---|---|
+|npm run typecheck|通过；最终desktop:package中的tsc --noEmit再次通过。|
+|npm run lint|通过；最终代码复验通过。|
+|npm test -- --reporter=dot|33文件874/874通过。新增流式provider/collector32项、HTTP通道隔离22项、课堂分离版本1项。|
+|npm run test:e2e|初次全套99/99通过，54.6秒。旧“Esc取消选区应取消回答”用例改为显式取消解答，保留迟到结果/拖框清理断言，满足新需求。|
+|最终受影响回归|补上“播放/恢复已有讲解不取消问答”边界后，执行board-concurrency、classroom-m2、realtime-m3、text-teacher四文件，24/24通过，24.9秒。含新增3项；累计102个不同浏览器用例完成验证，未称最终102在同一次全套执行。|
+|关键并行场景|真实PDF截图第1页发问，清选区、切跟随、翻第2页、选文朗读；问答main未cancel，TTS为speech，原截图来源保持不变。返回后板书引用第1页，当前选区/音频对象/播放位置继续。|
+|取消与重试|草稿不取消回答；取消解答不停止当前声音且拒绝迟到板书；换书同时取消两条任务。失败重试问题、截图、上下文相同；坏schema降级warning显示失败而非可听的成功回答。听既有讲解/停止/继续保持后台提问。|
+|服务器HTTP|真实Express路由+模拟provider：两个活动任务并行；两方向独立取消、迟到取消、不允许旧版本、重复请求不增额度、共享速率/预算、刷新版本恢复、Origin/CSRF及lane限制、会话失效/dispose同时释放均通过。|
+|Responses读取|SDK解析模拟SSE：delta/done/output_item/content_part、completed完整优先、空completed回补、commentary/reasoning剔除、拒答/断线/incomplete/超限及坏JSON；无真实云请求。|
+|UI目视检查|检查实际Edge截图的等待卡、原图页码、失败重试、数学板书和1280×720播放器布局。证据：[等待时继续读第2页](screenshots/board-concurrent-pending.png)、[旧截图板书与新段朗读](screenshots/board-concurrent-reading-720.png)、[原题重试](screenshots/board-question-retry.png)。声音使用真实HTMLAudio解码的静音WAV，答案为显式mock。|
+|构建及交付|npm run build与npm run desktop:package通过。保留既有Vite大chunk警告，未改完成标准。关闭经路径核实的本项目窗口后更新包，未全局杀进程。|
+|生产桌面退出重开|node scripts/verify-desktop-reading-reopen.mjs通过：真实EXE、隔离无Key档案、真实PDF第2页及笔记恢复，0远程请求、0模型/TTS请求、0页面错误。见[desktop-board-reopen.json](desktop-board-reopen.json)。|
+|真实接口/听感|本轮未测真实ChatGPT/GPT教材解题、模型延迟、豆包云语音或真人听感；没有把mock或结构校验通过称为真实教学能力通过。|
+
+对应验收：A02/A03/A04/A08/A09/A18/A20本地与模拟回归通过；真实模型部分仍待用户复验。普通用户桌面已重新打开，见board-reading-running.json。保持原账号、模型、音色与私有配置；重试一次新截图问题，等待时可选其他段落朗读。开发启动npm run dev；正常使用双击原图标。停止前已发生的云请求可能仍有用量，手动重试不保证免费。

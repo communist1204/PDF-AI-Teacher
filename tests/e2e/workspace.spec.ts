@@ -318,10 +318,11 @@ test('框选可自定义提问，Esc 清空截图后不会沿用旧区域',async
   await expect(page.getByRole('button',{name:'针对选区提问',exact:true})).toBeDisabled();
 });
 
-test('取消选区丢弃迟到回答，并可清除正在拖动的框',async({page})=>{
+test('显式取消解答丢弃迟到回答，清选区仍可清除正在拖动的框',async({page})=>{
   await openSample(page);await selectText(page);
   await page.route('**/api/ask',async route=>{await new Promise(resolve=>setTimeout(resolve,700));await route.continue().catch(()=>{});});
   await askSelection(page);await expect(page.locator('.thinking')).toBeVisible();
+  await page.getByRole('button',{name:'取消解答',exact:true}).click();
   await page.keyboard.press('Escape');
   await page.waitForTimeout(1000);
   await expect(page.getByTestId('board-step')).toHaveCount(0);

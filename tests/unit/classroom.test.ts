@@ -13,6 +13,23 @@ function setup(generate=vi.fn(async()=>entry)){
   return {controller,audio,generate,events,envelope:()=>envelope};
 }
 describe('classroom sequencing',()=>{
+  it('音频使用独立版本，只有当前音频完成才触发原上下文的教案请求',async()=>{
+    const main:Envelope={sessionId:'s',generationId:2,contextRevision:1};
+    const speech:Envelope={sessionId:'s',generationId:18,contextRevision:9};
+    const audio={load:vi.fn(),getSnapshot:()=>({sentences:[{}]}),play:vi.fn(async()=>{}),loadExplanation:vi.fn()};
+    const generate=vi.fn(async()=>entry);
+    const controller=new ClassroomController({audio:()=>audio as unknown as AudioCoordinator,begin:()=>({envelope:main,speechEnvelope:speech,mode:'demo'}),generate,showStep:()=>{},onChange:()=>{},onError:()=>{}});
+    await controller.start(target,'read-explain','selection');
+    expect(audio.load).toHaveBeenCalledWith(expect.objectContaining({sourceText:target.sourceText}),speech,'demo');
+    controller.onComplete({channel:'source',stepId:null,envelope:main});expect(generate).not.toHaveBeenCalled();
+    controller.onComplete({channel:'source',stepId:null,envelope:{...speech,generationId:17}});expect(generate).not.toHaveBeenCalled();
+    controller.onComplete({channel:'source',stepId:null,envelope:speech});
+    await vi.waitFor(()=>expect(audio.loadExplanation).toHaveBeenCalledTimes(1));
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({sourceText:target.sourceText}),main);
+    expect(audio.loadExplanation).toHaveBeenCalledWith(expect.anything(),entry.plan.steps[0],speech,'demo');
+    controller.onComplete({channel:'explanation',stepId:'one',envelope:main});expect(controller.getSnapshot().phase).toBe('explaining');
+    controller.onComplete({channel:'explanation',stepId:'one',envelope:speech});expect(controller.getSnapshot().phase).toBe('waiting');
+  });
   it('先播选中原文，再生成同一教案；板书先出现，每步后等待',async()=>{
     const {controller,audio,generate,events,envelope}=setup();await controller.start(target,'read-explain','selection');
     expect(generate).not.toHaveBeenCalled();expect(events).toEqual(['source','play']);

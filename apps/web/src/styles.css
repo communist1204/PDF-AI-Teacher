@@ -26,3 +26,4 @@
 .reading-assist-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}.reading-assist-actions small{color:var(--muted)}.reading-assist-message{font-size:14px;line-height:1.7;padding:10px 12px;background:var(--green-pale,#f2f6f1);border-radius:8px}
 
 .reading-storage-card{border-top:1px solid var(--border);padding:18px 0;margin-top:18px}.reading-storage-card p{font-size:13px;line-height:1.8}
+.question-task{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:13px;border:1px solid #dce5d6;border-radius:8px;background:#f6f9f2;font-size:12px;line-height:1.7;overflow-wrap:anywhere}.question-task strong{font-weight:600}.question-task strong .green-dot{margin-right:6px}.question-task>span{color:#768370;font-size:11px}.question-task button{margin-left:0;font-size:12px}.question-task-failed{border-color:#e8dcc7;background:#fffbf2}.question-task-failed p{color:#8c6940}

@@ -117,6 +117,8 @@ test('截图提问后清选区、跟页、换选段朗读仍完成原图板书�
   expect(original.context.imageDataUrl).toBe(image); expect(original.context.sources[0].pageIndex).toBe(0);
   await selectNextPage(page); await startReading(page);
   await expect(page.locator('.thinking')).toContainText('PDF 第 1 页');
+  await expect(page.locator('.thinking')).toContainText(/已等待 \d+ 秒/u);
+  await page.screenshot({ path: 'test-results/board-concurrent-pending.png', fullPage: true });
   await expect(page.getByRole('button', { name: '取消解答', exact: true })).toBeVisible();
   expect(mainCancels(log)).toBe(cancelledBefore);
   expect(log.speechLanes.length).toBeGreaterThan(0); expect(log.speechLanes.every(lane => lane === 'speech')).toBe(true);
@@ -167,11 +169,61 @@ test('失败附在本次问题下，重试仍发送原问题和原截图，不�
   await expect(page.getByRole('button', { name: '重试这次提问', exact: true })).toBeVisible();
   await expect(page.locator('.message.assistant')).toContainText('模型未返回可验证的教案');
   await expect(page.getByTestId('board-step')).toHaveCount(0);
+  await page.screenshot({ path: 'test-results/board-question-retry.png', fullPage: true });
   await page.getByRole('button', { name: '重试这次提问', exact: true }).click();
   await expect(page.getByTestId('board-step')).toHaveCount(1);
   expect(log.asks).toHaveLength(2); expect(log.asks[1].question).toBe(original.question); expect(log.asks[1].context).toEqual(original.context);
   await expect(page.getByTestId('board-step').getByRole('button', { name: /原文 · PDF 1 页/u })).toBeVisible();
   await expect(page.locator('.selection-preview')).toContainText('Reading on page two');
+});
+
+test('后台提问时听已有讲解、停止再继续只操作声音，不取消新问题（模拟接口）', async ({ page }) => {
+  const log = await setup(page);
+  await page.route('**/api/ask', route => route.fulfill({ json: responseFor(route.request().postDataJSON()) }));
+  await selectScreenshot(page);
+  await page.getByRole('textbox', { name: '输入文字问题', exact: true }).fill(question);
+  await page.getByRole('button', { name: '发送问题', exact: true }).click();
+  await expect(page.getByTestId('board-step')).toHaveCount(1);
+  const held = await heldAnswer(page); await sendQuestion(page);
+  await expect.poll(() => log.asks.length).toBe(2); const before = mainCancels(log);
+  await page.getByRole('button', { name: '听这次讲解', exact: true }).click();
+  await expect.poll(async () => (await audioSnapshot(page))?.time ?? 0).toBeGreaterThan(0.1);
+  await expect(page.locator('.thinking')).toBeVisible(); expect(mainCancels(log)).toBe(before);
+  await page.getByRole('button', { name: '停止', exact: true }).click();
+  await expect.poll(async () => (await audioSnapshot(page))?.paused).toBe(true);
+  await page.getByRole('button', { name: '继续朗读', exact: true }).click();
+  await expect.poll(async () => (await audioSnapshot(page))?.time ?? 0).toBeGreaterThan(0.1);
+  await expect(page.locator('.thinking')).toBeVisible(); expect(mainCancels(log)).toBe(before);
+  held.release(); await held.finished;
+  await expect(page.getByTestId('board-step')).toHaveCount(2);
+  expect(mainCancels(log)).toBe(before);
+});
+
+test('结构校验降级提示作为失败显示且可重试，不登记成成功回答（模拟接口）', async ({ page }) => {
+  await setup(page);
+  await page.route('**/api/ask', route => route.fulfill({ json: { ...responseFor(route.request().postDataJSON()), warning: 'invalid_model_output' } }));
+  await selectScreenshot(page);
+  await page.getByRole('textbox', { name: '输入文字问题', exact: true }).fill(question);
+  await page.getByRole('button', { name: '发送问题', exact: true }).click();
+  await expect(page.getByRole('button', { name: '重试这次提问', exact: true })).toBeVisible();
+  await expect(page.locator('.question-task-failed')).toContainText('未通过结构或来源校验');
+  await expect(page.getByTestId('board-step')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '听这次讲解', exact: true })).toHaveCount(0);
+});
+
+test('读并讲被文字问题打断后，底部续读只恢复原文，不重新生成或取消后台问题（模拟接口）', async ({ page }) => {
+  const log = await setup(page); const held = await heldAnswer(page);
+  await selectScreenshot(page); await selectNextPage(page);
+  await page.getByRole('button', { name: '读并讲', exact: true }).click();
+  await expect.poll(async () => (await audioSnapshot(page))?.time ?? 0).toBeGreaterThan(0.1);
+  await page.getByRole('textbox', { name: '输入文字问题', exact: true }).fill('先解释这一段。');
+  await page.getByRole('button', { name: '发送问题', exact: true }).click();
+  await expect.poll(() => log.asks.length).toBe(1); const before = mainCancels(log);
+  await page.getByRole('button', { name: '继续朗读', exact: true }).click();
+  await expect.poll(async () => (await audioSnapshot(page))?.time ?? 0).toBeGreaterThan(0.1);
+  await expect(page.locator('.thinking')).toBeVisible(); expect(mainCancels(log)).toBe(before); expect(log.asks).toHaveLength(1);
+  held.release(); await held.finished;
+  await expect(page.getByTestId('board-step')).toHaveCount(1); expect(mainCancels(log)).toBe(before);
 });
 
 test('换书会停止朗读并取消旧问题，迟到结果不会进入新书（模拟接口）', async ({ page }) => {

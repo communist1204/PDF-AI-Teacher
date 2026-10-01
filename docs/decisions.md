@@ -295,3 +295,13 @@ PDF 单换行视为物理排版，中文相邻不插空格、拉丁文字保留�
 - 根据本次用户对句间等待的反馈，为豆包启用“当前句播放时准备下一句”，最多一个后续句，范围仅限本次所选文字/当前教学单元。保留原速合成和播放器原位变速、所选音色，无自动换引擎。此次不改供应商协议、不换模型。
 - 云端暂停保留这一个预备槽位，继续或前进一条可复用，避免重复消耗；停止/重选/提问取消待处理请求并丢弃迟到结果。预备请求失败时不自动付费重试，到该句时提示手动重试。启动/保存设置不合成声音。停止前已生成但尚未播放的一句仍可能消耗额度，设置页说明这一边界。本地免费引擎维持已有取消和预取语义。
 - 这会消除“必须等上一句结束才发起下一句”的串行等待，但不是端到端流式播放；网络慢、短句高速播放、音频自身静音仍可能造成间隙。模拟网络与真实 HTMLAudio 的测试不能代替真实豆包听感或 OpenAI 对比。
+
+
+## 2026-10-01：独立问答快照、语音任务与流式最终回答
+
+- 新需求覆盖此前“任何选区变化都取消教案”的行为。手动提问拥有不可变ContextSnapshot和完整Envelope；阅读目标变化只推进speech通道版本。换书、替换提问、账号变化及显式取消仍使旧教案失效。朗读使用独立Envelope计数，板书与讲解仍来自同一TeachingPlan；不是放宽旧回复校验。
+- 服务端增加x-task-lane: speech，仅用于/api/tts和/api/cancel；其他路径拒绝此header，旧无header客户端保留main行为。每个session两个独立generation/revision/cancelledThrough/jobs，分别只容许一个活动请求；共享Cookie/CSRF/Origin、会话限额/速率/用量。过期会话和dispose清理两条队列。/api/config返回speechSession版本对，刷新不重置已取消代数。
+- 只切换、停止、恢复现成声音时不得取消问答；ClassroomController按是否需要生成新教案选择begin行为，音频结束回调按speechEnvelope校验。后台回答结束不自动抢走阅读音源；用户期间换了朗读目标时不自动继续旧课堂。真正的新问题仍替换前一个问题。
+- 按已安装openai 7.23.0类型与官方[Responses流式指南](https://developers.openai.com/api/docs/guides/streaming-responses)、[SDK事件示例](https://developers.openai.com/api/reference/typescript/resources/beta/subresources/responses/methods/create)、[Sign in with ChatGPT模型推理规范](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)核验。ChatGPT路径此前只取response.completed.output；现在同时收集output_item/text/content_part的标准事件，完成快照优先、空完成快照才回补事件文本，避免漏读或重复拼接。只接受有assistant message元数据的最终文本，排除phase=commentary及analysis/reasoning；仍要求response.completed，失败/中断/不完整输出不生成板书。累计2MiB UTF-8/有界条目限制，原schema、来源白名单不放松。
+- 空输出、拒答、超限、JSON错误分别提示；服务端结构校验降级warning在前端显示为失败卡，可手动重试，不伪装为成功教案。等待计时仅表示经过的墙钟时间，不声称已知模型推理阶段或预计完成时间。失败卡/待处理快照仅在当前窗口内保留，重启不自动重发。
+- 本轮不改模型、推理强度、授权路径、声音供应商、API Key或GPU设置，不读取凭证/真实响应内容来诊断，也不自动发起收费测试。真实上游等待可能仍存在，需要用户在自己的账号中手动复验。

@@ -14,7 +14,7 @@ export type ClassroomState = {
 const initial: ClassroomState = { phase:'idle', mode:'read-explain', units:[], unitIndex:0, entry:null, stepIndex:0, completedStepIds:[], interruptedPhase:'reading' };
 type Options = {
   audio: () => AudioCoordinator | null;
-  begin: () => { envelope: Envelope; mode:'demo'|'live' };
+  begin: (needsQuestion: boolean) => { envelope: Envelope; speechEnvelope?: Envelope; mode:'demo'|'live' };
   generate: (target:PdfTarget,envelope:Envelope) => Promise<BoardEntry|null>;
   showStep: (entry:BoardEntry,index:number) => void;
   onChange: (state:ClassroomState) => void;
@@ -25,11 +25,12 @@ export class ClassroomController {
   private state:ClassroomState=structuredClone(initial);
   private epoch=0;
   private envelope:Envelope|null=null;
+  private speechEnvelope:Envelope|null=null;
   private mode:'demo'|'live'='demo';
   constructor(private options:Options) {}
   getSnapshot(){ return structuredClone(this.state); }
   private emit(){ this.options.onChange(this.getSnapshot()); }
-  reset(){ this.epoch++;this.envelope=null;this.state=structuredClone(initial);this.emit(); }
+  reset(){ this.epoch++;this.envelope=null;this.speechEnvelope=null;this.state=structuredClone(initial);this.emit(); }
   interrupt(){
     this.epoch++;
     if(['reading','generating','explaining'].includes(this.state.phase)){
@@ -43,13 +44,13 @@ export class ClassroomController {
     if(!this.state.units.length)throw new Error('请先选择可核对的原文。');
     await this.startUnit();
   }
-  private begin(){const next=this.options.begin();this.envelope=next.envelope;this.mode=next.mode;return next;}
+  private begin(needsQuestion:boolean){const next=this.options.begin(needsQuestion);this.envelope=next.envelope;this.speechEnvelope=next.speechEnvelope??next.envelope;this.mode=next.mode;return next;}
   private async startUnit(){
     this.state.entry=null;this.state.stepIndex=0;this.state.completedStepIds=[];
-    this.begin();
+    this.begin(this.state.mode!=='read');
     if(this.state.mode==='explain'){await this.generate();return;}
     this.state.phase='reading';this.emit();
-    this.options.audio()?.load(this.state.units[this.state.unitIndex],this.envelope!,this.mode);
+    this.options.audio()?.load(this.state.units[this.state.unitIndex],this.speechEnvelope!,this.mode);
     await this.playOrSkipSource();
   }
   private async playOrSkipSource(){
@@ -78,11 +79,11 @@ export class ClassroomController {
     this.options.showStep(entry,this.state.stepIndex);
     if(!step.speechText.trim()){this.state.phase='waiting';this.emit();return;}
     // showStep commits React state before onStarted can confirm audible playback.
-    this.options.audio()?.loadExplanation(this.state.units[this.state.unitIndex],step,this.envelope!,this.mode);
+    this.options.audio()?.loadExplanation(this.state.units[this.state.unitIndex],step,this.speechEnvelope!,this.mode);
     await this.options.audio()?.play();
   }
   onComplete(event:{channel:'source'|'explanation';stepId:string|null;envelope:Envelope}){
-    if(!this.envelope||!sameEnvelope(event.envelope,this.envelope))return;
+    if(!this.envelope||!sameEnvelope(event.envelope,this.speechEnvelope!))return;
     if(event.channel==='source'&&this.state.phase==='reading'){
       if(this.state.mode==='read'){this.state.phase='waiting';this.emit();}
       else void this.generate().catch(error=>this.fail(error));
@@ -93,8 +94,8 @@ export class ClassroomController {
   }
   async continue(){
     if(this.state.phase==='interrupted'){
-      this.begin();
       const phase=this.state.interruptedPhase;
+      this.begin(phase==='generating'||(phase==='reading'&&this.state.mode!=='read'));
       if(phase==='generating'){await this.generate();return;}
       if(phase==='explaining'){
         const step=this.state.entry?.plan.steps[this.state.stepIndex];
@@ -104,19 +105,19 @@ export class ClassroomController {
         const sameSource=bookmark?.target.documentId===source.documentId&&bookmark?.target.pageIndex===source.pageIndex&&bookmark?.target.sourceId===source.sourceId&&bookmark?.target.blockId===source.blockId&&bookmark?.target.sourceText===source.sourceText;
         if(step&&playback?.channel==='explanation'&&playback.teachingStepId===step.stepId&&playback.hasBookmark&&sameSource&&bookmark?.speechText===step.speechText){
           this.state.phase='explaining';this.emit();this.options.showStep(this.state.entry!,this.state.stepIndex);
-          this.options.audio()?.rebind(this.envelope!);await this.options.audio()?.resume();
+          this.options.audio()?.rebind(this.speechEnvelope!);await this.options.audio()?.resume();
         }else await this.playStep();
       }else if(phase==='reading'){
         this.state.phase='reading';this.emit();
         const bookmark=this.options.audio()?.getBookmark();
-        if(bookmark?.target.sourceId===this.state.units[this.state.unitIndex].sourceId)await this.options.audio()?.resumeSource(this.envelope!,this.mode);
-        else {this.options.audio()?.load(this.state.units[this.state.unitIndex],this.envelope!,this.mode);await this.playOrSkipSource();}
+        if(bookmark?.target.sourceId===this.state.units[this.state.unitIndex].sourceId)await this.options.audio()?.resumeSource(this.speechEnvelope!,this.mode);
+        else {this.options.audio()?.load(this.state.units[this.state.unitIndex],this.speechEnvelope!,this.mode);await this.playOrSkipSource();}
       }
       return;
     }
     if(this.state.phase!=='waiting')return;
     const steps=this.state.entry?.plan.steps??[];
-    if(this.state.stepIndex+1<steps.length){this.state.stepIndex++;this.begin();await this.playStep();}
+    if(this.state.stepIndex+1<steps.length){this.state.stepIndex++;this.begin(false);await this.playStep();}
     else if(this.state.unitIndex+1<this.state.units.length){this.state.unitIndex++;await this.startUnit();}
     else {this.state.phase='complete';this.emit();}
   }

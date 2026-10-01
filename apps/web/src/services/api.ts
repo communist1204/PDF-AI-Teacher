@@ -21,12 +21,13 @@ async function checked(response: Response) {
   }
   return response;
 }
-export function apiClient(config: AppConfig) {
-  const post = (path: string, body: unknown, signal?: AbortSignal) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-csrf-token': config.csrfToken }, body: JSON.stringify(body), signal }).then(checked);
+export function apiClient(config: AppConfig, lane: 'main' | 'speech' = 'main') {
+  const post = (path: string, body: unknown, signal?: AbortSignal) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-csrf-token': config.csrfToken, ...(lane === 'speech' && (path === '/api/tts' || path === '/api/cancel') ? { 'x-task-lane': 'speech' } : {}) }, body: JSON.stringify(body), signal }).then(checked);
   return {
     async ask(request: AskRequest, signal: AbortSignal): Promise<AskResponse> {
-      const result: AskResponse = await (await post('/api/ask', request, signal)).json();
+      const result: AskResponse & { warning?: string } = await (await post('/api/ask', request, signal)).json();
       if (!sameEnvelope(request, result)) throw new Error('已丢弃过期回答');
+      if (result.warning === 'invalid_model_output') throw new Error('模型返回的教案未通过结构或来源校验，未执行板书。可以重试这次提问，或缩小选区后重新提问。');
       result.plan = validatePlan(result.plan, request.context, request.contextRevision);
       return result;
     },

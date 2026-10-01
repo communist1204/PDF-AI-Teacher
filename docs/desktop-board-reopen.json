@@ -1,0 +1,91 @@
+{
+  "date": "2026-10-01T09:49:02.504Z",
+  "status": "passed",
+  "executablePath": "D:\\PDF-AI-Teacher\\release\\PDF AI Teacher-win32-x64\\PDF AI Teacher.exe",
+  "profile": "D:\\PDF-AI-Teacher\\test-results\\desktop-reading-reopen\\2026-10-01T09-49-02-503Z-21072",
+  "samplePath": "D:\\PDF-AI-Teacher\\public\\sample.pdf",
+  "checks": {
+    "isolatedDemoNoKeys": true,
+    "realPdfCanvasAndTextLayer": true,
+    "pageTwoAndNoteSaved": true,
+    "windowCloseExitedProcessAndReleasedPort": true,
+    "automaticallyOpenedSamePdf": true,
+    "restoredLastViewedPageWithoutNavigation": true,
+    "noteRestored": true,
+    "noAskSpeechTranscriptionOrRealtimeRequests": true,
+    "actual720pScreenshots": true
+  },
+  "launches": [
+    {
+      "label": "initial",
+      "native": {
+        "packaged": true,
+        "profile": "D:\\PDF-AI-Teacher\\test-results\\desktop-reading-reopen\\2026-10-01T09-49-02-503Z-21072",
+        "windows": 1
+      },
+      "elapsedToWorkspaceMs": 582,
+      "mode": "demo",
+      "noApiKeys": true,
+      "signedOut": true,
+      "url": "http://127.0.0.1:4319/"
+    },
+    {
+      "label": "reopened",
+      "native": {
+        "packaged": true,
+        "profile": "D:\\PDF-AI-Teacher\\test-results\\desktop-reading-reopen\\2026-10-01T09-49-02-503Z-21072",
+        "windows": 1
+      },
+      "elapsedToWorkspaceMs": 430,
+      "mode": "demo",
+      "noApiKeys": true,
+      "signedOut": true,
+      "url": "http://127.0.0.1:4319/"
+    }
+  ],
+  "forbiddenRequests": [],
+  "remoteRequests": [],
+  "pageErrors": [],
+  "modelAndAudio": "未测试真实模型、语音或账号：本验收只读取自制 PDF、浏览页码与本地笔记；无 Key，不发起问答、TTS、转写或实时语音。",
+  "beforeClose": {
+    "page": 2,
+    "fileName": "sample.pdf",
+    "canvas": {
+      "width": 655,
+      "height": 847,
+      "inkSamples": 726
+    },
+    "textLayer": "P D F\n \nA I\n \nT E A C H E R\n \n/\n \n自 制 练 习 材 料\n\n\n参数更新与学习位置\n\n\n02\n \nAdamW 的一个数字例子\n\n\n设参数初始值为 10，任务损失是 0.5 × (θ − 8)²。此时任务梯度为 2。\n\n\n学习率取 0.1，衰减系数取 0.1。从零初始化开始，忽略极小常数后，第一步 Adam 更新量为 0.1，\n\n\n额外衰减量为 0.1。\n\n\nθ₁ = 10 − 0.1 − 0.1 = 9.8\n\n\n下一次在新参数位置计算任务梯度，得到 1.8。没有衰减时，参数为 9.9，下一次任务梯度为 1.9。\n\n\n可以在第一页发起提问，然后翻到此页，观察讲解目标仍锁定在第一页。\n\n\n自制测试材料 · 书面页码 2 · 可以自由使用与分发"
+  },
+  "persistedBeforeClose": {
+    "fileName": "sample.pdf",
+    "documentId": "sha256-16bfee405f4ced84881002033518cabf02eff6e2b7a9d504561c66134f9d0e5c",
+    "pageIndex": 1,
+    "note": "桌面自动恢复验收：停在 PDF 第 2 页，重开后保留这条本书笔记。2026-10-01T09-49-02-503Z-21072"
+  },
+  "beforeUsage": {
+    "records": 0,
+    "requestCount": 0
+  },
+  "afterReopen": {
+    "page": 2,
+    "fileName": "sample.pdf",
+    "canvas": {
+      "width": 655,
+      "height": 847,
+      "inkSamples": 726
+    },
+    "textLayer": "P D F\n \nA I\n \nT E A C H E R\n \n/\n \n自 制 练 习 材 料\n\n\n参数更新与学习位置\n\n\n02\n \nAdamW 的一个数字例子\n\n\n设参数初始值为 10，任务损失是 0.5 × (θ − 8)²。此时任务梯度为 2。\n\n\n学习率取 0.1，衰减系数取 0.1。从零初始化开始，忽略极小常数后，第一步 Adam 更新量为 0.1，\n\n\n额外衰减量为 0.1。\n\n\nθ₁ = 10 − 0.1 − 0.1 = 9.8\n\n\n下一次在新参数位置计算任务梯度，得到 1.8。没有衰减时，参数为 9.9，下一次任务梯度为 1.9。\n\n\n可以在第一页发起提问，然后翻到此页，观察讲解目标仍锁定在第一页。\n\n\n自制测试材料 · 书面页码 2 · 可以自由使用与分发"
+  },
+  "persistedAfterReopen": {
+    "fileName": "sample.pdf",
+    "documentId": "sha256-16bfee405f4ced84881002033518cabf02eff6e2b7a9d504561c66134f9d0e5c",
+    "pageIndex": 1,
+    "note": "桌面自动恢复验收：停在 PDF 第 2 页，重开后保留这条本书笔记。2026-10-01T09-49-02-503Z-21072"
+  },
+  "afterUsage": {
+    "records": 0,
+    "requestCount": 0
+  },
+  "elapsedMs": 2345
+}

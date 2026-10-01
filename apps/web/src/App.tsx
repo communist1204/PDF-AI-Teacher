@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { BookOpen, Settings2, LockKeyhole, ArrowUp, Play, Pause, Square, SkipBack, SkipForward, Volume2, X, Bookmark, PanelRightClose, MessageCircle, RefreshCw, NotebookPen } from 'lucide-react';
-import type { AppConfig, DocumentRecord, PdfTarget, TeachingStep, UsageRecord, Envelope } from '../../../packages/shared/protocol';
+import type { AppConfig, DocumentRecord, PdfTarget, TeachingStep, UsageRecord, Envelope, AskRequest } from '../../../packages/shared/protocol';
 import { apiClient, getConfig } from './services/api';
 import { SessionGuard, snapshot } from './state/session';
 import FeatureGuide from './features/experience/FeatureGuide';
@@ -12,6 +12,7 @@ import { PdfReader, type ReaderAction } from './features/pdf/PdfReader';
 import type { CaptureSelection } from './features/pdf/capture';
 import SelectionQuestionDialog from './features/chat/SelectionQuestionDialog';
 import AnswerSpeechControls from './features/chat/AnswerSpeechControls';
+import QuestionStatus from './features/chat/QuestionStatus';
 import Blackboard, { type BoardEntry } from './features/blackboard/Blackboard';
 import QwenSpeechStatus from './features/voice/QwenSpeechStatus';
 import { AudioCoordinator, type AudioState } from './features/voice/AudioCoordinator';
@@ -54,6 +55,8 @@ function speechUnavailableMessage(config: AppConfig | null): string {
 }
 function isLocalUsage(usage: UsageRecord): boolean { return 'local' in usage && usage.local === true; }
 type Message = { id: string; role: 'user' | 'assistant'; text: string; demo?: boolean; delivery?:'text'|'spoken'|'interrupted'|'unconfirmed' };
+type QuestionSubmission = Pick<AskRequest, 'question' | 'context' | 'history'>;
+type QuestionTask = { id: string; submission: QuestionSubmission; startedAt: number; model: string; status: 'pending' | 'failed' | 'cancelled'; error?: string };
 export default function App() {
   const [config,setConfig]=useState<AppConfig|null>(null);
   const audioEngine=speechEngine(config);
@@ -110,6 +113,8 @@ export default function App() {
   const [activeStep,setActiveStep]=useState(0);
   const [dark,setDark]=useState(false);
   const [busy,setBusy]=useState(false);
+  const [questionTask,setQuestionTask]=useState<QuestionTask|null>(null);
+  const activeAsk=useRef<string|null>(null);
   const [error,setError]=useState('');
   const [settings,setSettings]=useState(false);
   const [featureGuide,setFeatureGuide]=useState(false);
@@ -132,6 +137,7 @@ export default function App() {
   const workspace=useRef<HTMLElement>(null);
   const [navigation,setNavigation]=useState<{pageIndex:number;rect?:[number,number,number,number];nonce:number}>();
   const guard=useRef(new SessionGuard('initial'));
+  const speechGuard=useRef(new SessionGuard('initial'));
   const request=useRef<AbortController|null>(null);
   const audio=useRef<AudioCoordinator|null>(null);
   const configRef=useRef<AppConfig|null>(null);
@@ -140,12 +146,12 @@ export default function App() {
   const latestDocument=useRef<string|null>(null);
   const lastTargetId=useRef<string|null>(null);
 
-  const connect=useCallback(async()=>{try{const next=await getConfig();setConfig(next);configRef.current=next;guard.current=new SessionGuard(next.sessionId,next.generationId,next.contextRevision);setError('');}catch(e){setError((e as Error).message);}},[]);
+  const connect=useCallback(async()=>{try{const next=await getConfig();setConfig(next);configRef.current=next;guard.current=new SessionGuard(next.sessionId,next.generationId,next.contextRevision);speechGuard.current=new SessionGuard(next.sessionId,next.speechSession?.generationId??0,next.speechSession?.contextRevision??0);setError('');}catch(e){setError((e as Error).message);}},[]);
   useEffect(()=>{void connect();},[connect]);
   useEffect(()=>{try{localStorage.setItem('pdf-ai-teacher:speech-rate',String(rate));}catch{/* Playback remains usable if preferences cannot be saved. */}},[rate]);
   useEffect(()=>{
     if(!config)return;
-    const client=apiClient(config);
+    const client=apiClient(config,'speech');
     const controller=new AudioCoordinator({...(usesPlaybackRate(speechEngine(config))?{generatedSpeechRate:1}:{}),prefetchLocalSpeech:isLocalSpeechEngine(speechEngine(config)),prefetchSpeech:speechEngine(config)==='doubao',sourceReadingMode:'prose',requestSpeech:client.speech,onChange:setAudioState,onError:message=>{classroom.current?.interrupt();setError(message);},onComplete:event=>classroom.current?.onComplete(event)});
     audio.current=controller;controller.setRate(rateRef.current);controller.setVolume(volumeRef.current);setAudioState(controller.getSnapshot());
     return ()=>{controller.dispose();audio.current=null;};
@@ -156,26 +162,39 @@ export default function App() {
     void fetch('/api/usage',{signal:controller.signal}).then(response=>{if(!response.ok)throw new Error('用量暂时无法读取，请重新打开设置。');return response.json();}).then(data=>{setUsage(data.records);setUsageSummary(data);}).catch(error=>{if(!controller.signal.aborted)setError(error.message);});
     return()=>controller.abort();
   },[settings,config]);
-  const cancel=useCallback((change=false,keepLesson=false,keepInput=false,keepRealtime=false)=>{
+  const cancelAnswer=useCallback((change=false)=>{
+    const previous=guard.current.current();request.current?.abort();request.current=null;
+    activeAsk.current=null;guard.current.next(change);setBusy(false);
+    setQuestionTask(task=>task?.status==='pending'?{...task,status:'cancelled'}:task);
+    if(configRef.current)void apiClient(configRef.current).cancel(previous);
+  },[]);
+  const cancelSpeech=useCallback((change=false,keepLesson=false,keepInput=false,keepRealtime=false)=>{
     if(!keepRealtime){if(change)realtime.current?.stop('学习目标变化，实时会话已结束。重新选择后可手动连接。');else realtime.current?.interrupt();}
     if(!keepLesson)classroom.current?.interrupt();
     if(!keepInput)setVoiceRevision(value=>value+1);
-    const previous=guard.current.current();request.current?.abort();request.current=null;audio.current?.interrupt();
-    guard.current.next(change);setBusy(false);
-    if(configRef.current)void apiClient(configRef.current).cancel(previous);
+    const previous=speechGuard.current.current();audio.current?.interrupt();speechGuard.current.next(change);
+    if(configRef.current)void apiClient(configRef.current,'speech').cancel(previous);
   },[]);
+  const cancel=useCallback((change=false,keepLesson=false,keepInput=false,keepRealtime=false)=>{
+    cancelSpeech(change,keepLesson,keepInput,keepRealtime);cancelAnswer(change);
+  },[cancelSpeech,cancelAnswer]);
+  // Submitted questions own an immutable snapshot, independent of the current reading selection.
+  // Recognition, transcription and realtime still expire when their target changes.
+  const changeReading=useCallback((change=false)=>{
+    if(activeAsk.current)cancelSpeech(change);else cancel(change);
+  },[cancelSpeech,cancel]);
   useEffect(()=>{
     if(!config)return;
     const controller=new ClassroomController({
       audio:()=>audio.current,
-      begin:()=>{cancel(false,true);return {envelope:guard.current.current(),mode:speechPlaybackMode(config)};},
+      begin:needsQuestion=>{if(needsQuestion)cancel(false,true);else{cancelSpeech(false,true);if(!activeAsk.current)cancelAnswer();}return {envelope:guard.current.current(),speechEnvelope:speechGuard.current.current(),mode:speechPlaybackMode(config)};},
       generate:(source,envelope)=>askRef.current('请围绕本段进行一次简短教学：解释必要符号和原理，按需给出推导与小例子，最后留一个检查问题。',source,envelope),
       showStep:(entry,index)=>flushSync(()=>{setBoardHidden(false);setActiveEntryId(entry.id);setActiveStep(index);setRealtimeReveal(previous=>previous[entry.id]===undefined?previous:{...previous,[entry.id]:Math.max(previous[entry.id],index)});}),
       onChange:setLesson,onError:setError,
     });
     classroom.current=controller;setLesson(controller.getSnapshot());
     return()=>{controller.reset();classroom.current=null;};
-  },[config,cancel]);
+  },[config,cancel,cancelSpeech,cancelAnswer]);
   useEffect(()=>{
     if(!config)return;
     const controller=new RealtimeController({
@@ -204,7 +223,7 @@ export default function App() {
           if(action==='pause'){audio.current?.pause();return;}
           if(action==='resume_source'){
             if(!audio.current?.getBookmark())throw Error('还没有原文书签，请先选段朗读。');
-            classroom.current?.reset();void audio.current.resumeSource(guard.current.current(),speechPlaybackMode(config)).catch(error=>setError(error.message));return;
+            classroom.current?.reset();void audio.current.resumeSource(speechGuard.current.current(),speechPlaybackMode(config)).catch(error=>setError(error.message));return;
           }
           if(action==='continue_teaching'){if(!realtime.current?.getSnapshot().canContinue)throw Error('没有可继续的实时教学步骤，请指定要讲的内容。');return;}
           const next=Math.max(MIN_SPEECH_RATE,rateRef.current-0.25);setRate(next);audio.current?.setRate(next);
@@ -221,11 +240,11 @@ export default function App() {
     realtime.current=controller;return()=>{controller.stop();if(realtime.current===controller)realtime.current=null;};
   },[config,cancel]);
   const clearSelection=useCallback(()=>{
-    cancel(true);
+    changeReading(true);
     setTarget(null);setLocked(null);setBoardTarget(null);contextRef.current=null;lastTargetId.current=null;
     setNavigation(undefined);setQuestionDialog(false);setCorrectionOpen(false);setCorrection(null);setError('');
     setClearSelectionRevision(value=>value+1);
-  },[cancel]);
+  },[changeReading]);
   useEffect(()=>{
     const escape=(event:KeyboardEvent)=>{
       if(event.key!=='Escape'||event.isComposing)return;
@@ -257,16 +276,16 @@ export default function App() {
     openedPage.current=initialPage;
     if(value?.documentId===latestDocument.current)return;
     if(persistLatest.current)void queueSave(persistLatest.current).catch(error=>setError(error.message));
-    clearSelection();classroom.current?.reset();audio.current?.reset();setRecordReady(null);savedIdentity.current='';setBoardHidden(false);setActiveStep(0);setActiveEntryId(null);latestDocument.current=value?.documentId??null;lastTargetId.current=null;
+    cancel(true);setQuestionTask(null);clearSelection();classroom.current?.reset();audio.current?.reset();setRecordReady(null);savedIdentity.current='';setBoardHidden(false);setActiveStep(0);setActiveEntryId(null);latestDocument.current=value?.documentId??null;lastTargetId.current=null;
     setDocument(value);setTarget(null);setLocked(null);contextRef.current=null;setBoardTarget(null);setEntries([]);setRealtimeReveal({});setMessages([]);setQuestion('');setPageIndex(0);currentPage.current=0;setError('');
     if(value){try{setNote(localStorage.getItem(`pdf-teacher-note:${value.documentId}`)??'');}catch{setNote('');}}else setNote('');
-  },[clearSelection,queueSave]);
+  },[cancel,clearSelection,queueSave]);
   const handleTarget=useCallback((value:PdfTarget|null)=>{
     if(value?.sourceId===lastTargetId.current)return;
     lastTargetId.current=value?.sourceId??null;
-    if(value){cancel(true);classroom.current?.reset();audio.current?.reset();setCorrection(null);setBoardTarget(null);contextRef.current=value;}
+    if(value){changeReading(true);classroom.current?.reset();audio.current?.reset();setCorrection(null);setBoardTarget(null);contextRef.current=value;}
     setTarget(value);
-  },[cancel]);
+  },[changeReading]);
   const handlePage=useCallback((page:number)=>{
     const previous=currentPage.current;currentPage.current=page;setPageIndex(page);
     if(followRef.current&&previous!==page){clearSelection();audio.current?.reset();}
@@ -281,43 +300,47 @@ export default function App() {
     const allowed=new Set(context.sources.map(source=>source.sourceId));
     realtimeContext.current={context,board:displayed.flatMap(entry=>entry.plan.steps.slice(0,(realtimeReveal[entry.id]??(lesson?.entry?.id===entry.id?lesson.stepIndex:entry.plan.steps.length-1))+1).filter(step=>step.sourceIds.every(id=>allowed.has(id))).map((step,index)=>({entryId:entry.id,stepId:step.stepId,title:step.title,number:index+1,summary:[step.explanationMarkdown,...step.boardBlocks.map(block=>block.type==='math'?block.latex:block.type==='text'?block.markdown:'')].join('\n').slice(0,1600),sourceIds:step.sourceIds}))).slice(-12)};
   }else realtimeContext.current=null;
-  const ask=async(text=question,overrideTarget?:PdfTarget,providedEnvelope?:Envelope):Promise<BoardEntry|null>=>{
+  const ask=async(text=question,overrideTarget?:PdfTarget,providedEnvelope?:Envelope,retry?:QuestionSubmission):Promise<BoardEntry|null>=>{
     if(desktopSettings?.restartRequired){setError('账号或模型设置等待应用，请在设置中点击「应用并重启」后继续提问。');setSettings(true);return null;}
-    const source=overrideTarget??effective;
+    const source=retry?.context.sources[0]??overrideTarget??effective;
     if(!text.trim())return null;
     if(!config){setError('请先连接本地服务。');return null;}
     if(!source){setError('你想了解哪一段？请在 PDF 中选中文字或框选一个公式。');return null;}
     if(config.mode==='unconfigured'){setError('真实模型未配置。请在本机 .env 配置，或启用 DEMO_MODE=true。');return null;}
-    if(!providedEnvelope&&!overrideTarget&&realtime.current?.isLive()){setQuestion('');try{await realtime.current.ask(text.trim());}catch(error){setError((error as Error).message);}return null;}
+    if(!retry&&!providedEnvelope&&!overrideTarget&&realtime.current?.isLive()){setQuestion('');try{await realtime.current.ask(text.trim());}catch(error){setError((error as Error).message);}return null;}
     if(!providedEnvelope)cancel();setError('');
     const envelope=providedEnvelope??guard.current.current();
-    const context=snapshot(source,overrideTarget?null:boardTarget?.text??null);
+    const context=structuredClone(retry?.context??snapshot(source,overrideTarget?null:boardTarget?.text??null));
     contextRef.current=structuredClone(source);setLocked(structuredClone(source));
     const controller=new AbortController();request.current=controller;setBusy(true);
-    const submitted=text.trim();if(!overrideTarget)setQuestion('');
-    const history=messages.filter(message=>!['interrupted','unconfirmed'].includes(message.delivery??'')).slice(-6).map(m=>({role:m.role,text:m.text.slice(0,4000)}));
-    setMessages(prev=>[...prev,{id:crypto.randomUUID(),role:'user',text:submitted}]);
+    const submitted=retry?.question??text.trim();if(!overrideTarget&&!retry)setQuestion('');
+    const history=structuredClone(retry?.history??messages.filter(message=>!['interrupted','unconfirmed'].includes(message.delivery??'')).slice(-6).map(m=>({role:m.role,text:m.text.slice(0,4000)})));
+    const taskId=crypto.randomUUID();activeAsk.current=taskId;
+    const speechAtSubmission=speechGuard.current.current();
+    setQuestionTask({id:taskId,submission:{question:submitted,context,history},startedAt:Date.now(),model:context.imageDataUrl?config.models.vision:config.models.chat,status:'pending'});
+    if(!retry)setMessages(prev=>[...prev,{id:crypto.randomUUID(),role:'user',text:submitted}]);
     try{
       const result=await apiClient(config).ask({...envelope,question:submitted,context,history},controller.signal);
-      if(!guard.current.accepts(result))return null;
+      if(controller.signal.aborted||activeAsk.current!==taskId||!guard.current.accepts(result))return null;
       const entry={id:crypto.randomUUID(),plan:result.plan,context,mode:result.mode};
       setMessages(prev=>[...prev,{id:entry.id,role:'assistant',text:result.plan.needsClarification?[result.plan.answer,result.plan.clarificationQuestion].filter(Boolean).join('\n'):result.plan.answer,demo:result.mode==='demo'}]);
       setEntries(prev=>[...prev,entry]);setBoardHidden(false);setActiveEntryId(entry.id);setActiveStep(0);setUsage(prev=>[...prev,result.usage]);
-      if(!providedEnvelope&&autoResume&&classroom.current?.getSnapshot().phase==='interrupted')void classroom.current.continue();
+      setQuestionTask(task=>task?.id===taskId?null:task);
+      if(!providedEnvelope&&autoResume&&speechGuard.current.accepts(speechAtSubmission)&&classroom.current?.getSnapshot().phase==='interrupted')void classroom.current.continue();
       return entry;
-    }catch(e){if(!controller.signal.aborted&&guard.current.accepts(envelope))setError((e as Error).message);}
-    finally{if(guard.current.accepts(envelope)){setBusy(false);request.current=null;}}
+    }catch(e){if(!controller.signal.aborted&&activeAsk.current===taskId&&guard.current.accepts(envelope)){const message=(e as Error).message;setError(message);setQuestionTask(task=>task?.id===taskId?{...task,status:'failed',error:message}:task);}}
+    finally{if(activeAsk.current===taskId&&guard.current.accepts(envelope)){activeAsk.current=null;setBusy(false);if(request.current===controller)request.current=null;}}
     return null;
   };
   useEffect(()=>{askRef.current=ask;});
   const readingTarget=effective&&correction?.sourceId===effective.sourceId?{...effective,sourceId:effective.sourceId.slice(0,135)+':corrected:'+textVersion(correction.text),blockId:effective.blockId.slice(0,135)+':corrected:'+textVersion(correction.text),sourceText:correction.text}:effective;
   const proseReading=useMemo(()=>prepareProseReading(readingTarget?.sourceText??''),[readingTarget?.sourceText]);
   const read=async()=>{
-    if(!readingTarget?.sourceText.trim()){cancel();setError(effective?.imageDataUrl?'这个框选区域没有可直接朗读的文字。请选择 PDF 文字；如需识图，可自行打开「校对朗读文本」。':'请先选择原文。');return;}
-    if(!splitSourceSentences(readingTarget.sourceText,'prose').length){cancel();setError('已跳过公式和难读内容，这个选区没有可朗读的正文。请选择包含正文的段落。');return;}
+    if(!readingTarget?.sourceText.trim()){changeReading();setError(effective?.imageDataUrl?'这个框选区域没有可直接朗读的文字。请选择 PDF 文字；如需识图，可自行打开「校对朗读文本」。':'请先选择原文。');return;}
+    if(!splitSourceSentences(readingTarget.sourceText,'prose').length){changeReading();setError('已跳过公式和难读内容，这个选区没有可朗读的正文。请选择包含正文的段落。');return;}
     if(!canPlaySpeech(config)){setError(speechUnavailableMessage(config));return;}
-    cancel();setError('');setLocked(structuredClone(effective));
-    classroom.current?.reset();audio.current?.load(readingTarget!,guard.current.current(),speechPlaybackMode(config));
+    changeReading();setError('');setLocked(structuredClone(effective));
+    classroom.current?.reset();audio.current?.load(readingTarget!,speechGuard.current.current(),speechPlaybackMode(config));
     audio.current?.setRate(rate);audio.current?.setVolume(volume);
     try{await audio.current?.play();}catch(e){setError((e as Error).message);}
   };
@@ -340,20 +363,20 @@ export default function App() {
   const applyReadingCorrection=(text:string,play=false)=>{
     if(!effective)return;
     text=toSpeechText(text);
-    cancel(true);classroom.current?.reset();audio.current?.reset();setCorrection({sourceId:effective.sourceId,text});setCorrectionOpen(false);setError('');
+    changeReading(true);classroom.current?.reset();audio.current?.reset();setCorrection({sourceId:effective.sourceId,text});setCorrectionOpen(false);setError('');
     if(!play)return;
     if(!canPlaySpeech(config)){setError(speechUnavailableMessage(config));return;}
     const corrected={...effective,sourceId:effective.sourceId.slice(0,135)+':corrected:'+textVersion(text),blockId:effective.blockId.slice(0,135)+':corrected:'+textVersion(text),sourceText:text};
-    setLocked(structuredClone(effective));audio.current?.load(corrected,guard.current.current(),speechPlaybackMode(config));
+    setLocked(structuredClone(effective));audio.current?.load(corrected,speechGuard.current.current(),speechPlaybackMode(config));
     audio.current?.setRate(rate);audio.current?.setVolume(volume);void audio.current?.play().catch(error=>setError(error.message));
   };
-  const resume=async()=>{setError('');try{if(classroom.current?.getSnapshot().phase==='interrupted'){await classroom.current.continue();return;}if(audioState?.status!=='paused'){cancel();audio.current?.rebind(guard.current.current());}await audio.current?.resume();}catch(e){setError((e as Error).message);}};
+  const resume=async()=>{setError('');try{const currentLesson=classroom.current?.getSnapshot();if(currentLesson?.phase==='interrupted'){if(activeAsk.current&&currentLesson.interruptedPhase!=='explaining'){await resumeOriginal();return;}await classroom.current?.continue();return;}if(audioState?.status!=='paused'){changeReading();audio.current?.rebind(speechGuard.current.current());}await audio.current?.resume();}catch(e){setError((e as Error).message);}};
   const resumeOriginal=async()=>{
     if(!config||!audio.current?.getBookmark())return;
-    cancel();classroom.current?.reset();setError('');
-    await audio.current.resumeSource(guard.current.current(),speechPlaybackMode(config));
+    changeReading();classroom.current?.reset();setError('');
+    await audio.current.resumeSource(speechGuard.current.current(),speechPlaybackMode(config));
   };
-  const selectBoard=(step:TeachingStep,entry:BoardEntry)=>{cancel(true);const source=entry.context.sources.find(s=>step.sourceIds.includes(s.sourceId))??entry.context.sources[0];setBoardTarget({text:`${step.title}\n${step.explanationMarkdown}\n${step.boardBlocks.map(b=>b.type==='math'?b.latex:b.type==='text'?b.markdown:b.type==='callout'?b.text:JSON.stringify('rows' in b?b.rows:b)).join('\n')}`,target:source});setQuestion(`请解释“${step.title}”这一步。`);};
+  const selectBoard=(step:TeachingStep,entry:BoardEntry)=>{changeReading(true);const source=entry.context.sources.find(s=>step.sourceIds.includes(s.sourceId))??entry.context.sources[0];setBoardTarget({text:`${step.title}\n${step.explanationMarkdown}\n${step.boardBlocks.map(b=>b.type==='math'?b.latex:b.type==='text'?b.markdown:b.type==='callout'?b.text:JSON.stringify('rows' in b?b.rows:b)).join('\n')}`,target:source});setQuestion(`请解释“${step.title}”这一步。`);};
   const startLesson=async(mode=lessonMode)=>{
     if(!readingTarget?.sourceText.trim()||!config){setError('请先选择原文。');return;}
     if(!canPlaySpeech(config)){setError(speechUnavailableMessage(config));return;}
@@ -364,7 +387,7 @@ export default function App() {
   };
   const speakStep=(_step:TeachingStep,entry:BoardEntry,index:number,restart=false)=>{
     if(!canPlaySpeech(config)){setError(speechUnavailableMessage(config));return;}
-    cancel();setError('');if(restart)audio.current?.loadExplanation(entry.context.sources[0],entry.plan.steps[index],guard.current.current(),speechPlaybackMode(config),true);setClassroomOpen(value=>value+1);classroom.current?.restore(entry,index,[]);void classroom.current?.continue().catch(error=>setError(error.message));
+    changeReading();setError('');if(restart)audio.current?.loadExplanation(entry.context.sources[0],entry.plan.steps[index],speechGuard.current.current(),speechPlaybackMode(config),true);setClassroomOpen(value=>value+1);classroom.current?.restore(entry,index,[]);void classroom.current?.continue().catch(error=>setError(error.message));
   };
   const showMicrophone=()=>{setFeatureGuide(false);setChatVisible(true);if(optionalVoice.current)optionalVoice.current.open=true;setRealtimeOpen(value=>value+1);setVoiceRevision(value=>value+1);void realtime.current?.start('local');};
   const focusQuestion=()=>{setFeatureGuide(false);setChatVisible(true);setTimeout(()=>document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus(),0);};
@@ -372,18 +395,18 @@ export default function App() {
   const directLesson=(mode:LessonMode)=>{setFeatureGuide(false);setPractice(false);setClassroomOpen(value=>value+1);setLessonMode(mode);void startLesson(mode);};
   const applyRecord=useCallback((record:LearningRecord)=>{
     if(latestDocument.current!==record.document.documentId)return;
-    clearSelection();audio.current?.reset();setTarget(record.target);setLocked(null);lastTargetId.current=record.target?.sourceId??null;contextRef.current=record.target;
+    cancel(true);setQuestionTask(null);clearSelection();audio.current?.reset();setTarget(record.target);setLocked(null);lastTargetId.current=record.target?.sourceId??null;contextRef.current=record.target;
     setBoardTarget(null);setBoardHidden(false);setCorrection(null);setMessages(record.messages);setEntries(record.entries);setActiveStep(record.activeStep);setActiveEntryId(record.activeEntryId??record.entries.at(-1)?.id??null);
     setNote(record.note);setLessonMode(record.preferences.mode);setLessonUnit(record.preferences.unit);setAutoResume(record.preferences.autoResume);
     setNavigation({pageIndex:record.pageIndex,rect:record.target?.pageIndex===record.pageIndex?record.target.rect??undefined:undefined,nonce:Date.now()});
     currentPage.current=record.pageIndex;setPageIndex(record.pageIndex);
-    const bookmarkRestored=!record.readingBookmark||audio.current?.restoreBookmark(record.readingBookmark,guard.current.current(),speechPlaybackMode(configRef.current));
+    const bookmarkRestored=!record.readingBookmark||audio.current?.restoreBookmark(record.readingBookmark,speechGuard.current.current(),speechPlaybackMode(configRef.current));
     if(record.teachingProgress){
       const progress=record.teachingProgress;const entry=record.entries.find(value=>value.id===progress.entryId);
       classroom.current?.restoreProgress(progress,entry??null);
     }else classroom.current?.reset();
     setStorageNotice(bookmarkRestored?'已恢复本书记录。声音保持停止，核对后可手动继续。':'书和页码已恢复。朗读规则已更新为跳过公式；旧句位置未沿用，可点「朗读所选」从选段开头开始。');
-  },[clearSelection]);
+  },[cancel,clearSelection]);
   useEffect(()=>{
     if(!documentRecord||!config)return;
     let valid=true;const documentId=documentRecord.documentId;const loadRevision=guard.current.current().contextRevision;setPersistenceEnabled(true);setStorageNotice('正在读取本书记录…');
@@ -407,7 +430,7 @@ export default function App() {
   useEffect(()=>{const flush=()=>{if(persistLatest.current){try{writeRecovery(persistLatest.current);}catch{/* The UI already reports journal failures. */}void queueSave(persistLatest.current).catch(()=>{});}};window.addEventListener('pagehide',flush);return()=>window.removeEventListener('pagehide',flush);},[queueSave]);
   const deleteCurrentRecord=(documentId:string)=>{
     if(latestDocument.current!==documentId)return;
-    setPersistenceEnabled(false);persistLatest.current=null;clearSelection();classroom.current?.reset();audio.current?.reset();
+    setPersistenceEnabled(false);persistLatest.current=null;cancel(true);setQuestionTask(null);clearSelection();classroom.current?.reset();audio.current?.reset();
     setMessages([]);setEntries([]);setActiveStep(0);setNote('');setTarget(null);setLocked(null);setBoardTarget(null);setActiveEntryId(null);setCorrection(null);setClearSelectionRevision(value=>value+1);
     if(documentRecord){try{localStorage.removeItem('pdf-teacher-note:'+documentRecord.documentId);}catch{/* IndexedDB record is already deleted. */}}
     setStorageNotice('本书记录已删除，自动保存暂停。');
@@ -420,20 +443,20 @@ export default function App() {
     window.addEventListener('pointermove',move);window.addEventListener('pointerup',done,{once:true});
   };
   const currentSentence=audioState?.sentences[audioState.sentenceIndex];
-  const speechTaskKey=JSON.stringify(guard.current.current());
-  const stopSpeech=()=>{realtime.current?.stop();cancel();audio.current?.stop();setStoppedSpeechKey(JSON.stringify(guard.current.current()));};
+  const speechTaskKey=JSON.stringify(speechGuard.current.current());
+  const stopSpeech=()=>{realtime.current?.stop();changeReading();audio.current?.stop();setStoppedSpeechKey(JSON.stringify(speechGuard.current.current()));};
   const outputLabel={silent:'待机',buffering:'准备声音',speaking:'正在朗读',paused:'已暂停'};
   const saveNote=(value:string)=>{setNote(value);if(persistenceEnabled&&recordReady===documentRecord?.documentId){const current=buildRecord();if(current){const next={...current,note:value};persistLatest.current=next;try{writeRecovery(next);}catch(error){setError((error as Error).message);}}}if(documentRecord){try{localStorage.setItem(`pdf-teacher-note:${documentRecord.documentId}`,value);}catch{setError('本地笔记存储失败，请复制保留内容。');}}};
   return <div className="app-shell">
     <header className="app-header"><div className="brand"><span className="brand-mark"><BookOpen size={23}/></span><div><strong>PDF AI Teacher</strong><span>你的陪读学习工作台</span></div></div><div className="document-title"><span className="small-label">正在阅读</span><strong>{documentRecord?.fileName??'从一本书，一个问题开始'}</strong>{documentRecord&&<span>PDF {pageIndex+1} / {documentRecord.pageCount}</span>}</div><div className="header-actions">{desktopBridge&&<button className="desktop-account-entry" onClick={()=>setSettings(true)}>{desktopSettings?.auth.status==='signed_in'?'ChatGPT 账号设置':'登录 ChatGPT'}{desktopSettings?.restartRequired?' · 待应用':''}</button>}<button className="feature-entry" disabled={!!documentRecord&&recordReady!==documentRecord.documentId} onClick={()=>setFeatureGuide(true)}><BookOpen size={15}/>功能体验</button>{['connecting','connected'].includes(realtimeState.connection)&&<button className="microphone-chip" onClick={()=>realtime.current?.stop()}>{realtimeState.connection==='connecting'?'语音准备中 · 点击取消':'麦克风开启 · 点击关闭'}</button>}<span className={`mode-badge ${config?.mode==='live'?'live':''}`}><i/>{config?.mode==='demo'?((isLocalSpeechEngine(audioEngine)||audioEngine==='doubao')?'演示模式 · 解题 AI 未连接':'演示模式 · AI 未连接'):config?.mode==='live'?(chatgptMode?'ChatGPT 账号 · 能力待验':'API 模式 · 能力待验'):'模型未配置'}</span><button className="icon-button" title="设置与用量" aria-label="设置与用量" disabled={!!documentRecord&&recordReady!==documentRecord.documentId} onClick={()=>setSettings(true)}><Settings2 size={19}/></button></div></header>
-    <div className="session-toolbar"><div className="session-label"><span className="green-dot"/>学习空间 <span className="divider">/</span><span>选一段 · 听一段 · 慢慢讲</span>{documentRecord&&!persistenceEnabled&&<button className="text-button" onClick={()=>setSettings(true)}>自动保存已暂停 · 查看原因</button>}</div><div className="toolbar-actions"><span className="locked-indicator"><LockKeyhole size={13}/>{locked?`讲解锁定 · PDF 第 ${locked.pageIndex+1} 页`:'等待选择学习目标'}</span><button className="text-button" onClick={()=>{const next=!follow;setFollow(next);followRef.current=next;cancel(true);if(next){clearSelection();audio.current?.reset();}}}>{follow?'跟随当前页 ✓':'切换为跟随当前页'}</button><button className="icon-button" aria-label="展开或折叠对话" onClick={()=>setChatVisible(!chatVisible)}><PanelRightClose size={17}/></button></div></div>
+    <div className="session-toolbar"><div className="session-label"><span className="green-dot"/>学习空间 <span className="divider">/</span><span>选一段 · 听一段 · 慢慢讲</span>{documentRecord&&!persistenceEnabled&&<button className="text-button" onClick={()=>setSettings(true)}>自动保存已暂停 · 查看原因</button>}</div><div className="toolbar-actions"><span className="locked-indicator"><LockKeyhole size={13}/>{locked?`讲解锁定 · PDF 第 ${locked.pageIndex+1} 页`:'等待选择学习目标'}</span><button className="text-button" onClick={()=>{const next=!follow;setFollow(next);followRef.current=next;changeReading(true);if(next){clearSelection();audio.current?.reset();}}}>{follow?'跟随当前页 ✓':'切换为跟随当前页'}</button><button className="icon-button" aria-label="展开或折叠对话" onClick={()=>setChatVisible(!chatVisible)}><PanelRightClose size={17}/></button></div></div>
     {desktopSettings?.restartRequired&&<div className="desktop-pending-banner" role="status"><span>账号或模型设置等待应用，请重启软件后继续 AI 问答。已保存的学习记录保留。</span><button className="text-button" onClick={()=>setSettings(true)}>打开设置并应用</button></div>}
     {error&&<div className="error-banner" role="alert"><span>{error}</span><div>{!config&&<button onClick={()=>void connect()}><RefreshCw size={14}/>重新连接</button>}<button aria-label="关闭提示" onClick={()=>setError('')}><X size={16}/></button></div></div>}
     {practice&&<PracticeCoach key={practiceSession} target={readingTarget} audio={audioState} hasDocument={!!documentRecord} loading={!!documentRecord&&recordReady!==documentRecord.documentId} demo={config?.mode==='demo'} speechEngine={audioEngine} onChoose={()=>setReaderAction({type:'select-excerpt',nonce:Date.now()})} onRead={()=>void read()} onPause={()=>audio.current?.pause()} onResume={()=>void resume()} onClose={()=>setPractice(false)} onMore={()=>{setPractice(false);setFeatureGuide(true);}}/>}
     <main inert={!!documentRecord&&recordReady!==documentRecord.documentId} aria-busy={!!documentRecord&&recordReady!==documentRecord.documentId} ref={workspace} style={chatVisible?{gridTemplateColumns:`minmax(300px,${columns[0]}fr) minmax(310px,${columns[1]}fr) minmax(270px,${100-columns[0]-columns[1]}fr)`}:undefined} className={`workspace ${!chatVisible?'chat-collapsed':''}`}>
-      <section className="reader-panel panel" aria-label="PDF 阅读区"><PdfReader onImageCapture={handleCapture} restoreReading={restoreReading} action={readerAction} clearSelectionRevision={clearSelectionRevision} onClearSelection={clearSelection} onDocument={handleDocument} onTarget={handleTarget} onPage={handlePage} onError={setError} navigation={navigation} readingText={audioState?.channel==='source'&&audioState.status==='speaking'&&audioState.cursor?.pageIndex===pageIndex&&audioState.cursor?.documentId===documentRecord?.documentId?currentSentence?.sourceText:undefined}/><div className="selection-tray"><div className="selection-title"><span className="eyebrow">{boardTarget?'已选板书步骤':effective?.imageDataUrl?'公式区域预览':effective?'原文选区预览':'你的阅读目标'}</span>{effective&&<span>PDF {effective.pageIndex+1} 页{effective.pageLabel?` · 书面 ${effective.pageLabel}`:''}</span>}</div>{effective?.imageDataUrl?<img className="crop-preview" src={effective.imageDataUrl} alt="即将发送的公式截图"/>:<p className="selection-preview">{boardTarget?.text??effective?.sourceText??'用鼠标选择 PDF 文字，或框选一个想弄懂的公式。'}</p>}<div className="selection-actions"><button className="primary-button" disabled={!effective||busy} onClick={()=>{cancel();setQuestionDialog(true);}}><MessageCircle size={15}/>针对选区提问</button><button className="secondary-button" disabled={!effective?.sourceText&&!effective?.imageDataUrl} onClick={()=>void read()}><Volume2 size={15}/>朗读所选</button><button className="secondary-button" disabled={!readingTarget?.sourceText||busy} onClick={()=>directLesson('read-explain')}>读并讲</button>{effective&&<button className="text-button clear-selection-button" title="清除选区与提问目标（Esc），保留阅读书签" onClick={clearSelection}><X size={13}/>取消选中 <kbd>Esc</kbd></button>}</div><p className="selection-question-hint">每次可编辑问题，也可以直接在右侧输入。{(effective?.sourceText||effective?.imageDataUrl)&&<button className="text-button" onClick={()=>{cancel();setCorrectionOpen(true);}}>校对朗读文本</button>}{correction&&<span> · 使用已校对版本</span>}</p><ClassroomControls openNonce={classroomOpen} state={lesson} mode={lessonMode} unit={lessonUnit} disabled={!readingTarget?.sourceText||busy} onMode={value=>{cancel();classroom.current?.reset();setLessonMode(value);}} onUnit={value=>{cancel();classroom.current?.reset();setLessonUnit(value);}} onStart={()=>void startLesson()} onContinue={()=>void classroom.current?.continue().catch(error=>setError(error.message))} onStop={()=>{cancel();classroom.current?.reset();}}/>{readingTarget?.sourceText&&<p className="privacy-hint" data-testid="prose-reading-notice">只读正文 · 自动跳过公式，不调用识别模型。{proseReading.skippedCount>0&&` 本选区将跳过 ${proseReading.skippedCount} 处检测到的公式或难读内容，原文保留。`}</p>}<p className="privacy-hint">{config?.mode==='demo'?(audioEngine==='doubao'?'演示问答不调用解题模型；主动朗读会将所选文字发给火山引擎豆包语音。':audioEngine==='openai'?'演示问答不调用解题模型；主动朗读会将所选文字发给 OpenAI。':'演示问答：内容留在本机，不调用在线模型。'):effective?.imageDataUrl?'发送问题时：此截图与问题将传给配置的模型服务。':'发送问题时：所选原文、最近 6 条问答（每条最多 4000 字）与问题将传给模型。'}</p></div></section>
+      <section className="reader-panel panel" aria-label="PDF 阅读区"><PdfReader onImageCapture={handleCapture} restoreReading={restoreReading} action={readerAction} clearSelectionRevision={clearSelectionRevision} onClearSelection={clearSelection} onDocument={handleDocument} onTarget={handleTarget} onPage={handlePage} onError={setError} navigation={navigation} readingText={audioState?.channel==='source'&&audioState.status==='speaking'&&audioState.cursor?.pageIndex===pageIndex&&audioState.cursor?.documentId===documentRecord?.documentId?currentSentence?.sourceText:undefined}/><div className="selection-tray"><div className="selection-title"><span className="eyebrow">{boardTarget?'已选板书步骤':effective?.imageDataUrl?'公式区域预览':effective?'原文选区预览':'你的阅读目标'}</span>{effective&&<span>PDF {effective.pageIndex+1} 页{effective.pageLabel?` · 书面 ${effective.pageLabel}`:''}</span>}</div>{effective?.imageDataUrl?<img className="crop-preview" src={effective.imageDataUrl} alt="即将发送的公式截图"/>:<p className="selection-preview">{boardTarget?.text??effective?.sourceText??'用鼠标选择 PDF 文字，或框选一个想弄懂的公式。'}</p>}<div className="selection-actions"><button className="primary-button" disabled={!effective} onClick={()=>{changeReading();setQuestionDialog(true);}}><MessageCircle size={15}/>针对选区提问</button><button className="secondary-button" disabled={!effective?.sourceText&&!effective?.imageDataUrl} onClick={()=>void read()}><Volume2 size={15}/>朗读所选</button><button className="secondary-button" disabled={!readingTarget?.sourceText||busy} onClick={()=>directLesson('read-explain')}>读并讲</button>{effective&&<button className="text-button clear-selection-button" title="清除选区与提问目标（Esc），保留阅读书签" onClick={clearSelection}><X size={13}/>取消选中 <kbd>Esc</kbd></button>}</div><p className="selection-question-hint">每次可编辑问题，也可以直接在右侧输入。{(effective?.sourceText||effective?.imageDataUrl)&&<button className="text-button" onClick={()=>{changeReading();setCorrectionOpen(true);}}>校对朗读文本</button>}{correction&&<span> · 使用已校对版本</span>}</p><ClassroomControls openNonce={classroomOpen} state={lesson} mode={lessonMode} unit={lessonUnit} disabled={!readingTarget?.sourceText||busy} onMode={value=>{cancel();classroom.current?.reset();setLessonMode(value);}} onUnit={value=>{cancel();classroom.current?.reset();setLessonUnit(value);}} onStart={()=>void startLesson()} onContinue={()=>void classroom.current?.continue().catch(error=>setError(error.message))} onStop={()=>{cancel();classroom.current?.reset();}}/>{readingTarget?.sourceText&&<p className="privacy-hint" data-testid="prose-reading-notice">只读正文 · 自动跳过公式，不调用识别模型。{proseReading.skippedCount>0&&` 本选区将跳过 ${proseReading.skippedCount} 处检测到的公式或难读内容，原文保留。`}</p>}<p className="privacy-hint">{config?.mode==='demo'?(audioEngine==='doubao'?'演示问答不调用解题模型；主动朗读会将所选文字发给火山引擎豆包语音。':audioEngine==='openai'?'演示问答不调用解题模型；主动朗读会将所选文字发给 OpenAI。':'演示问答：内容留在本机，不调用在线模型。'):effective?.imageDataUrl?'发送问题时：此截图与问题将传给配置的模型服务。':'发送问题时：所选原文、最近 6 条问答（每条最多 4000 字）与问题将传给模型。'}</p></div></section>
       <Blackboard revealLimits={realtimeReveal} activeEntryId={activeEntryId} revealThrough={lesson?.entry?{entryId:lesson.entry.id,index:lesson.stepIndex}:null} onSpeak={speakStep} entries={boardHidden?[]:entries} active={activeStep} setActive={setActiveStep} dark={dark} setDark={setDark} onSelect={selectBoard} onSource={(id,entry)=>{const source=entry.context.sources.find(s=>s.sourceId===id);if(source)setNavigation({pageIndex:source.pageIndex,rect:source.rect??undefined,nonce:Date.now()});}} onClear={()=>{cancel();setBoardHidden(true);setBoardTarget(null);}}/>
-      {chatVisible&&<section className="chat-panel panel" aria-label="学习对话"><div className="panel-heading"><div><span className="eyebrow">03 / CONVERSATION</span><h2>一起想明白</h2></div><span className="chat-status">{busy?'正在解答':'文字问答'}</span></div><div className="teaching-route"><div><strong>{realtimeState.mode==='live'&&realtimeState.connection==='connected'?'当前使用实时模型对话':'打字提问 · 看推导 · 听讲解'}</strong><span>解题：{config?.mode==='demo'?'固定演示，AI 未连接':(realtimeState.mode==='live'&&realtimeState.connection==='connected'?config?.models.realtime:effective?.imageDataUrl?config?.models.vision:config?.models.chat)||'未配置'} · 朗读：{voiceLabel}</span></div><button className="text-button" onClick={()=>setSettings(true)}>配置</button></div><div className="conversation-scroll">{!messages.length&&<div className="chat-welcome"><div className="teacher-avatar"><BookOpen size={21}/></div><h3>把不懂的地方，打字问清楚</h3><p>选中教材后输入你的问题。解题模型负责理论、推导和讲解稿；语音模型负责把讲解读给你听。</p><button className="secondary-button welcome-trial" onClick={()=>setFeatureGuide(true)}>带我试用功能</button>{config?.mode==='demo'&&<div className="demo-notice">解题 AI 尚未连接：{isLocalSpeechEngine(audioEngine)?'本地 AI 朗读独立可用，模型就绪后即可免费听书。':'朗读、暂停和续读按所选声音设置使用。'}提问只展示固定教案，连接解题模型后才会理解你的教材。</div>}<span className="small-label">你可以这样问</span><div className="prompt-list">{['这一步为什么成立？','解释每个符号的含义','用一个小数字举例'].map(p=><button key={p} onClick={()=>setQuestion(p)}>{p}<ArrowUp size={13}/></button>)}</div></div>}{messages.map(m=><div className={`message ${m.role}`} key={m.id}><div className="message-label">{m.role==='user'?'你':m.demo?'演示讲解 · 非真实 AI':'AI 老师'}</div>{m.delivery&&<span className="message-delivery">{m.delivery==='spoken'?'实时语音 · 播放完成':m.delivery==='interrupted'?'实时语音已打断 · 转写可能含未播放内容':m.delivery==='unconfirmed'?'实时语音播放未确认':'实时会话输入'}</span>}<p>{m.text}</p>{m.role==='assistant'&&!m.delivery&&entries.find(entry=>entry.id===m.id)&&<AnswerSpeechControls entry={entries.find(entry=>entry.id===m.id)!} lesson={lesson} available={speechAvailable} speechEngine={audioEngine} onListen={()=>{const entry=entries.find(item=>item.id===m.id);if(entry?.plan.steps[0])speakStep(entry.plan.steps[0],entry,0,true);}} onContinue={()=>void classroom.current?.continue().catch(error=>setError(error.message))}/>}</div>)}{busy&&<div className="thinking" role="status"><span className="green-dot"/>正在核对条件、推导并整理板书…<button onClick={()=>cancel()}>取消</button></div>}</div><div className="composer-area">{effective&&<div className="target-chip"><span>{boardTarget?'已选板书':effective.imageDataUrl?'框选区域':'所选文字'} · PDF 第 {effective.pageIndex+1} 页</span><button aria-label="取消提问目标" onClick={clearSelection}><X size={12}/></button></div>}<div className="composer"><textarea aria-label="输入文字问题" placeholder="哪一步还不清楚？" value={question} maxLength={2000} onChange={e=>{cancel();setQuestion(e.target.value);}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void ask();}}}/><div className="composer-bottom"><span>Enter 发送 · Shift+Enter 换行</span><button aria-label="发送问题" disabled={!question.trim()||busy} onClick={()=>void ask()}><ArrowUp size={18}/></button></div></div><details className="optional-voice" ref={optionalVoice}><summary>可选：麦克风与实时语音</summary><p>日常理论问题直接打字即可。以下功能只在你主动开启时使用麦克风；开启实时语音后，文字追问也会进入实时模型。</p><RealtimePanel openNonce={realtimeOpen} state={realtimeState} config={config} hasTarget={!!effective} onStart={mode=>{setVoiceRevision(value=>value+1);void realtime.current?.start(mode);}} onStop={()=>realtime.current?.stop()} onInterrupt={()=>{realtime.current?.interrupt();audio.current?.pause();}} onContinue={()=>void realtime.current?.continueTeaching().catch(error=>setError(error.message))}/><VoiceQuestionInput config={config} onStart={()=>{realtime.current?.stop();cancel(false,false,true);return guard.current.current();}} onTranscript={(text,envelope)=>{if(guard.current.accepts(envelope)){setQuestion(text);setError('');}}} onError={setError} resetRevision={voiceRevision} disabled={!effective}/></details><details className="notes"><summary><NotebookPen size={13}/>本书本地笔记</summary><textarea aria-label="本书本地笔记" value={note} disabled={!documentRecord||recordReady!==documentRecord.documentId} onChange={e=>saveNote(e.target.value)} placeholder={desktopBridge?'只保存在本机软件内，不发送给模型':'只保存在当前浏览器，不发送给模型'}/></details></div></section>}
+      {chatVisible&&<section className="chat-panel panel" aria-label="学习对话"><div className="panel-heading"><div><span className="eyebrow">03 / CONVERSATION</span><h2>一起想明白</h2></div><span className="chat-status">{busy?'正在解答':'文字问答'}</span></div><div className="teaching-route"><div><strong>{realtimeState.mode==='live'&&realtimeState.connection==='connected'?'当前使用实时模型对话':'打字提问 · 看推导 · 听讲解'}</strong><span>解题：{config?.mode==='demo'?'固定演示，AI 未连接':(realtimeState.mode==='live'&&realtimeState.connection==='connected'?config?.models.realtime:effective?.imageDataUrl?config?.models.vision:config?.models.chat)||'未配置'} · 朗读：{voiceLabel}</span></div><button className="text-button" onClick={()=>setSettings(true)}>配置</button></div><div className="conversation-scroll">{!messages.length&&<div className="chat-welcome"><div className="teacher-avatar"><BookOpen size={21}/></div><h3>把不懂的地方，打字问清楚</h3><p>选中教材后输入你的问题。解题模型负责理论、推导和讲解稿；语音模型负责把讲解读给你听。</p><button className="secondary-button welcome-trial" onClick={()=>setFeatureGuide(true)}>带我试用功能</button>{config?.mode==='demo'&&<div className="demo-notice">解题 AI 尚未连接：{isLocalSpeechEngine(audioEngine)?'本地 AI 朗读独立可用，模型就绪后即可免费听书。':'朗读、暂停和续读按所选声音设置使用。'}提问只展示固定教案，连接解题模型后才会理解你的教材。</div>}<span className="small-label">你可以这样问</span><div className="prompt-list">{['这一步为什么成立？','解释每个符号的含义','用一个小数字举例'].map(p=><button key={p} onClick={()=>setQuestion(p)}>{p}<ArrowUp size={13}/></button>)}</div></div>}{messages.map(m=><div className={`message ${m.role}`} key={m.id}><div className="message-label">{m.role==='user'?'你':m.demo?'演示讲解 · 非真实 AI':'AI 老师'}</div>{m.delivery&&<span className="message-delivery">{m.delivery==='spoken'?'实时语音 · 播放完成':m.delivery==='interrupted'?'实时语音已打断 · 转写可能含未播放内容':m.delivery==='unconfirmed'?'实时语音播放未确认':'实时会话输入'}</span>}<p>{m.text}</p>{m.role==='assistant'&&!m.delivery&&entries.find(entry=>entry.id===m.id)&&<AnswerSpeechControls entry={entries.find(entry=>entry.id===m.id)!} lesson={lesson} available={speechAvailable} speechEngine={audioEngine} onListen={()=>{const entry=entries.find(item=>item.id===m.id);if(entry?.plan.steps[0])speakStep(entry.plan.steps[0],entry,0,true);}} onContinue={()=>void classroom.current?.continue().catch(error=>setError(error.message))}/>}</div>)}{questionTask&&<QuestionStatus key={questionTask.id} task={questionTask} onCancel={()=>cancelAnswer()} onRetry={()=>void ask(questionTask.submission.question,undefined,undefined,questionTask.submission)}/>}</div><div className="composer-area">{effective&&<div className="target-chip"><span>{boardTarget?'已选板书':effective.imageDataUrl?'框选区域':'所选文字'} · PDF 第 {effective.pageIndex+1} 页</span><button aria-label="取消提问目标" onClick={clearSelection}><X size={12}/></button></div>}<div className="composer"><textarea aria-label="输入文字问题" placeholder="哪一步还不清楚？" value={question} maxLength={2000} onChange={e=>{changeReading();setQuestion(e.target.value);}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void ask();}}}/><div className="composer-bottom"><span>Enter 发送 · Shift+Enter 换行</span><button aria-label="发送问题" disabled={!question.trim()} onClick={()=>void ask()}><ArrowUp size={18}/></button></div></div><details className="optional-voice" ref={optionalVoice}><summary>可选：麦克风与实时语音</summary><p>日常理论问题直接打字即可。以下功能只在你主动开启时使用麦克风；开启实时语音后，文字追问也会进入实时模型。</p><RealtimePanel openNonce={realtimeOpen} state={realtimeState} config={config} hasTarget={!!effective} onStart={mode=>{setVoiceRevision(value=>value+1);void realtime.current?.start(mode);}} onStop={()=>realtime.current?.stop()} onInterrupt={()=>{realtime.current?.interrupt();audio.current?.pause();}} onContinue={()=>void realtime.current?.continueTeaching().catch(error=>setError(error.message))}/><VoiceQuestionInput config={config} onStart={()=>{realtime.current?.stop();cancel(false,false,true);return guard.current.current();}} onTranscript={(text,envelope)=>{if(guard.current.accepts(envelope)){setQuestion(text);setError('');}}} onError={setError} resetRevision={voiceRevision} disabled={!effective}/></details><details className="notes"><summary><NotebookPen size={13}/>本书本地笔记</summary><textarea aria-label="本书本地笔记" value={note} disabled={!documentRecord||recordReady!==documentRecord.documentId} onChange={e=>saveNote(e.target.value)} placeholder={desktopBridge?'只保存在本机软件内，不发送给模型':'只保存在当前浏览器，不发送给模型'}/></details></div></section>}
       {chatVisible&&<><div className="column-handle first" style={{left:`calc((100% - 28px) * ${columns[0]/100} + 7px)`}} role="separator" aria-label="调整阅读器宽度" aria-orientation="vertical" tabIndex={0} onKeyDown={e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight")setColumns([Math.max(28,Math.min(48,columns[0]+(e.key==="ArrowRight"?1:-1))),columns[1]]);}} onPointerDown={e=>{e.preventDefault();resizeColumn(0,e.clientX);}}/><div className="column-handle second" style={{left:`calc((100% - 28px) * ${(columns[0]+columns[1])/100} + 21px)`}} role="separator" aria-label="调整黑板宽度" aria-orientation="vertical" tabIndex={0} onKeyDown={e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight")setColumns([columns[0],Math.max(25,Math.min(43,columns[1]+(e.key==="ArrowRight"?1:-1)))]);}} onPointerDown={e=>{e.preventDefault();resizeColumn(1,e.clientX);}}/></>}    </main>
     <QwenSpeechStatus enabled={audioEngine==='qwen'&&audioState?.outputOwner!=='realtime'} status={audioState?.status} operationId={JSON.stringify([speechTaskKey,audioState?.channel,currentSentence?.sentenceId,audioState?.rate])} stopped={stoppedSpeechKey===speechTaskKey} onStop={stopSpeech}/>
     <footer className="audio-bar" aria-label="朗读控制"><div className="audio-source"><span className={`audio-emblem ${audioState?.status==='speaking'?'playing':''}`}><Volume2 size={20}/></span><div><strong>{audioState?outputLabel[audioState.status as keyof typeof outputLabel]??'待机':'声音待机'}<span className="audio-kind">{voiceLabel}</span></strong><span className="subtitle" data-testid="reading-subtitle">{currentSentence?.sourceText??'选择原文，开启一小段朗读'}</span></div></div><div className="playback-controls"><button className="sentence-button" aria-label="上一句" title="跳到上一句" disabled={!audioState?.hasBookmark} onClick={()=>audio.current?.previous()}><SkipBack size={17}/><span>上一句</span></button><button className="play-button" aria-label={(audioState?.status==='speaking'||audioState?.status==='buffering')?'暂停朗读':'继续朗读'} disabled={!audioState?.hasBookmark} onClick={()=>(audioState?.status==='speaking'||audioState?.status==='buffering')?audio.current?.pause():void resume()}>{(audioState?.status==='speaking'||audioState?.status==='buffering')?<Pause size={18}/>:<Play size={18}/>}</button><button className="sentence-button" aria-label="下一句" title="跳到下一句" disabled={!audioState?.hasBookmark} onClick={()=>audio.current?.next()}><SkipForward size={17}/><span>下一句</span></button><button className="stop-button" onClick={stopSpeech}><Square size={14}/>停止</button></div><div className="audio-options">{audioState?.channel==='explanation'&&audioState.cursor&&<button className="text-button" onClick={()=>void resumeOriginal()}>回原文继续</button>}<button className="text-button voice-settings-button" disabled={!!documentRecord&&recordReady!==documentRecord.documentId} onClick={()=>setSettings(true)}>声音设置</button><button className="bookmark-button" disabled={!audioState?.cursor} onClick={()=>{const cursor=audioState?.cursor;if(cursor)setNavigation({pageIndex:cursor.pageIndex,nonce:Date.now()});}}><Bookmark size={14}/>阅读位置</button><label title={usesPlaybackRate(audioEngine)?'即时调整当前音频速度，保留播放位置；暂停时保持暂停。':'此声音改速从当前句重播。实时讲解最高1.5×，从下一步骤生效。'}>语速<select aria-label="语速" value={rate} onChange={e=>{const value=Number(e.target.value);setRate(value);audio.current?.setRate(value);}}>{SPEECH_RATE_OPTIONS.map(n=><option key={n} value={n}>{n}×</option>)}</select></label><label className="volume-control"><Volume2 size={15}/><input aria-label="音量" type="range" min="0" max="1" step="0.1" value={volume} onChange={e=>{setVolume(Number(e.target.value));audio.current?.setVolume(Number(e.target.value));realtime.current?.setVolume(Number(e.target.value));}}/></label></div></footer>
