@@ -1029,3 +1029,67 @@ describe('explicit one-next cloud lookahead (mock Doubao requests)', () => {
     expect(h.onComplete).toHaveBeenCalledOnce(); expect(h.requestSpeech).toHaveBeenCalledOnce(); h.audio.dispose();
   });
 });
+
+describe('prose-only source policy preserves original reading anchors', () => {
+  const mixedTarget: PdfTarget = { ...target, sourceText: String.raw`公式前面的正文。
+$$h_l = f(W_l h_{l-1} + b_l)$$
+公式后面的正文。
+最后一句正文。` };
+
+  it('omits a formula-only selection without requesting speech or inventing content', async () => {
+    const h = harness(undefined, { sourceReadingMode: 'prose', prefetchSpeech: true });
+    h.audio.load({ ...target, sourceText: String.raw`$$\unknown{a}{b}=\int f(x) dx$$` }, envelope, 'live');
+    expect(h.audio.getSnapshot().sentences).toEqual([]);
+    await h.audio.play();
+    expect(h.requestSpeech).not.toHaveBeenCalled(); expect(h.handles).toHaveLength(0);
+    expect(h.audio.getBookmark()).toBeNull(); expect(h.audio.getSnapshot().status).toBe('silent');
+    h.audio.dispose();
+  });
+
+  it('navigates readable sentences across skipped formulas while keeping the exact selected source', async () => {
+    const h = harness(undefined, { sourceReadingMode: 'prose', generatedSpeechRate: 1 });
+    h.audio.load(mixedTarget, envelope, 'live');
+    expect(h.audio.getSnapshot().sentences.map(sentence => sentence.speechText)).toEqual(['公式前面的正文。', '公式后面的正文。', '最后一句正文。']);
+    await h.audio.play(); h.audio.next(); await tick();
+    expect(h.audio.getSnapshot()).toMatchObject({ sentenceIndex: 1, status: 'speaking' });
+    expect(h.handles.at(-1)?.input.text).toBe('公式后面的正文。');
+    const middle = h.audio.getBookmark()!;
+    expect(middle.target.sourceText).toBe(mixedTarget.sourceText);
+    expect(middle.cursor.textVersion).toMatch(/^prose-v1-/u);
+    h.audio.next(); await tick(); expect(h.handles.at(-1)?.input.text).toBe('最后一句正文。');
+    h.audio.previous(); await tick();
+    expect(h.audio.getBookmark()).toEqual(middle); expect(h.handles.at(-1)?.input.text).toBe('公式后面的正文。');
+    expect(h.requestSpeech.mock.calls.every(call => !call[0].includes('$$') && !call[0].includes('h_l'))).toBe(true);
+    expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it('restores the same prose bookmark without autoplay and rejects pre-existing strict cursors', async () => {
+    const strict = harness(); strict.audio.next(); const oldBookmark = strict.audio.getBookmark()!;
+    const h = harness(undefined, { sourceReadingMode: 'prose' });
+    expect(h.audio.restoreBookmark(oldBookmark, envelope, 'live')).toBe(false);
+    h.audio.load(mixedTarget, envelope, 'live'); h.audio.next(); const bookmark = h.audio.getBookmark()!;
+    h.audio.reset();
+    expect(h.audio.restoreBookmark(JSON.parse(JSON.stringify(bookmark)), { ...envelope, generationId: 4 }, 'live')).toBe(true);
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'silent', sentenceIndex: 1 });
+    expect(h.requestSpeech).not.toHaveBeenCalled(); expect(h.handles).toHaveLength(0);
+    await h.audio.resume();
+    expect(h.handles[0].input.text).toBe('公式后面的正文。');
+    expect(h.audio.getBookmark()).toEqual(bookmark);
+    strict.audio.dispose(); h.audio.dispose();
+  });
+
+  it('leaves formula pronunciation and bookmark validation unchanged for teaching explanations', async () => {
+    const h = harness(undefined, { sourceReadingMode: 'prose' });
+    const step = { ...explanationStep, speechText: '参数 β_1^t 表示衰减。' };
+    h.audio.loadExplanation(target, step, envelope, 'live'); await h.audio.play();
+    expect(h.handles[0].input.text).toBe('参数 贝塔 下标 一 的 t 次方 表示衰减。');
+    expect(h.audio.getSnapshot().sentences[0].sourceText).toBe(step.speechText);
+    const bookmark = h.audio.getExplanationBookmark()!;
+    expect(bookmark.textVersion).not.toMatch(/^prose-v1-/u);
+    h.audio.stop(); expect(h.audio.restoreExplanationBookmark(bookmark, envelope, 'live')).toBe(true);
+    const unreadable = { ...step, speechText: String.raw`公式 $\unknown{x}$。` };
+    h.audio.loadExplanation(target, unreadable, envelope, 'live'); await h.audio.play();
+    expect(h.requestSpeech).toHaveBeenCalledOnce(); expect(h.onError).toHaveBeenCalledOnce();
+    h.audio.dispose();
+  });
+});
