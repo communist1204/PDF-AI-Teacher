@@ -84,3 +84,27 @@ describe('local prose-only reading projection', () => {
     expect(spoken(source)).toContain('请执行 fetch');
   });
 });
+
+describe('prose projection boundary regressions', () => {
+  it.each([
+    '\\frac{a}{b} z', '\\alpha x', '\\left(x\\right)', 'xᴸ', 'xᵗ', 'W⁽ˡ⁾', 'h₍ᵢ₎',
+    '\\begin{matrix}1 & 2 \\\\ 3 & 4\\end{matrix}',
+    '\\begin{align}h=1\n\\text{条件} x=2\\end{align}',
+  ])('does not leak operands from TeX or script expressions: %s', source => {
+    expect(spoken(source)).toBe('');
+  });
+
+  it('does not absorb an ordinary year across an English sentence boundary', () => {
+    expect(spoken('The value x=1. 2026年出版。')).toContain('2026年出版。');
+  });
+
+  it('retains calendar dates and the language name C++', () => {
+    expect(spoken('日期2026-10-01，C++ language，2026/10/01。')).toBe('日期2026-10-01，C++ language，2026/10/01。');
+  });
+
+  it('handles unfinished environments without dropping following Chinese prose', () => {
+    const text = spoken('\\begin{align}x=1\n下面仍然是正文。');
+    expect(text).toContain('下面仍然是正文。');
+    expect(text).not.toContain('begin');
+  });
+});

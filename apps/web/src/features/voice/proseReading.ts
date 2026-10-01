@@ -1,4 +1,6 @@
-﻿/** Local reading projection. Original UTF-16 offsets remain the only source anchors. */
+import { UNICODE_SCRIPT_MARKERS } from './mathSpeech';
+
+/** Local reading projection. Original UTF-16 offsets remain the only source anchors. */
 export interface ProseOmission { start: number; end: number }
 export interface ProseReading { text: string; skippedCount: number; ranges: ProseOmission[] }
 
@@ -29,7 +31,7 @@ function unclosedEnd(source: string, start: number): number {
     const word = /^[A-Za-z]{2,}/u.exec(source.slice(at))?.[0];
     if (word && !MATH_WORDS.has(word)) break;
     if (word) { at += word.length; continue; }
-    if (!MATH_CHARACTER.test(char) && !/[\\$`]/u.test(char) && !CORRUPT.test(char)) break;
+    if (!MATH_CHARACTER.test(char) && !UNICODE_SCRIPT_MARKERS.test(char) && !/[\\$`]/u.test(char) && !CORRUPT.test(char)) break;
     at += char.length;
   }
   return at;
@@ -42,7 +44,16 @@ function delimitedRanges(source: string): ProseOmission[] {
     const opener = source.startsWith('$$', at) ? '$$' : source.startsWith('\\[', at) ? '\\['
       : source.startsWith('\\(', at) ? '\\(' : source[at] === '$' ? '$'
       : source.startsWith('~~~', at) ? '~~~' : source[at] === '`' ? (source.startsWith('```', at) ? '```' : '`') : '';
-    if (!opener) { at += 1; continue; }
+    if (!opener) {
+      const environment = /^\\begin\{([A-Za-z*]+)\}/u.exec(source.slice(at));
+      if (environment) {
+        const closing = '\\end{' + environment[1] + '}';
+        const close = source.indexOf(closing, at + environment[0].length);
+        const end = close < 0 ? unclosedEnd(source, at + environment[0].length) : close + closing.length;
+        ranges.push({ start: at, end }); at = end; continue;
+      }
+      at += 1; continue;
+    }
     const closer = opener === '\\[' ? '\\]' : opener === '\\(' ? '\\)' : opener;
     let closeAt = source.indexOf(closer, at + opener.length);
     while (closeAt >= 0 && source[closeAt - 1] === '\\') closeAt = source.indexOf(closer, closeAt + closer.length);
@@ -60,9 +71,10 @@ function delimitedRanges(source: string): ProseOmission[] {
 }
 
 function hasMath(value: string): boolean {
-  return MATH_SYMBOL.test(value) || /[=+*/<>≤≥≠≈×÷]/u.test(value)
+  if (/^(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|C\+\+)$/u.test(value.trim())) return false;
+  return MATH_SYMBOL.test(value) || UNICODE_SCRIPT_MARKERS.test(value) || /[=+*/<>≤≥≠≈×÷]/u.test(value)
     || /[A-Za-z\d)\]}]\s*[−-]\s*[A-Za-z\d([{]/u.test(value)
-    || /[A-Za-z][(\[]\s*[A-Za-z\d]/u.test(value);
+    || /[A-Za-z][([]\s*[A-Za-z\d]/u.test(value);
 }
 
 function blankRanges(source: string, ranges: readonly ProseOmission[]): string {
@@ -112,8 +124,10 @@ function bareMathRanges(source: string): ProseOmission[] {
   while (at < source.length) {
     const char = String.fromCodePoint(source.codePointAt(at)!);
     const word = /^[A-Za-z]{2,}/u.exec(source.slice(at))?.[0];
-    const mathWord = !!word && MATH_WORDS.has(word) && /^\s*[(\[{]/u.test(source.slice(at + word.length));
-    if ((word && !mathWord) || !MATH_CHARACTER.test(char) || /^(?:\r?\n){2}/u.test(source.slice(at, at + 4))) {
+    const mathWord = !!word && MATH_WORDS.has(word) && /^\s*[([{]/u.test(source.slice(at + word.length));
+    const sentencePeriod = char === '.' && !(/\d/u.test(source[at - 1] ?? '') && /\d/u.test(source[at + 1] ?? ''))
+      && !(source[at - 1] === '.' || source[at + 1] === '.');
+    if (sentencePeriod || (word && !mathWord) || (!MATH_CHARACTER.test(char) && !UNICODE_SCRIPT_MARKERS.test(char)) || /^(?:\r?\n){2}/u.test(source.slice(at, at + 4))) {
       flush(at); at += word?.length ?? char.length; runStart = at;
     } else at += word?.length ?? char.length;
   }
@@ -134,7 +148,7 @@ export function omitProseRanges(source: string, start: number, end: number, rang
   }
   pieces.push(source.slice(from, upper));
   // Removing a formula may leave only its wrapper; do not speak an empty parenthesis.
-  return pieces.join('').replace(/[（(\[{]\s*[）)\]}]/gu, ' ')
+  return pieces.join('').replace(/[（([{]\s*[）)\]}]/gu, ' ')
     .replace(/[ \t]{2,}/gu, ' ').replace(/\s+([，。！？；：、,.!?;:])/gu, '$1')
     .replace(/([，；：、,;:])[ \t]*([，。！？；：、,.!?;:])/gu, '$2').trim();
 }
@@ -153,8 +167,14 @@ export function prepareProseReading(source: string): ProseReading {
     at += char.length;
   }
   remaining = blankRanges(source, mergeRanges(ranges));
-  ranges.push(...commandRanges(remaining));
+  const commands = commandRanges(remaining);
+  ranges.push(...commands);
   remaining = blankRanges(source, mergeRanges(ranges));
+  // A command is still a mathematical boundary marker after its arguments are hidden.
+  // This also skips adjacent bare operands, e.g. a fraction followed by z.
+  const marked = remaining.split('');
+  for (const command of commands) marked[command.start] = '=';
+  remaining = marked.join('');
   ranges.push(...bareMathRanges(remaining));
   ranges = mergeRanges(ranges);
   const text = omitProseRanges(source, 0, source.length, ranges);
