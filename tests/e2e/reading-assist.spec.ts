@@ -18,7 +18,7 @@ async function setup(page: Page) {
   await page.getByRole('button', { name: '选本页文字', exact: true }).click();
 }
 
-test('未识别公式自动请求选区截图并生成中文，一键直接朗读', async ({ page }) => {
+test('只有主动点击 AI 才请求选区截图并生成中文，随后一键朗读', async ({ page }) => {
   const requests: Array<{ context: { sources: { sourceText: string }[]; imageDataUrl: string }; sessionId: string; generationId: number; contextRevision: number }> = [];
   const spoken: string[] = [];
   page.on('request', request => { if (new URL(request.url()).pathname === '/api/tts') spoken.push(request.postDataJSON().text); });
@@ -26,8 +26,11 @@ test('未识别公式自动请求选区截图并生成中文，一键直接朗�
     const body = route.request().postDataJSON(); requests.push(body);
     await route.fulfill({ json: { sessionId: body.sessionId, generationId: body.generationId, contextRevision: body.contextRevision, readingText: speechText, uncertain: false, warnings: [], usage } });
   });
-  await setup(page); await page.getByRole('button', { name: '朗读所选', exact: true }).click();
+  await setup(page); await page.getByRole('button', { name: '校对朗读文本', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '校对朗读文本', exact: true });
+  await expect(dialog).toBeVisible(); expect(requests).toHaveLength(0);
+  await expect(dialog.getByRole('textbox', { name: '确认后的朗读文本' })).toHaveValue(/unsupported/u);
+  await dialog.getByRole('button', { name: 'AI 自动识别读法', exact: true }).click();
   await expect(dialog.getByRole('textbox', { name: '确认后的朗读文本' })).toHaveValue(speechText);
   expect(requests).toHaveLength(1); expect(requests[0].context.sources).toHaveLength(1);
   expect(requests[0].context.sources[0].sourceText).toContain('unsupported');
@@ -49,8 +52,9 @@ test('模型不确定时保留说明并阻止直接采用朗读，不伪装识�
     const body = route.request().postDataJSON();
     await route.fulfill({ json: { sessionId: body.sessionId, generationId: body.generationId, contextRevision: body.contextRevision, readingText: '这一处下标看不清。', uncertain: true, warnings: ['无法确定下标'], usage } });
   });
-  await setup(page); await page.getByRole('button', { name: '朗读所选', exact: true }).click();
+  await setup(page); await page.getByRole('button', { name: '校对朗读文本', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '校对朗读文本', exact: true });
+  await dialog.getByRole('button', { name: 'AI 自动识别读法', exact: true }).click();
   await expect(dialog).toContainText('无法确定下标');
   await expect(dialog.getByRole('button', { name: '使用并朗读', exact: true })).toBeDisabled();
   await expect(dialog.getByRole('button', { name: '使用校对文本', exact: true })).toBeDisabled();
@@ -58,7 +62,7 @@ test('模型不确定时保留说明并阻止直接采用朗读，不伪装识�
   await expect(page.getByTestId('reading-subtitle')).toContainText('选择原文');
 });
 
-test('关闭自动识别会取消请求，迟到结果不替换选区或启动语音', async ({ page }) => {
+test('关闭主动发起的识别会取消请求，迟到结果不替换选区或启动语音', async ({ page }) => {
   let release: (() => void) | undefined; let started = false; let speeches = 0;
   page.on('request', request => { if (new URL(request.url()).pathname === '/api/tts') speeches++; });
   await page.route('**/api/reading-assist', async route => {
@@ -66,7 +70,8 @@ test('关闭自动识别会取消请求，迟到结果不替换选区或启动�
     await new Promise<void>(resolve => { release = resolve; });
     await route.fulfill({ json: { sessionId: body.sessionId, generationId: body.generationId, contextRevision: body.contextRevision, readingText: speechText, uncertain: false, warnings: [], usage } }).catch(() => undefined);
   });
-  await setup(page); await page.getByRole('button', { name: '朗读所选', exact: true }).click();
+  await setup(page); await page.getByRole('button', { name: '校对朗读文本', exact: true }).click();
+  await page.getByRole('button', { name: 'AI 自动识别读法', exact: true }).click();
   await expect.poll(() => started).toBe(true);
   await page.getByRole('button', { name: '关闭朗读校对', exact: true }).click(); release?.();
   await expect(page.getByRole('dialog', { name: '校对朗读文本' })).toHaveCount(0);
@@ -75,7 +80,7 @@ test('关闭自动识别会取消请求，迟到结果不替换选区或启动�
 });
 
 
-test('纯图片框选也能自动识别并朗读，无须先手工转写', async ({ page }) => {
+test('纯图片默认朗读给出明确提示，主动识别后可朗读且重开不重复识别', async ({ page }) => {
   let requests = 0;
   let received: { context: { sources: { sourceText: string }[]; imageDataUrl: string } } | undefined;
   await page.route('**/api/reading-assist', async route => {
@@ -90,7 +95,12 @@ test('纯图片框选也能自动识别并朗读，无须先手工转写', async
   await expect(page.getByRole('img', { name: '即将发送的公式截图', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '朗读所选', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: '朗读所选', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '校对朗读文本', exact: true })).toHaveCount(0);
+  await expect(page.locator('.error-banner')).toContainText('没有可直接朗读的文字'); expect(requests).toBe(0);
+  await page.getByRole('button', { name: '校对朗读文本', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '校对朗读文本', exact: true });
+  await expect(dialog).toContainText('当前选区只有图片'); expect(requests).toBe(0);
+  await dialog.getByRole('button', { name: 'AI 自动识别读法', exact: true }).click();
   await expect(dialog.getByRole('textbox', { name: '确认后的朗读文本' })).toHaveValue(speechText);
   expect(received?.context.sources[0].sourceText).toBe(''); expect(received?.context.imageDataUrl).toMatch(/^data:image\/png;base64,/u);
   await dialog.getByRole('button', { name: '使用并朗读', exact: true }).click();
