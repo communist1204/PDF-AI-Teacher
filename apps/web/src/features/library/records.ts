@@ -1,6 +1,6 @@
 import { LearningRecordSchema, MAX_RECORD_BYTES, type LearningRecord } from '../../../../../packages/shared/learning';
 import { validatePlan, type DocumentRecord, type SourceRef } from '../../../../../packages/shared/protocol';
-import { splitSentences, textVersion } from '../voice/sentences';
+import { splitSourceSentences, sourceTextVersion } from '../voice/sentences';
 
 /** Existing protocol schemas strip unknown fields; imports must reject them instead. */
 function rejectUnknownProperties(input: unknown, parsed: unknown): void {
@@ -65,8 +65,9 @@ function validateRecordContent(value: unknown, expectedDocument?: DocumentRecord
   if (record.readingBookmark) {
     const { target, cursor } = record.readingBookmark;
     source(target);
-    const sentences = splitSentences(target.sourceText);
-    if (cursor.documentId !== target.documentId || cursor.pageIndex !== target.pageIndex || cursor.blockId !== target.blockId || cursor.textVersion !== textVersion(target.sourceText) || sentences[cursor.sentenceIndex]?.sentenceId !== cursor.sentenceId) fail('阅读书签的文本版本或句子位置已失效，不能跳过未读内容。');
+    const mode = cursor.textVersion.startsWith('prose-v1-') ? 'prose' : 'strict';
+    const sentences = splitSourceSentences(target.sourceText, mode);
+    if (cursor.documentId !== target.documentId || cursor.pageIndex !== target.pageIndex || cursor.blockId !== target.blockId || cursor.textVersion !== sourceTextVersion(target.sourceText, mode) || sentences[cursor.sentenceIndex]?.sentenceId !== cursor.sentenceId) fail('阅读书签的文本版本或句子位置已失效，不能跳过未读内容。');
   }
   const progress = record.teachingProgress;
   if (progress) {

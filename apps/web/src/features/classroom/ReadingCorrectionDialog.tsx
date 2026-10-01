@@ -5,7 +5,7 @@ export type ReadingRecognition = { readingText: string; uncertain: boolean; warn
 export default function ReadingCorrectionDialog({sourceText,onSave,onClose,onRecognize,onConfigure,recognitionModel,imageOnly=false}:{imageOnly?:boolean;sourceText:string;onSave:(text:string,play?:boolean)=>void;onClose:()=>void;onRecognize?:(text:string,signal:AbortSignal)=>Promise<ReadingRecognition>;onConfigure?:()=>void;recognitionModel?:string}){
   const dialog=useRef<HTMLDialogElement>(null);const [text,setText]=useState(sourceText);
   const [busy,setBusy]=useState(false);const [message,setMessage]=useState('');const [uncertain,setUncertain]=useState(false);const [recognized,setRecognized]=useState(false);
-  const task=useRef<AbortController|null>(null);const initial=useRef({sourceText,onRecognize,imageOnly});
+  const task=useRef<AbortController|null>(null);
   useEffect(()=>{dialog.current?.showModal();return()=>task.current?.abort();},[]);
   const recognize=async(input:string,recognizer=onRecognize)=>{
     if(!recognizer||task.current)return;
@@ -18,18 +18,13 @@ export default function ReadingCorrectionDialog({sourceText,onSave,onClose,onRec
     }catch(error){if(!controller.signal.aborted)setMessage((error as Error).message);}
     finally{if(task.current===controller){task.current=null;setBusy(false);}}
   };
-  // Start once for an unresolved original selection, never for every edit or render.
-  useEffect(()=>{
-    let active=true;
-    queueMicrotask(()=>{if(active&&(initial.current.imageOnly||requiresFormulaConfirmation(initial.current.sourceText)))void recognize(initial.current.sourceText,initial.current.onRecognize);});
-    return()=>{active=false;};
-  },[]);
   const needsReview=requiresFormulaConfirmation(text);
   const speech=splitSentences(text).map(sentence=>sentence.speechText).join('\n');
   const canSave=!!text.trim()&&!needsReview&&!uncertain&&!busy;
   return <dialog ref={dialog} className="selection-question-dialog reading-correction-dialog" aria-label="校对朗读文本" onCancel={event=>{event.preventDefault();onClose();}}>
     <div className="panel-heading"><h2>原文与公式读法</h2><button className="icon-button" aria-label="关闭朗读校对" onClick={onClose}><X size={18}/></button></div>
-    <p className="question-mode-note">常见公式会自动转换。遇到提取乱码或复杂公式，AI 可结合原页选区识别并生成中文读法；无需逐个手改。只发送所选文字与选区截图，使用当前解题账号的额度，PDF 原文件保持原样。</p>
+    <p className="question-mode-note">默认朗读会跳过公式，直接读正文，不等待 AI。这里是可选的完整读法校对；只有点击「AI 自动识别读法」才会发送所选文字与截图，使用解题账号额度。PDF 原文件保持原样。</p>
+    {imageOnly&&<p className="reading-assist-message">当前选区只有图片；如需朗读其中的文字，请主动识别或输入读法。</p>}
     <div className="reading-assist-actions"><button className="secondary-button" disabled={!onRecognize||busy} onClick={()=>void recognize(text)}>{busy?'正在自动识别…':'AI 自动识别读法'}</button>{onRecognize?<small>识别模型：{recognitionModel}</small>:<span>连接解题模型后可自动识别。<button className="text-button" onClick={onConfigure}>配置 GPT</button></span>}</div>
     {message&&<p className="reading-assist-message" role="status">{message}</p>}
     <label className="question-label" htmlFor="reading-correction">确认后的朗读文本</label><textarea id="reading-correction" maxLength={12000} disabled={busy} value={text} onChange={event=>{setText(event.target.value);setUncertain(false);setRecognized(false);}}/>

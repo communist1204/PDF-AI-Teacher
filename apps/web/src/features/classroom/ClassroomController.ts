@@ -50,6 +50,15 @@ export class ClassroomController {
     if(this.state.mode==='explain'){await this.generate();return;}
     this.state.phase='reading';this.emit();
     this.options.audio()?.load(this.state.units[this.state.unitIndex],this.envelope!,this.mode);
+    await this.playOrSkipSource();
+  }
+  private async playOrSkipSource(){
+    if(!this.options.audio()?.getSnapshot().sentences.length){
+      // A formula-only reading unit is skipped; teaching still sees the original.
+      if(this.state.mode==='read'){this.state.phase='waiting';this.emit();}
+      else await this.generate();
+      return;
+    }
     await this.options.audio()?.play();
   }
   private async generate(){
@@ -101,7 +110,7 @@ export class ClassroomController {
         this.state.phase='reading';this.emit();
         const bookmark=this.options.audio()?.getBookmark();
         if(bookmark?.target.sourceId===this.state.units[this.state.unitIndex].sourceId)await this.options.audio()?.resumeSource(this.envelope!,this.mode);
-        else {this.options.audio()?.load(this.state.units[this.state.unitIndex],this.envelope!,this.mode);await this.options.audio()?.play();}
+        else {this.options.audio()?.load(this.state.units[this.state.unitIndex],this.envelope!,this.mode);await this.playOrSkipSource();}
       }
       return;
     }

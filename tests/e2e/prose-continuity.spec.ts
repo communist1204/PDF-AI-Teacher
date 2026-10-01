@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { mockSourceSpeech } from './realtimeHarness';
@@ -118,5 +119,7 @@ test('豆包模拟延迟：播放时只提前准备下一句，换段复用音�
   await expect.poll(() => failed).toContain(requests[2].text); releaseThird();
   await expect.poll(() => returned).toBe(3);
   expect(await probeState(page)).toMatchObject({ count: 2, playing: 0 });
-  await testInfo.attach('mock-doubao-continuity.json', { body: Buffer.from(JSON.stringify({ simulatedNetworkDelayMs: 350, transitionGapMs: gapMs, requests, events: (await probeState(page)).events, realCloudTest: false }, null, 2)), contentType: 'application/json' });
+  const reportPath=testInfo.outputPath('mock-doubao-continuity.json');
+  await writeFile(reportPath,JSON.stringify({ simulatedNetworkDelayMs: 350, transitionGapMs: gapMs, requests, events: (await probeState(page)).events, realCloudTest: false },null,2));
+  await testInfo.attach('mock-doubao-continuity.json', { path: reportPath, contentType: 'application/json' });
 });

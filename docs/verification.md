@@ -456,3 +456,24 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 用户最少步骤：双击原软件图标；更新后先打开一次自己的书，之后自动恢复。遇到复杂公式点「朗读所选」，模型已配置时自动准备稿件，再点「使用并朗读」；未配置时进入GPT设置，Key只在本机填写。
 
 交付时已启动普通用户配置的新版桌面窗口，PID 26600，标题「PDF AI Teacher · 学习工作台」、Responding=true；没有测试profile/调试参数，没有改账号或声音配置。见 [reading-running.json](reading-running.json)。
+
+
+## 2026-10-01 16:55：跳过公式与豆包单句提前准备
+
+环境：Windows、Node24.19.0、npm11.17.0、Git2.50.1，Edge真实浏览器/HTMLAudio，Electron44.5.0打包应用。范围仅本项目；未读取凭证、调用付费云接口或变更科研/Conda/CUDA/代理/训练进程。
+
+|检查|实际结果与证据|
+|---|---|
+|npm run typecheck / npm run lint|通过。首轮lint发现新正则3处冗余转义，已修复并复验。|
+|npm test|30文件、819项全部通过。公式投影43项、句源/版本测试、79项音频控制、记录导入导出及课堂恢复均包含。|
+|npm run test:e2e|95用例；最终全套94通过，唯一失败为workspace旧自动弹窗断言，与新需求冲突。原改写因换行匹配没有落到该文件，第二次仍失败；随后明确修正入口为主动校对，保留暂停/文字打断/续读所有断言。|
+|Playwright定向复测|npm run test:e2e -- tests/e2e/workspace.spec.ts -g '同一句暂停续播'：1/1通过。其余94项已在最终产品代码上通过，未删除失败测试；合计95用例完成验证。|
+|真实PDF与UI|1280×720实页检查：原文选区保留公式，提示跳过数量，点击后没有自动识别窗口，播放器/上一句/下一句/停止可见。见screenshots/prose-reading-skip-720.png。主动校对仍提供AI入口，打开不会调用，见screenshots/reading-assist-preview-720.png。|
+|默认不调用识别|真实PDF选择正文+公式与纯公式两类E2E，reading-assist/ask请求为0；只把可读正文送入模拟TTS，纯公式不请求TTS。图片选区也不会自动识别。|
+|连续播放与取消|350ms模拟接口延迟、真实HTMLAudio完整WAV；第二句请求在第一句播放时发生，句末到下一句playing为42.6ms，复用同一次生成、无叠音；第三句预取停止取消，迟到响应不播放。详见prose-doubao-continuity.json，realCloudTest=false。|
+|变速/暂停/导航|云预取暂停保留一个槽、0.25–3倍速不重头、不重发当前/预取请求；下一句直接消费槽位；停止、重选、外部音源、提问和迟到响应安全性均验证。|
+|生产与桌面|npm run desktop:package通过（包含npm run build/typecheck、前后端打包）。仍有既存>500kB前端chunk警告，不影响构建。|
+|桌面退出重开|node scripts/verify-desktop-reading-reopen.mjs通过：真实exe、本机隔离无Key档案，关闭释放进程/端口，自动恢复PDF第2页和笔记，远端/API用量0、pageErrors0；见desktop-prose-reopen.json。|
+|真实云/听感|本轮未测真实豆包接口、首音延迟、音色/韵律或人耳连续听感；不把静音WAV模拟当成真实语音，不保证所有网络无缝。|
+
+程序已恢复到普通用户配置运行，见prose-reading-running.json。已有账号和音色不变。以后双击原图标即可；选两三句混合文字并点击「朗读所选」实听，不需手改公式或等待GPT。公式过滤是本地启发式，损坏PDF若丢失全部数学标记仍可能漏检。旧严格读法的句锚点不沿用；书/页码照常恢复。暂停可能让最多一条已发出的下一句合成完成，停止前已产生的额度不能撤销。

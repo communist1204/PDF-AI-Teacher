@@ -107,8 +107,8 @@ test('音频模拟：同一句暂停续播，文字打断后恢复未完成句�
   await openSample(page);
   await page.getByRole('button',{name:'切换为跟随当前页',exact:true}).click();
   await page.getByRole('button',{name:'选本页文字',exact:true}).click();
-  await page.getByRole('button',{name:'朗读所选',exact:true}).click();
-  // Full-page extraction contains a missing hat glyph (NUL): never bypass formula review.
+  // Explicit correction remains available; default prose reading is covered separately.
+  await page.getByRole('button',{name:'校对朗读文本',exact:true}).click();
   await expect(page.getByRole('dialog',{name:'校对朗读文本',exact:true})).toBeVisible();
   expect(await page.evaluate(()=>(window as unknown as {__testSpeech:{speaks:string[]}}).__testSpeech.speaks)).toEqual([]);
   await page.getByRole('textbox',{name:'确认后的朗读文本',exact:true}).fill('指数移动平均将过去的梯度按权重累积。初始值为零时，早期估计会偏小。');

@@ -130,7 +130,7 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
           </fieldset>
           <label>豆包中文音色<select aria-label="豆包中文音色" value={draft.doubaoTtsVoice ?? DEFAULT_DOUBAO_TTS_VOICE} onChange={event => update('doubaoTtsVoice', event.target.value)}>{DOUBAO_TTS_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</select></label>
           <label>豆包朗读语气<textarea aria-label="豆包朗读语气" value={draft.doubaoTtsInstructions ?? DEFAULT_DOUBAO_TTS_INSTRUCTIONS} onChange={event => update('doubaoTtsInstructions', event.target.value)} rows={3} maxLength={1000} placeholder="自然稳定地朗读，按语义停顿，不增改原文。"/></label>
-          <p className="desktop-setting-note">可以先保存声音选项，稍后再填写 Key；保存设置不会请求语音。确认额度并「应用并重启」后，再选一小段原文点「朗读所选」试听。声音合成完成后播放，播放中可原位调速。</p>
+          <p className="desktop-setting-note">可以先保存声音选项，稍后再填写 Key；保存设置不会请求语音。确认额度并「应用并重启」后，再选一小段原文点「朗读所选」试听。播放中可原位调速，并提前准备下一句来减少等待。停止会取消准备；最多可能有一句已生成但尚未听到的内容使用了额度。</p>
         </div>}
         {draft.ttsEngine === 'system' && <p>系统基本语音：免费，使用 Windows / 浏览器已有声音，音色和自然度受本机系统限制。不会向 OpenAI 请求语音。</p>}
         {draft.ttsEngine === 'openai' && <p>OpenAI AI 合成语音使用独立 API Key 和 API 额度；ChatGPT 登录不包含本应用的 TTS 授权。只有你主动朗读时才请求语音，真实听感需试听。</p>}

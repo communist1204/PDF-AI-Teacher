@@ -1,3 +1,4 @@
+import { prepareProseReading, omitProseRanges } from './proseReading';
 import type { Sentence } from '../../../../../packages/shared/protocol';
 import { mathToSpeech, UNICODE_SCRIPT_MARKERS } from './mathSpeech';
 
@@ -229,4 +230,25 @@ export function splitSentences(sourceText: string): Sentence[] {
     sourceText: source,
     speechText: toSpeechText(source),
   }));
+}
+
+
+export type SourceReadingMode = 'strict' | 'prose';
+/** Reading policy is part of the cursor identity, so old formula anchors cannot drift. */
+export function sourceTextVersion(text: string, mode: SourceReadingMode = 'strict'): string {
+  return mode === 'prose' ? 'prose-v1-' + textVersion(text) : textVersion(text);
+}
+
+/** Keep original sentence spans for highlights; omit formulas only from the speech channel. */
+export function splitSourceSentences(sourceText: string, mode: SourceReadingMode = 'strict'): Sentence[] {
+  const sentences = splitSentences(sourceText);
+  if (mode === 'strict') return sentences;
+  const { ranges } = prepareProseReading(sourceText);
+  let offset = 0;
+  return sentences.map(sentence => {
+    const end = offset + sentence.sourceText.length;
+    const prose = omitProseRanges(sourceText, offset, end, ranges);
+    offset = end;
+    return { ...sentence, sentenceId: 'prose-v1-' + sentence.sentenceId, speechText: toSpeechText(prose) };
+  }).filter(sentence => /[\p{L}\p{N}]/u.test(sentence.speechText));
 }

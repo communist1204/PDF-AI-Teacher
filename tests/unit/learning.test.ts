@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LEARNING_FORMAT, MAX_RECORD_BYTES, type LearningRecord } from '../../packages/shared/learning';
 import { exportRecord, importRecord, markdownExport, validateRecord } from '../../apps/web/src/features/library/records';
 import { loadRecord, saveRecord } from '../../apps/web/src/features/library/storage';
-import { splitSentences, textVersion } from '../../apps/web/src/features/voice/sentences';
+import { splitSentences, textVersion, splitSourceSentences, sourceTextVersion } from '../../apps/web/src/features/voice/sentences';
 import { makeDemoPlan } from '../../apps/server/src/demo';
 import type { PdfTarget } from '../../packages/shared/protocol';
 
@@ -181,4 +181,23 @@ describe('versioned learning record import/export', () => {
     await expect(loadRecord(record.document)).rejects.toThrow('请先导出');
     expect(record.note).toBe('记住偏差修正。');
   });
+});
+
+
+it('round-trips prose bookmarks after skipped formula sentences without shifting their original source',()=>{
+  const record=fixture();const target=record.target!;
+  target.sourceText='先读正文。\n$$x=y$$\n最后读正文。';
+  const sentences=splitSourceSentences(target.sourceText,'prose');
+  record.readingBookmark!.cursor={documentId,pageIndex:target.pageIndex,blockId:target.blockId,sentenceIndex:1,sentenceId:sentences[1].sentenceId,textVersion:sourceTextVersion(target.sourceText,'prose')};
+  const restored=importRecord(exportRecord(record));
+  expect(restored.readingBookmark).toEqual(record.readingBookmark);
+  expect(restored.readingBookmark!.target.sourceText).toContain('$$x=y$$');
+  restored.readingBookmark!.cursor.sentenceIndex=2;
+  expect(()=>validateRecord(restored)).toThrow('阅读书签');
+});
+
+it('does not accept prose sentence ids under a strict reading version',()=>{
+  const record=fixture();const target=record.target!;
+  record.readingBookmark!.cursor.sentenceId=splitSourceSentences(target.sourceText,'prose')[1].sentenceId;
+  expect(()=>validateRecord(record)).toThrow('阅读书签');
 });
