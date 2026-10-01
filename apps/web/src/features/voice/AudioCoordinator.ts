@@ -1,7 +1,7 @@
 import { sameEnvelope, SourceSchema, type Envelope, type PdfTarget, type ReadingCursor, type Sentence, type TeachingStep } from '../../../../../packages/shared/protocol';
 import { browserPlaybackAdapter, type PlaybackAdapter, type PlaybackHandle } from './playback';
 import { MAX_SPEECH_RATE, MIN_SPEECH_RATE } from '../../../../../packages/shared/speechRate';
-import { splitSentences, textVersion, requiresFormulaConfirmation } from './sentences';
+import { splitSentences, splitSourceSentences, sourceTextVersion, textVersion, requiresFormulaConfirmation } from './sentences';
 export { splitSentences, toSpeechText, requiresFormulaConfirmation } from './sentences';
 export type { PlaybackAdapter, PlaybackHandle, PlaybackInput } from './playback';
 
@@ -41,8 +41,12 @@ export type AudioCoordinatorOptions = {
   onComplete?: (event: AudioCompletion) => void;
   playbackAdapter?: PlaybackAdapter;
   generatedSpeechRate?: number;
-  /** Only enable for a free local engine. Never speculatively generate paid speech. */
+  /** Legacy free local lookahead, with a bounded foreground retry after a failed request. */
   prefetchLocalSpeech?: boolean;
+  /** Prepare at most the next sentence during playback. Cloud use must be explicit. */
+  prefetchSpeech?: boolean;
+  /** Source pronunciation policy; explanations retain their teaching speech. */
+  sourceReadingMode?: 'strict' | 'prose';
 };
 
 // The input state stays orthogonal to the single output owner.
@@ -66,7 +70,7 @@ function validTarget(value: PdfTarget): boolean {
   return SourceSchema.safeParse(value).success && (value.imageDataUrl === undefined || (typeof value.imageDataUrl === 'string' && value.imageDataUrl.length <= 3000000 && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(value.imageDataUrl)));
 }
 
-/** One owner, one current sentence, no speculative paid generation. */
+/** One output owner, one current sentence and at most one explicitly enabled lookahead. */
 export class AudioCoordinator {
   private state: AudioState = { status: 'silent', channel: 'source', teachingStepId: null, error: null, sentenceIndex: 0, sentences: [], cursor: null, hasBookmark: false, mode: 'demo', rate: 1, volume: 1 };
   private target: PdfTarget | null = null;
@@ -76,7 +80,7 @@ export class AudioCoordinator {
   private active: PlaybackHandle | null = null;
   private externalOutput: { stop: () => void } | null = null;
   private request: AbortController | null = null;
-  private prefetched: { text: string; envelope: Envelope; controller: AbortController; promise: Promise<Blob> } | null = null;
+  private prefetched: { sentenceIndex: number; text: string; envelope: Envelope; controller: AbortController; promise: Promise<Blob> } | null = null;
   private epoch = 0;
   private playbackAttempt = 0;
   private disposed = false;
@@ -137,7 +141,7 @@ export class AudioCoordinator {
   private cursor(index: number): ReadingCursor | null {
     const sentence = this.state.sentences[index];
     if (!sentence || !this.target || this.state.channel !== 'source') return null;
-    return { documentId: this.target.documentId, pageIndex: this.target.pageIndex, blockId: this.target.blockId, sentenceId: sentence.sentenceId, textVersion: textVersion(this.target.sourceText), sentenceIndex: index };
+    return { documentId: this.target.documentId, pageIndex: this.target.pageIndex, blockId: this.target.blockId, sentenceId: sentence.sentenceId, textVersion: sourceTextVersion(this.target.sourceText, this.options.sourceReadingMode), sentenceIndex: index };
   }
 
   private rememberSource() {
@@ -170,7 +174,7 @@ export class AudioCoordinator {
     this.target = cloneTarget(target);
     this.explanationText = '';
     this.envelope = { ...envelope };
-    this.state = { ...this.state, status: 'silent', channel: 'source', teachingStepId: null, error: null, mode, sentences: splitSentences(target.sourceText), sentenceIndex: bookmark?.cursor.sentenceIndex ?? 0, hasBookmark: !!bookmark };
+    this.state = { ...this.state, status: 'silent', channel: 'source', teachingStepId: null, error: null, mode, sentences: splitSourceSentences(target.sourceText, this.options.sourceReadingMode), sentenceIndex: bookmark?.cursor.sentenceIndex ?? 0, hasBookmark: !!bookmark };
     this.emit();
   }
 
@@ -202,8 +206,8 @@ export class AudioCoordinator {
     if (this.disposed || !bookmark || !this.mayRestore(bookmark.target)) return false;
     const cursor = bookmark.cursor;
     const target = bookmark.target;
-    const sentence = cursor && Number.isInteger(cursor.sentenceIndex) && cursor.sentenceIndex >= 0 ? splitSentences(target.sourceText)[cursor.sentenceIndex] : null;
-    if (!sentence || cursor.documentId !== target.documentId || cursor.pageIndex !== target.pageIndex || cursor.blockId !== target.blockId || cursor.textVersion !== textVersion(target.sourceText) || cursor.sentenceId !== sentence.sentenceId) return false;
+    const sentence = cursor && Number.isInteger(cursor.sentenceIndex) && cursor.sentenceIndex >= 0 ? splitSourceSentences(target.sourceText, this.options.sourceReadingMode)[cursor.sentenceIndex] : null;
+    if (!sentence || cursor.documentId !== target.documentId || cursor.pageIndex !== target.pageIndex || cursor.blockId !== target.blockId || cursor.textVersion !== sourceTextVersion(target.sourceText, this.options.sourceReadingMode) || cursor.sentenceId !== sentence.sentenceId) return false;
     this.sourceBookmark = { target: cloneTarget(target), cursor: { ...cursor } };
     this.load(target, envelope, mode);
     return true;
@@ -250,14 +254,14 @@ export class AudioCoordinator {
 
   private async startSentence(): Promise<void> {
     if (this.disposed || !this.envelope) return;
-    const cached = this.prefetched?.text === this.state.sentences[this.state.sentenceIndex]?.speechText && sameEnvelope(this.prefetched.envelope, this.envelope) ? this.prefetched : null;
+    const cached = this.prefetched?.sentenceIndex === this.state.sentenceIndex && this.prefetched.text === this.state.sentences[this.state.sentenceIndex]?.speechText && sameEnvelope(this.prefetched.envelope, this.envelope) ? this.prefetched : null;
     if (cached) this.prefetched = null;
     this.cancel();
     const token = this.epoch;
     const envelope = { ...this.envelope };
     const sentence = this.state.sentences[this.state.sentenceIndex];
     if (!sentence) return;
-    if (sentence.speechText.length > 1400 || requiresFormulaConfirmation(sentence.sourceText)) { this.fail('这句含有尚不能可靠朗读的公式，请先在「校对朗读文本」中补充中文读法。'); return; }
+    if (this.requiresReview(sentence)) { this.fail('这句含有尚不能可靠朗读的公式，请先在「校对朗读文本」中补充中文读法。'); return; }
     const request = cached?.controller ?? new AbortController();
     this.request = request;
     const valid = () => !this.disposed && token === this.epoch && !!this.envelope && sameEnvelope(envelope, this.envelope) && !request.signal.aborted;
@@ -271,15 +275,23 @@ export class AudioCoordinator {
       const rate = this.state.rate;
       let blob: Blob | undefined;
       if (this.state.mode === 'live') {
-        // Speculative local work may fail while an aborted request is draining.
-        // A failed lookahead must not become the foreground sentence's result.
-        if (cached) { try { blob = await cached.promise; } catch { if (!valid()) return; } }
+        if (cached) {
+          try { blob = await cached.promise; }
+          catch (error) {
+            if (!valid()) return;
+            // A cloud request may already be charged even when it fails. Surface
+            // its error at this sentence and wait for an explicit user retry.
+            if (this.options.prefetchSpeech) throw error;
+            // Free local work may fail while an aborted process is draining;
+            // retain the existing single foreground retry for that engine.
+          }
+        }
         if (!blob && valid()) blob = await this.options.requestSpeech(sentence.speechText, envelope, rate, request.signal);
       }
       if (!valid()) return;
       const handle = await this.adapter.create({
         mode: this.state.mode, text: sentence.speechText, blob, rate, generatedRate: this.options.generatedSpeechRate, volume: this.state.volume, signal: request.signal,
-        onStarted: () => { if (valid() && this.state.status !== 'paused') { started = true; this.state.status = 'speaking'; this.emit(); } },
+        onStarted: () => { if (valid() && this.state.status !== 'paused') { started = true; this.state.status = 'speaking'; this.emit(); this.prefetchNext(); } },
         onEnded: () => {
           if (!valid() || !started) return;
           // An end racing with pause is not confirmed as read. Discard that
@@ -308,17 +320,27 @@ export class AudioCoordinator {
     }
   }
 
+  private requiresReview(sentence: Sentence): boolean {
+    const text = this.state.channel === 'source' && this.options.sourceReadingMode === 'prose' ? sentence.speechText : sentence.sourceText;
+    return sentence.speechText.length > 1400 || requiresFormulaConfirmation(text);
+  }
+
   private prefetchNext() {
-    if (!this.options.prefetchLocalSpeech || this.state.mode !== 'live' || this.state.status !== 'speaking' || !this.envelope || this.prefetched || this.disposed) return;
+    if (!(this.options.prefetchSpeech || this.options.prefetchLocalSpeech) || this.state.mode !== 'live' || this.state.status !== 'speaking' || !this.envelope || this.prefetched || this.disposed) return;
     const next = this.state.sentences[this.state.sentenceIndex + 1];
-    if (!next || next.speechText.length > 1400 || requiresFormulaConfirmation(next.sourceText)) return;
+    if (!next || this.requiresReview(next)) return;
     const controller = new AbortController();
     const envelope = { ...this.envelope };
-    const promise = this.options.requestSpeech(next.speechText, envelope, this.state.rate, controller.signal);
-    const entry = { text: next.speechText, envelope, controller, promise };
+    const rate = this.state.rate;
+    const promise = Promise.resolve().then(() => {
+      if (controller.signal.aborted) throw new DOMException('朗读已取消', 'AbortError');
+      return this.options.requestSpeech(next.speechText, envelope, rate, controller.signal);
+    });
+    const entry = { sentenceIndex: this.state.sentenceIndex + 1, text: next.speechText, envelope, controller, promise };
     this.prefetched = entry;
-    // Leave failures to a normal foreground attempt, without automatic loops.
-    void promise.catch(() => { if (this.prefetched === entry) this.prefetched = null; });
+    // Observe rejection immediately. Explicit cloud lookahead keeps the failure
+    // for the foreground; local lookahead permits one normal foreground attempt.
+    void promise.catch(() => { if (!this.options.prefetchSpeech && this.prefetched === entry) this.prefetched = null; });
   }
 
   private finishedSentence() {
@@ -355,8 +377,13 @@ export class AudioCoordinator {
       return;
     }
     if (this.disposed || (this.state.status !== 'speaking' && this.state.status !== 'buffering')) return;
-    this.prefetched?.controller.abort();
-    this.prefetched = null;
+    // Pausing a loaded clip keeps the one cloud lookahead, avoiding duplicate
+    // generation when resumed. It can finish silently but can never autoplay.
+    // Stop, interrupt, new selection and disposal always cancel and discard it.
+    if (!this.options.prefetchSpeech || !this.active) {
+      this.prefetched?.controller.abort();
+      this.prefetched = null;
+    }
     if (this.active) {
       this.playbackAttempt += 1;
       this.active.pause();
@@ -406,8 +433,14 @@ export class AudioCoordinator {
     if (this.externalOutput) this.stop();
     if (!this.state.sentences.length) return;
     const continuePlaying = this.state.status === 'speaking' || this.state.status === 'buffering';
+    const nextIndex = Math.max(0, Math.min(this.state.sentences.length - 1, this.state.sentenceIndex + delta));
+    // Keep only a matching next lookahead while stopping the current output.
+    // A forward skip (including while paused) then consumes that same request.
+    const cached = this.prefetched?.sentenceIndex === nextIndex ? this.prefetched : null;
+    if (cached) this.prefetched = null;
     this.cancel();
-    this.state.sentenceIndex = Math.max(0, Math.min(this.state.sentences.length - 1, this.state.sentenceIndex + delta));
+    this.prefetched = cached;
+    this.state.sentenceIndex = nextIndex;
     this.rememberSource();
     this.state.hasBookmark = true;
     this.state.status = 'silent';
@@ -424,7 +457,7 @@ export class AudioCoordinator {
     const nextRate = Math.max(MIN_SPEECH_RATE, Math.min(MAX_SPEECH_RATE, rate));
     if (nextRate === this.state.rate) return;
     this.state.rate = nextRate;
-    // Local engines always synthesize at 1x. Adjust only the media timeline:
+    // Fixed-rate local and Doubao engines synthesize at 1x. Adjust the media timeline:
     // preserve currentTime, a paused handle, in-flight generation and lookahead.
     // startSentence applies the latest state.rate after a pending result arrives.
     if (this.state.mode === 'live' && this.options.generatedSpeechRate === 1) {

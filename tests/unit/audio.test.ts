@@ -926,3 +926,106 @@ describe('fixed 1x local audio changes speed without restarting', () => {
     expect(h.onError).not.toHaveBeenCalled(); h.audio.dispose();
   });
 });
+
+
+describe('explicit one-next cloud lookahead (mock Doubao requests)', () => {
+  const options = { prefetchSpeech: true, generatedSpeechRate: 1 };
+
+  it('overlaps only the next generation with playback and reuses its completed audio', async () => {
+    const first = deferred<Blob>(); const next = deferred<Blob>();
+    const request = vi.fn<AudioCoordinatorOptions['requestSpeech']>(text => text === '第一句。' ? first.promise : text === '第二句。' ? next.promise : Promise.resolve(new Blob(['third'])));
+    const h = harness(request, options); const playing = h.audio.play();
+    expect(request.mock.calls.map(call => call[0])).toEqual(['第一句。']);
+    expect(h.handles).toHaveLength(0);
+    first.resolve(new Blob(['first'])); await playing;
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'speaking', sentenceIndex: 0 });
+    expect(request.mock.calls.map(call => call[0])).toEqual(['第一句。', '第二句。']);
+    const nextBlob = new Blob(['next']); next.resolve(nextBlob); await tick();
+    expect(h.handles).toHaveLength(1); expect(request).toHaveBeenCalledTimes(2);
+    h.handles[0].input.onEnded(); await vi.waitFor(() => expect(h.handles).toHaveLength(2));
+    expect(h.handles[1].input.blob).toBe(nextBlob);
+    expect(request.mock.calls.map(call => call[0])).toEqual(['第一句。', '第二句。', '第三句。']);
+    expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it('adopts an unfinished next request, retaining it across live speed changes', async () => {
+    const next = deferred<Blob>();
+    const request = vi.fn<AudioCoordinatorOptions['requestSpeech']>(async text => text === '第二句。' ? next.promise : new Blob(['audio']));
+    const h = harness(request, options); await h.audio.play();
+    const signal = request.mock.calls[1][3]; const first = h.handles[0]; first.position = 4.5;
+    h.audio.setRate(3); h.audio.setRate(0.25);
+    expect(first).toMatchObject({ plays: 1, position: 4.5, stopped: false });
+    expect(first.setRate).toHaveBeenLastCalledWith(0.25);
+    first.input.onEnded(); await tick();
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'buffering', sentenceIndex: 1 });
+    expect(request).toHaveBeenCalledTimes(2); expect(signal.aborted).toBe(false);
+    h.audio.setRate(2.5); next.resolve(new Blob(['next']));
+    await vi.waitFor(() => expect(h.handles).toHaveLength(2));
+    expect(h.handles[1].setRate).toHaveBeenLastCalledWith(2.5);
+    expect(request.mock.calls.filter(call => call[0] === '第二句。')).toHaveLength(1);
+    expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it('keeps a single cloud lookahead through pause and resume without background playback', async () => {
+    const next = deferred<Blob>();
+    const request = vi.fn<AudioCoordinatorOptions['requestSpeech']>(async text => text === '第二句。' ? next.promise : new Blob(['audio']));
+    const h = harness(request, options); await h.audio.play(); h.handles[0].position = 2.75;
+    const signal = request.mock.calls[1][3]; h.audio.pause();
+    expect(signal.aborted).toBe(false); next.resolve(new Blob(['ready while paused'])); await tick();
+    expect(h.audio.getSnapshot().status).toBe('paused'); expect(h.audible()).toBe(0);
+    expect(h.handles).toHaveLength(1); expect(request).toHaveBeenCalledTimes(2);
+    await h.audio.resume();
+    expect(h.handles[0]).toMatchObject({ position: 2.75, plays: 2, stopped: false });
+    expect(request).toHaveBeenCalledTimes(2);
+    h.handles[0].input.onEnded(); await vi.waitFor(() => expect(h.handles).toHaveLength(2));
+    expect(request.mock.calls.filter(call => call[0] === '第二句。')).toHaveLength(1);
+    expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it.each([false, true])('reuses the next request when manually skipping (paused=%s)', async paused => {
+    const next = deferred<Blob>();
+    const request = vi.fn<AudioCoordinatorOptions['requestSpeech']>(async text => text === '第二句。' ? next.promise : new Blob(['audio']));
+    const h = harness(request, options); await h.audio.play(); const signal = request.mock.calls[1][3];
+    if (paused) h.audio.pause(); h.audio.next();
+    expect(signal.aborted).toBe(false); expect(h.audio.getBookmark()?.cursor.sentenceIndex).toBe(1);
+    const resuming = paused ? h.audio.resume() : Promise.resolve();
+    next.resolve(new Blob(['next'])); await resuming;
+    await vi.waitFor(() => expect(h.handles).toHaveLength(2));
+    expect(request.mock.calls.filter(call => call[0] === '第二句。')).toHaveLength(1);
+    expect(h.handles[1].input.text).toBe('第二句。'); expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it.each(['stop', 'interrupt', 'reset', 'dispose', 'rebind', 'previous', 'selection', 'realtime'] as const)('%s cancels lookahead and rejects late audio', async action => {
+    const next = deferred<Blob>();
+    const request = vi.fn<AudioCoordinatorOptions['requestSpeech']>(async text => text === '第二句。' ? next.promise : new Blob(['audio']));
+    const h = harness(request, options); await h.audio.play(); const signal = request.mock.calls[1][3];
+    if (action === 'rebind') h.audio.rebind({ ...envelope, generationId: 2 });
+    else if (action === 'selection') h.audio.load({ ...target, sourceText: '新选区。' }, { ...envelope, contextRevision: 2 }, 'live');
+    else if (action === 'realtime') h.audio.claimExternalOutput(vi.fn());
+    else h.audio[action]();
+    expect(signal.aborted).toBe(true); next.resolve(new Blob(['stale cloud audio'])); await tick();
+    expect(h.handles.every(handle => handle.input.text !== '第二句。')).toBe(true);
+    expect(h.onError).not.toHaveBeenCalled(); expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it('does not retry failed cloud lookahead or stop the current voice until that sentence is reached', async () => {
+    const next = deferred<Blob>(); let nextCalls = 0;
+    const request = vi.fn<AudioCoordinatorOptions['requestSpeech']>(async text => text === '第二句。' && ++nextCalls === 1 ? next.promise : new Blob(['audio']));
+    const h = harness(request, options); await h.audio.play(); next.reject(new Error('模拟额度错误')); await tick();
+    expect(h.audio.getSnapshot().status).toBe('speaking'); expect(h.onError).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledTimes(2);
+    h.handles[0].input.onEnded(); await vi.waitFor(() => expect(h.onError).toHaveBeenCalledOnce());
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'silent', sentenceIndex: 1, hasBookmark: true });
+    expect(request).toHaveBeenCalledTimes(2); expect(nextCalls).toBe(1);
+    await h.audio.play(); expect(nextCalls).toBe(2);
+    expect(h.handles[1].input.text).toBe('第二句。'); h.audio.dispose();
+  });
+
+  it('ends at the selected text boundary and does not generate before an explicit play', async () => {
+    const h = harness(undefined, options); expect(h.requestSpeech).not.toHaveBeenCalled();
+    h.audio.load({ ...target, sourceText: '只选这一句。' }, envelope, 'live'); await h.audio.play();
+    expect(h.requestSpeech).toHaveBeenCalledOnce(); h.handles[0].input.onEnded(); await tick();
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'silent', hasBookmark: false });
+    expect(h.onComplete).toHaveBeenCalledOnce(); expect(h.requestSpeech).toHaveBeenCalledOnce(); h.audio.dispose();
+  });
+});
