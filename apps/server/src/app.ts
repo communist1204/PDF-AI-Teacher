@@ -15,9 +15,12 @@ import { HttpError, providerError, safeRequestId } from './errors';
 import { ChatGptTeachingProvider, OpenAITeachingProvider, speechRequest, type ChatGptCredentials, type TeachingProvider } from './provider';
 
 type Job = { envelope: Envelope; controller: AbortController };
-type Session = {
-  id: string; csrf: string; touchedAt: number; generation: number; revision: number; cancelledThrough: number;
-  transcribedGenerations: Set<number>; requests: number; recentRequests: number[]; usage: UsageRecord[]; jobs: Set<Job>;
+// Teaching and source speech have independent cancellation scopes; authentication and budgets remain shared.
+type TaskLane = { generation: number; revision: number; cancelledThrough: number; jobs: Set<Job> };
+function createTaskLane(): TaskLane { return { generation: 0, revision: 0, cancelledThrough: -1, jobs: new Set() }; }
+type Session = TaskLane & {
+  id: string; csrf: string; touchedAt: number; speech: TaskLane;
+  transcribedGenerations: Set<number>; requests: number; recentRequests: number[]; usage: UsageRecord[];
 };
 const SESSION_COOKIE = 'pdf_teacher_session';
 const SESSION_TTL = 6 * 60 * 60 * 1000;
@@ -73,6 +76,8 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     if (!allowedHosts.has(req.headers.host ?? '')) return next(new HttpError(403, 'invalid_host', '只允许从本机应用地址访问。'));
     const origin = req.headers.origin;
     if ((origin && origin !== `http://${req.headers.host}`) || req.headers['sec-fetch-site'] === 'cross-site') return next(new HttpError(403, 'invalid_origin', '拒绝非本应用来源的请求。'));
+    const taskLane = req.header('x-task-lane');
+    if (taskLane !== undefined && (taskLane !== 'speech' || req.method !== 'POST' || !['/api/tts', '/api/cancel'].includes(req.path))) return next(new HttpError(400, 'invalid_task_lane', '独立朗读通道仅用于生成或取消语音。'));
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
     next();
   });
@@ -83,7 +88,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
   function expireSessions() {
     realtimeConnections.expire();
     for (const [id, session] of sessions) if (session.touchedAt + SESSION_TTL < now()) {
-      for (const job of session.jobs) job.controller.abort(cancelledError());
+      for (const lane of [session, session.speech]) for (const job of lane.jobs) job.controller.abort(cancelledError());
       void realtimeConnections.disconnect(id);
       cache.clear(id); sessions.delete(id);
     }
@@ -102,15 +107,21 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     if (req.body?.sessionId !== session.id) throw new HttpError(403, 'session_mismatch', '请求不属于当前会话。');
     return session;
   }
-  function checkFresh(session: Session, envelope: Envelope) {
+  function taskLaneFor(req: Request, session: Session): TaskLane {
+    return req.header('x-task-lane') === 'speech' ? session.speech : session;
+  }
+  function requireIdle(lane: TaskLane) {
+    if ([...lane.jobs].some(job => !job.controller.signal.aborted)) throw new HttpError(409, 'request_in_progress', '此通道已有任务正在生成，请等待完成或先停止。');
+  }
+  function checkFresh(lane: TaskLane, envelope: Envelope) {
     // Cancellation may arrive before its request. Persist the boundary to prevent
     // a delayed request from starting a paid provider operation afterwards.
-    if (envelope.generationId <= session.cancelledThrough) throw new HttpError(409, 'stale_request', '本代任务已取消，迟到请求已丢弃。');
-    if (envelope.generationId < session.generation || envelope.contextRevision < session.revision) throw new HttpError(409, 'stale_request', '过期请求已丢弃。');
-    if (envelope.generationId > session.generation || envelope.contextRevision > session.revision) {
-      for (const job of session.jobs) job.controller.abort(cancelledError());
-      session.generation = envelope.generationId;
-      session.revision = envelope.contextRevision;
+    if (envelope.generationId <= lane.cancelledThrough) throw new HttpError(409, 'stale_request', '本代任务已取消，迟到请求已丢弃。');
+    if (envelope.generationId < lane.generation || envelope.contextRevision < lane.revision) throw new HttpError(409, 'stale_request', '过期请求已丢弃。');
+    if (envelope.generationId > lane.generation || envelope.contextRevision > lane.revision) {
+      for (const job of lane.jobs) job.controller.abort(cancelledError());
+      lane.generation = envelope.generationId;
+      lane.revision = envelope.contextRevision;
     }
   }
   function consumeRequest(session: Session) {
@@ -124,11 +135,11 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     session.usage.push(record);
     return record;
   }
-  async function runJob<T>(session: Session, envelope: Envelope, req: Request, res: Response, usage: UsageRecord, action: (signal: AbortSignal) => Promise<T>, timeoutMs = config.requestTimeoutMs): Promise<T> {
-    if ([...session.jobs].some(job => !job.controller.signal.aborted)) throw new HttpError(409, 'request_in_progress', '已有任务正在生成，请等待完成或先停止。');
+  async function runJob<T>(session: Session, envelope: Envelope, req: Request, res: Response, usage: UsageRecord, action: (signal: AbortSignal) => Promise<T>, timeoutMs = config.requestTimeoutMs, lane: TaskLane = session): Promise<T> {
+    requireIdle(lane);
     const controller = new AbortController();
     const job: Job = { envelope, controller };
-    session.jobs.add(job);
+    lane.jobs.add(job);
     const stopForDisconnect = () => { if (!res.writableEnded) controller.abort(cancelledError()); };
     req.once('aborted', stopForDisconnect);
     res.once('close', stopForDisconnect);
@@ -141,7 +152,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
         // Promise resolution is still observed if a provider ignores cancellation.
         Promise.resolve().then(() => action(controller.signal)).then(resolve, reject).finally(() => controller.signal.removeEventListener('abort', aborted));
       });
-      if (controller.signal.aborted || envelope.generationId !== session.generation || envelope.contextRevision !== session.revision) throw cancelledError();
+      if (controller.signal.aborted || envelope.generationId !== lane.generation || envelope.contextRevision !== lane.revision) throw cancelledError();
       return result;
     } catch (error) {
       usage.cancelled = controller.signal.aborted;
@@ -149,7 +160,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
       usage.requestId = mapped.requestId ?? usage.requestId;
       throw mapped;
     } finally {
-      clearTimeout(timer); session.jobs.delete(job);
+      clearTimeout(timer); lane.jobs.delete(job);
       req.off('aborted', stopForDisconnect); res.off('close', stopForDisconnect);
     }
   }
@@ -159,7 +170,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     let session = sessions.get(cookieSession(req) ?? '');
     if (!session) {
       if (sessions.size >= 128) throw new HttpError(429, 'session_capacity', '本地会话数达到上限，请关闭闲置页面后重启本项目。');
-      session = { id: randomUUID(), csrf: randomBytes(32).toString('hex'), touchedAt: now(), generation: 0, revision: 0, cancelledThrough: -1, transcribedGenerations: new Set(), requests: 0, recentRequests: [], usage: [], jobs: new Set() };
+      session = { id: randomUUID(), csrf: randomBytes(32).toString('hex'), touchedAt: now(), ...createTaskLane(), speech: createTaskLane(), transcribedGenerations: new Set(), requests: 0, recentRequests: [], usage: [] };
       sessions.set(session.id, session);
     }
     session.touchedAt = now();
@@ -172,7 +183,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     if(usingDoubaoTts) body.speech={engine:'doubao',ready:doubaoReady,voice:config.doubaoTtsVoice??'',style:'豆包中文朗读；额度与权限需在官方控制台确认',instructionsSupported:true};
     if (usingLocalTts || usingSystemTts) body.speech = { engine: config.ttsEngine, ready: usingSystemTts || localReady, voice: usingLocalTts ? localVoice : '系统所选声音', style: usingQwenTts ? '中文自然陪读，可自定义语气' : usingLocalTts ? '本地中文语音；不使用语气提示词' : '系统默认', instructionsSupported: usingQwenTts, ...(usingQwenTts ? {device:config.qwenTtsDevice??'cpu'} : {}) };
     else if (config.ttsEngine) body.speech!.engine = config.ttsEngine;
-    res.json(body);
+    res.json({ ...body, speechSession: { generationId: Math.max(session.speech.generation, session.speech.cancelledThrough), contextRevision: session.speech.revision } });
   });
 
   app.post('/api/ask', async (req, res) => {
@@ -197,6 +208,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     const model = request.context.imageDataUrl ? config.visionModel : config.chatModel;
     if (usingChatGpt && (!options.chatGptAuth || !model || !provider)) throw new HttpError(503, 'chatgpt_not_configured', '请在桌面设置中登录 ChatGPT、选择可用模型并应用设置；未使用演示回答替代。');
     if (!teachingConfigured || !model || !provider) throw new HttpError(503, 'not_configured', request.context.imageDataUrl ? '视觉模型或 API Key 未配置。截图保留在本机，未假装识别。' : '文字模型或 API Key 未配置。请在本机 .env 中配置后重启。');
+    requireIdle(session);
     consumeRequest(session);
     const usage = newUsage(session, model, 'text');
     const result = await runJob(session, request, req, res, usage, signal => provider.ask(request, model, signal), config.teachingTimeoutMs);
@@ -244,7 +256,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     if (!teachingConfigured || !model || !provider) throw new HttpError(503, 'not_configured', request.context.imageDataUrl ? '视觉模型或 API Key 未配置，未识别截图。' : '文字模型或 API Key 未配置；可在桌面设置中登录 ChatGPT 或在本机配置 API。');
     if (!provider.readingAssist) throw new HttpError(503, 'reading_assist_unsupported', '当前模型适配器尚不支持朗读稿整理，未改用解题回答或其他服务。');
     // A duplicate does not spend the local request budget or create a fictitious usage row.
-    if ([...session.jobs].some(job => !job.controller.signal.aborted)) throw new HttpError(409, 'request_in_progress', '已有任务正在生成，请等待完成或先停止。');
+    requireIdle(session);
     consumeRequest(session);
     const usage = newUsage(session, model, 'text');
     const result = await runJob(session, request, req, res, usage, signal => provider.readingAssist!(request, model, signal), config.teachingTimeoutMs);
@@ -270,10 +282,11 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
   });
   app.post('/api/tts', async (req, res) => {
     const session = requireMutation(req);
+    const lane = taskLaneFor(req, session);
     const parsed = TtsRequestSchema.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, 'invalid_request', `朗读文本不能为空或超过 1600 字，语速范围为 ${MIN_SPEECH_RATE} 到 ${MAX_SPEECH_RATE}。`);
     const request = parsed.data;
-    checkFresh(session, request);
+    checkFresh(lane, request);
     setEnvelope(res, request);
     if (usingSystemTts) throw new HttpError(409, 'system_tts', '当前选择系统本机声音，不调用语音 API。');
     if (usingLocalTts && !localReady) throw new HttpError(503, 'local_tts_missing', '免费本地声音包未就绪。请修复或重新安装本软件的本地声音包；没有调用付费 API。');
@@ -284,11 +297,12 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     const cacheKey = cache.key(session.id, usingDoubaoTts ? ['doubao',ttsModel,config.doubaoTtsVoice,config.doubaoTtsInstructions,request.text] : usingLocalTts ? ['local', ttsModel, localVoice, usingQwenTts ? config.qwenTtsInstructions : '', request.text] : [config.baseUrl, speechRequest(config, request.text, request.speed)]);
     const cached = cache.get(cacheKey);
     if (cached) { res.set('x-audio-cache', 'hit').type(contentType).send(cached); return; }
+    requireIdle(lane);
     // Local CPU speech has no paid session quota. The provider serializes generation.
     if (!usingLocalTts) consumeRequest(session);
     const usage = newUsage(session, ttsModel, 'tts', usingDoubaoTts ? null : request.text.length);
     if (usingLocalTts) usage.local = true;
-    const result = await runJob(session, request, req, res, usage, signal => usingDoubaoTts ? doubaoProvider!.speak(request.text,request.speed,signal,session.id+'-'+request.contextRevision+'-'+request.generationId) : usingLocalTts ? localProvider!.speak(request.text, request.speed, signal) : provider!.speak(request.text, request.speed, signal), usingQwenTts ? 305000 : usingDoubaoTts ? 125000 : config.requestTimeoutMs);
+    const result = await runJob(session, request, req, res, usage, signal => usingDoubaoTts ? doubaoProvider!.speak(request.text,request.speed,signal,session.id+(lane === session ? '-' : '-speech-')+request.contextRevision+'-'+request.generationId) : usingLocalTts ? localProvider!.speak(request.text, request.speed, signal) : provider!.speak(request.text, request.speed, signal), usingQwenTts ? 305000 : usingDoubaoTts ? 125000 : config.requestTimeoutMs, lane);
     if (!result.audio.length || result.audio.length > 8 * 1024 * 1024) throw new HttpError(502, 'invalid_audio', '语音返回为空或超出大小限制，未播放。');
     usage.requestId = safeRequestId('requestId' in result ? result.requestId : undefined) ?? usage.requestId;
     if (usingDoubaoTts) usage.characters = 'characters' in result ? result.characters ?? null : null;
@@ -376,12 +390,13 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
 
   app.post('/api/cancel', (req, res) => {
     const session = requireMutation(req);
+    const lane = taskLaneFor(req, session);
     const parsed = EnvelopeSchema.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, 'invalid_request', '取消请求格式不正确。');
     const envelope = parsed.data;
-    session.cancelledThrough = Math.max(session.cancelledThrough, envelope.generationId);
+    lane.cancelledThrough = Math.max(lane.cancelledThrough, envelope.generationId);
     let cancelled = 0;
-    for (const job of session.jobs) if (job.envelope.generationId <= envelope.generationId && !job.controller.signal.aborted) { job.controller.abort(cancelledError()); cancelled += 1; }
+    for (const job of lane.jobs) if (job.envelope.generationId <= envelope.generationId && !job.controller.signal.aborted) { job.controller.abort(cancelledError()); cancelled += 1; }
     setEnvelope(res, envelope);
     res.json({ ...envelope, cancelled, upstreamCancellation: 'requested', note: '本地已发出取消；不能保证服务商撤销已发生的费用。' });
   });
@@ -410,7 +425,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     disposing ??= (async () => {
       const activeIds = [...sessions.keys()];
       for (const session of sessions.values()) {
-        for (const job of session.jobs) job.controller.abort(cancelledError());
+        for (const lane of [session, session.speech]) for (const job of lane.jobs) job.controller.abort(cancelledError());
         cache.clear(session.id);
       }
       sessions.clear();
