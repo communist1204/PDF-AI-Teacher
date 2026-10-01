@@ -153,6 +153,24 @@ export function omitProseRanges(source: string, start: number, end: number, rang
     .replace(/([，；：、,;:])[ \t]*([，。！？；：、,.!?;:])/gu, '$2').trim();
 }
 
+/** Remove an example aside only when omissions leave nothing except connective words. */
+function emptyExampleAsides(source: string, ranges: readonly ProseOmission[]): ProseOmission[] {
+  const openings: Array<{ start: number; closer: string }> = [];
+  const omissions: ProseOmission[] = [];
+  for (let at = 0; at < source.length; at += 1) {
+    if (source[at] === '(' || source[at] === '（') openings.push({ start: at, closer: source[at] === '(' ? ')' : '）' });
+    else if (source[at] === ')' || source[at] === '）') {
+      const opening = openings.pop();
+      if (!opening || opening.closer !== source[at]) continue;
+      const containsOmission = ranges.some(range => range.start < at && range.end > opening.start + 1);
+      if (!containsOmission) continue;
+      const remaining = omitProseRanges(source, opening.start + 1, at, ranges);
+      if (/^(?:(?:比如|例如|以及|如|或|和|与|及)|[\s，、,;；])*$/u.test(remaining)) omissions.push({ start: opening.start, end: at + 1 });
+    }
+  }
+  return omissions;
+}
+
 /** Default prose-only reading is deterministic and never calls an AI or network API. */
 export function prepareProseReading(source: string): ProseReading {
   let ranges = delimitedRanges(source);
@@ -177,6 +195,7 @@ export function prepareProseReading(source: string): ProseReading {
   remaining = marked.join('');
   ranges.push(...bareMathRanges(remaining));
   ranges = mergeRanges(ranges);
+  ranges = mergeRanges([...ranges, ...emptyExampleAsides(source, ranges)]);
   const text = omitProseRanges(source, 0, source.length, ranges);
   return { text: /[\p{L}\p{N}]/u.test(text) ? text : '', skippedCount: ranges.length, ranges };
 }

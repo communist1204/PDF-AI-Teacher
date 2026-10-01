@@ -35,7 +35,8 @@ describe('local prose-only reading projection', () => {
     expect(result.text).toContain('这减少了参数量');
     expect(result.text).toContain('卷积核（Convolution Kernel）在图像上滑动');
     expect(result.text).not.toMatch(/[×=]|2242|1000|27/);
-    expect(result.skippedCount).toBe(4);
+    expect(result.skippedCount).toBe(3);
+    expect(result.text).not.toContain("比如");
   });
 
   it('uses global omission ranges across short source chunks', () => {
@@ -106,5 +107,30 @@ describe('prose projection boundary regressions', () => {
     const text = spoken('\\begin{align}x=1\n下面仍然是正文。');
     expect(text).toContain('下面仍然是正文。');
     expect(text).not.toContain('begin');
+  });
+});
+
+describe('empty example asides after formula skipping', () => {
+  it.each([
+    '小块区域（比如 3 × 3 或 5 × 5），继续阅读。',
+    '小块区域(例如 $x$ 和 $y$)，继续阅读。',
+    '小块区域（$x$），继续阅读。',
+  ])('removes the empty example wrapper: %s', source => {
+    const result = prepareProseReading(source);
+    expect(result.text).toBe('小块区域，继续阅读。');
+    expect(result.skippedCount).toBe(1);
+    const range = result.ranges[0];
+    expect(source.slice(range.start, range.end)).toMatch(/^[（(].*[）)]$/u);
+    expect(omitProseRanges(source, 0, source.length, result.ranges)).toBe(result.text);
+  });
+
+  it.each(['比如3或5', 'Convolution Kernel', '例如', '只有文本没有公式'])('preserves a readable parenthetical when no formula was omitted: %s', aside => {
+    const source = '前文（' + aside + '），后文。';
+    expect(spoken(source)).toBe(source);
+  });
+
+  it('preserves meaningful words and numbers left in a mixed aside', () => {
+    expect(spoken('前文（比如 $x$ 或版本2），后文。')).toContain('版本2');
+    expect(spoken('前文（输入 $x$），后文。')).toContain('输入');
   });
 });
