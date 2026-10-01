@@ -5,6 +5,7 @@ import type { Response, ResponseInputContent } from 'openai/resources/responses/
 import { TeachingPlanSchema, type AskRequest, type AudioMime } from '../../../packages/shared/protocol';
 import type { ServerConfig } from './config';
 import { HttpError, safeRequestId } from './errors';
+import { ResponseTextCollector } from './responseTextCollector';
 import { ReadingAssistDraftSchema, type ReadingAssistRequest } from '../../../packages/shared/readingAssist';
 import { READING_ASSIST_INSTRUCTIONS, readingAssistContent } from './readingAssistPrompt';
 
@@ -179,17 +180,20 @@ export class ChatGptTeachingProvider implements TeachingProvider {
       const { data: stream, response } = await client.responses.create({ model, store: false, stream: true, instructions: TEACHER_INSTRUCTIONS, input: [{ role: 'user', content }], text: { format: zodTextFormat(TeachingPlanSchema, 'teaching_plan') }, ...(effort ? { reasoning: { effort } } : {}) }, { signal, maxRetries: 0, timeout: this.config.teachingTimeoutMs }).withResponse();
       requestId = safeRequestId(response.headers.get('x-request-id'));
       let completed: Response | undefined;
+      const collector = new ResponseTextCollector(requestId);
       for await (const event of stream) {
         signal.throwIfAborted();
         if (event.type === 'response.failed') throw chatGptProviderError(event.response.error, requestId);
         if (event.type === 'error') throw chatGptProviderError(event, requestId);
         if (event.type === 'response.incomplete') return { plan: null, incompleteReason: 'other', requestId, inputTokens: event.response.usage?.input_tokens, outputTokens: event.response.usage?.output_tokens };
         if (event.type === 'response.completed') completed = event.response;
+        else collector.accept(event);
       }
       signal.throwIfAborted();
       if (!completed || completed.status !== 'completed') throw new HttpError(502, 'chatgpt_interrupted_stream', 'ChatGPT 回答在完成前中断，未显示不完整教案。请手动重试；本次可能已有计划用量。', requestId);
-      const text = completed.output.flatMap(item => item.type === 'message' ? item.content.flatMap(part => part.type === 'output_text' ? [part.text] : []) : []).join('');
-      if (!text || text.length > 2 * 1024 * 1024) throw new HttpError(502, 'invalid_model_output', 'ChatGPT 未返回可验证的教案，未执行板书。请缩小问题后手动重试。', requestId);
+      const { text, refused } = collector.finish(completed);
+      if (refused) throw new HttpError(502, 'model_refusal', 'ChatGPT 未能回答本次请求，未生成板书。可以调整问题或重新框选清晰区域后再试。', requestId);
+      if (!text.trim()) throw new HttpError(502, 'empty_model_output', 'ChatGPT 已结束本次请求，但没有返回最终回答。请手动重试；本次可能已有计划用量。', requestId);
       let plan: unknown;
       try { plan = JSON.parse(text); } catch { throw new HttpError(502, 'invalid_model_output', 'ChatGPT 教案格式无效，未执行板书。请手动重试。', requestId); }
       return { plan, requestId, inputTokens: completed.usage?.input_tokens, outputTokens: completed.usage?.output_tokens };
@@ -214,19 +218,21 @@ export class ChatGptTeachingProvider implements TeachingProvider {
       }, { signal, maxRetries: 0, timeout: this.config.teachingTimeoutMs }).withResponse();
       requestId = safeRequestId(response.headers.get('x-request-id'));
       let completed: Response | undefined;
+      const collector = new ResponseTextCollector(requestId);
       for await (const event of stream) {
         signal.throwIfAborted();
         if (event.type === 'response.failed') throw chatGptProviderError(event.response.error, requestId);
         if (event.type === 'error') throw chatGptProviderError(event, requestId);
         if (event.type === 'response.incomplete') return { draft: null, incompleteReason: event.response.incomplete_details?.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other', requestId, inputTokens: event.response.usage?.input_tokens, outputTokens: event.response.usage?.output_tokens };
         if (event.type === 'response.completed') completed = event.response;
+        else collector.accept(event);
       }
       signal.throwIfAborted();
       if (!completed || completed.status !== 'completed') throw new HttpError(502, 'chatgpt_interrupted_stream', 'ChatGPT 在完成朗读稿之前中断，未使用不完整结果。请手动重试；本次可能已有计划用量。', requestId);
-      const text = completed.output.flatMap(item => item.type === 'message' ? item.content.flatMap(part => part.type === 'output_text' ? [part.text] : []) : []).join('');
+      const { text, refused } = collector.finish(completed);
       let draft: unknown = null;
       // Preserve reported usage even for malformed/refused output; the route rejects null.
-      if (text && text.length <= 100000) { try { draft = JSON.parse(text); } catch { /* validated by the route */ } }
+      if (!refused && text && text.length <= 100000) { try { draft = JSON.parse(text); } catch { /* validated by the route */ } }
       return { draft, requestId, inputTokens: completed.usage?.input_tokens, outputTokens: completed.usage?.output_tokens };
     } catch (error) {
       if (signal.aborted) throw signal.reason;
