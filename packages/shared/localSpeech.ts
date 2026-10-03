@@ -17,13 +17,13 @@ export const QWEN_TTS_VOICES: ReadonlyArray<{ name: string; id: string }> = [
 export const DEFAULT_QWEN_TTS_VOICE = 'serena';
 export const DEFAULT_QWEN_TTS_INSTRUCTIONS = '用温和自然的中文陪读语气，按语义停顿，不增添或改动原文。';
 /** Legacy names remain only for loading older records; no retired engine can be selected at runtime. */
-export type SpeechEngine = 'none' | 'local' | 'qwen' | 'doubao' | 'openai' | 'system';
-export type ActiveSpeechEngine = 'none' | 'doubao' | 'openai';
+export type SpeechEngine = 'none' | 'local' | 'qwen' | 'cosy' | 'doubao' | 'openai' | 'system';
+export type ActiveSpeechEngine = 'none' | 'cosy' | 'doubao' | 'openai';
 export function normalizeSpeechEngine(engine?: string): ActiveSpeechEngine {
-  return engine === 'doubao' || engine === 'openai' ? engine : 'none';
+  return engine === 'cosy' || engine === 'doubao' || engine === 'openai' ? engine : 'none';
 }
 export function isLocalSpeechEngine(engine?: SpeechEngine): boolean {
-  return engine === 'local' || engine === 'qwen';
+  return engine === 'cosy' || engine === 'local' || engine === 'qwen';
 }
 
 /** These engines synthesize at 1x; the reader applies speed without resynthesis. */

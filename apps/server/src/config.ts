@@ -17,6 +17,8 @@ export interface ServerConfig {
   teachingMaxOutputTokens: number;
   teachingTimeoutMs: number;
   ttsEngine?: SpeechEngine;
+  cosyRuntimeDir?: string;
+  cosyWorkerPath?: string;
   doubaoApiKey?: string;
   doubaoTtsVoice?: string;
   doubaoTtsInstructions?: string;
@@ -67,7 +69,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) {
     throw new Error('OPENAI_BASE_URL 必须为 HTTPS 服务地址或本机回环 HTTP 地址，且不能包含凭证。');
   }
-  if (env.TTS_ENGINE && !['none', 'local', 'qwen', 'doubao', 'openai', 'system'].includes(env.TTS_ENGINE)) throw new Error('TTS_ENGINE 必须为 none、doubao 或 openai。');
+  if (env.TTS_ENGINE && !['none', 'local', 'qwen', 'cosy', 'doubao', 'openai', 'system'].includes(env.TTS_ENGINE)) throw new Error('TTS_ENGINE 必须为 none、cosy、doubao 或 openai。');
   // Old local/system choices retire to silence, never to a chargeable cloud provider.
   const ttsEngine = normalizeSpeechEngine(env.TTS_ENGINE);
   const cloudSpeech = ttsEngine === 'openai';
@@ -100,6 +102,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     teachingMaxOutputTokens: integer(env.TEACHING_MAX_OUTPUT_TOKENS, 16000, 1024, 128000, 'TEACHING_MAX_OUTPUT_TOKENS'),
     teachingTimeoutMs: integer(env.TEACHING_TIMEOUT_MS, 180000, 1000, 600000, 'TEACHING_TIMEOUT_MS'),
     ttsEngine,
+    cosyRuntimeDir: env.COSY_TTS_RUNTIME_DIR?.trim() || undefined,
+    cosyWorkerPath: env.COSY_TTS_WORKER_PATH?.trim() || undefined,
     doubaoApiKey,doubaoTtsVoice,doubaoTtsInstructions,
     ttsModel,
     transcriptionModel: env.TRANSCRIPTION_MODEL?.trim() || '',

@@ -1,7 +1,7 @@
 /* eslint-disable preserve-caught-error -- IPC errors intentionally omit original causes that may contain credentials. */
 import {app,BrowserWindow,ipcMain,safeStorage,shell,dialog,Menu,session,type IpcMainInvokeEvent} from 'electron';
 import {createServer,type Server} from 'node:http';
-import {join,resolve} from 'node:path';
+import {join,resolve,dirname} from 'node:path';
 import {access} from 'node:fs/promises';
 import {mkdirSync} from 'node:fs';
 import express from 'express';
@@ -82,6 +82,8 @@ async function start(){
  await auth.initialize();
  const data=vault.get(),prefs=data.preferences;
  const config=serverConfigFor(prefs,data.apiKey,data.port,data.doubaoApiKey);
+ config.cosyRuntimeDir=resolve(app.isPackaged?join(dirname(process.execPath),'../..'):process.cwd(),'cosy-tts-runtime');
+ config.cosyWorkerPath=app.isPackaged?join(process.resourcesPath,'cosy-tts-worker.py'):resolve(process.cwd(),'scripts/cosy-tts-worker.py');
  config.authMode=prefs.mode==='chatgpt'?'chatgpt':'api_key';
  localApp=createApp({config,fetch:desktopFetch,chatGptAuth:prefs.mode==='chatgpt'?{getAccessToken:signal=>auth.getAccessToken(signal)}:undefined});
  const token=(await import('node:crypto')).randomBytes(32).toString('hex');
