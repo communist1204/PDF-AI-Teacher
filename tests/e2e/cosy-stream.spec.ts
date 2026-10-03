@@ -126,7 +126,13 @@ test('下一句复用完整预取，上一句新流替换旧音源，无叠音',
   try {
     await page.getByRole('button', { name: '朗读所选', exact: true }).click();
     await expect.poll(async () => (await probe(page)).time).toBeGreaterThan(0.2);
+    // The real backend permits only one active speech generation per lane.
+    // Foreground EOF frees that lane before the current audio finishes playing.
+    expect(stream.calls).toEqual([{ text: '第一句用于流式播放。', stream: true }]);
+    expect(stream.finished).toBe(0);
+    stream.finish();
     await expect.poll(() => stream.calls.length).toBe(2); expect(stream.calls[1].stream).toBe(false);
+    expect(await probe(page)).toMatchObject({ count: 1, ended: 0, active: 1 });
     await page.getByRole('button', { name: '下一句', exact: true }).click();
     await expect.poll(async () => (await probe(page)).count).toBe(2);
     await expect(page.getByTestId('reading-subtitle')).toHaveText('第二句用于预取复用。'); expect(stream.calls).toHaveLength(2);

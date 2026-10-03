@@ -26,7 +26,7 @@ function fixture() {
   vi.stubGlobal('MediaSource', MediaMock); vi.stubGlobal('Audio', AudioMock);
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-media'); const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   const controller = new AbortController();
-  const input: PlaybackInput = { mode: 'live', text: '测试', rate: 1, generatedRate: 1, volume: 0.8, signal: controller.signal, onStarted: vi.fn(), onEnded: vi.fn(), onError: vi.fn() };
+  const input: PlaybackInput = { mode: 'live', text: '测试', rate: 1, generatedRate: 1, volume: 0.8, signal: controller.signal, onStarted: vi.fn(), onStreamComplete: vi.fn(), onEnded: vi.fn(), onError: vi.fn() };
   return { media, buffers, input, controller, revoke };
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -38,6 +38,7 @@ describe('bounded stream playback lifecycle (mock media, no listening claims)', 
     const handle = createStreamPlayback(f.input, { body, mimeType: 'audio/mpeg' });
     f.media[0].open(); await vi.waitFor(() => expect(f.media[0].endOfStream).toHaveBeenCalledOnce());
     expect(f.buffers[0].writes.map(value => value.byteLength)).toEqual([262144, 262144, 75712]);
+    expect(f.input.onStreamComplete).toHaveBeenCalledOnce();
     expect(f.input.onEnded).not.toHaveBeenCalled(); expect(f.input.onError).not.toHaveBeenCalled();
     handle.dispose(); expect(f.revoke).toHaveBeenCalledOnce();
   });
@@ -49,6 +50,7 @@ describe('bounded stream playback lifecycle (mock media, no listening claims)', 
     f.controller.abort(); f.media[0].open(); await Promise.resolve(); handle.dispose();
     expect(cancelled).toHaveBeenCalledOnce(); expect(f.buffers).toHaveLength(0);
     expect(f.input.onStarted).not.toHaveBeenCalled(); expect(f.input.onError).not.toHaveBeenCalled(); expect(f.revoke).toHaveBeenCalledOnce();
+    expect(f.input.onStreamComplete).not.toHaveBeenCalled();
   });
 
   it('rejects oversized input, cancels its reader and never signals normal completion', async () => {

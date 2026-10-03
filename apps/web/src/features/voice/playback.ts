@@ -11,6 +11,8 @@ export type PlaybackInput = {
   signal: AbortSignal;
   onStarted: () => void;
   onBuffering?: () => void;
+  /** Stream EOF and all appends completed; playback may still have audio left. */
+  onStreamComplete?: () => void;
   onEnded: () => void;
   onError: (message: string) => void;
 };

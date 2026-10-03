@@ -1105,13 +1105,16 @@ $$h_l = f(W_l h_{l-1} + b_l)$$
 });
 
 describe('foreground streaming uses the same output owner and source anchors', () => {
-  it('starts the foreground stream while the next sentence remains a bounded Blob prefetch', async () => {
+  it('waits for stream EOF before prefetching the next Blob while the current audio still plays', async () => {
     const body = new ReadableStream<Uint8Array>();
     const stream = vi.fn(async () => ({ body, mimeType: 'audio/mpeg' as const }));
     const h = harness(undefined, { requestSpeechStream: stream, generatedSpeechRate: 1, prefetchLocalSpeech: true });
     await h.audio.play();
     expect(h.handles[0].input.stream?.body).toBe(body);
     expect(stream).toHaveBeenCalledOnce();
+    expect(h.requestSpeech).not.toHaveBeenCalled();
+    expect(h.audio.getSnapshot().status).toBe('speaking');
+    h.handles[0].input.onStreamComplete?.(); await tick();
     expect(h.requestSpeech.mock.calls.map(call => call[0])).toEqual(['第二句。']);
     h.handles[0].position = 2.5; h.audio.setRate(3); h.audio.pause(); h.audio.setRate(0.25); await h.audio.resume();
     expect(h.handles).toHaveLength(1); expect(h.handles[0].position).toBe(2.5);
@@ -1119,6 +1122,30 @@ describe('foreground streaming uses the same output owner and source anchors', (
     h.handles[0].input.onEnded(); await vi.waitFor(() => expect(h.handles).toHaveLength(2));
     expect(h.handles[1].input.blob).toBeInstanceOf(Blob); expect(h.handles[1].input.stream).toBeUndefined();
     expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it('prefetches after EOF while paused without restarting or resuming the current sound', async () => {
+    const h = harness(undefined, { requestSpeechStream: async () => ({ body: new ReadableStream<Uint8Array>(), mimeType: 'audio/mpeg' }), generatedSpeechRate: 1, prefetchLocalSpeech: true });
+    await h.audio.play(); h.audio.pause(); h.handles[0].position = 1.25;
+    expect(h.requestSpeech).not.toHaveBeenCalled();
+    h.handles[0].input.onStreamComplete?.(); await tick();
+    expect(h.requestSpeech.mock.calls.map(call => call[0])).toEqual(['第二句。']);
+    expect(h.audio.getSnapshot().status).toBe('paused'); expect(h.audible()).toBe(0);
+    h.audio.setRate(3); await h.audio.resume();
+    expect(h.handles).toHaveLength(1); expect(h.handles[0]).toMatchObject({ position: 1.25, plays: 2 });
+    expect(h.requestSpeech).toHaveBeenCalledOnce();
+    h.handles[0].input.onEnded(); await vi.waitFor(() => expect(h.handles).toHaveLength(2));
+    expect(h.handles[1].input.blob).toBeInstanceOf(Blob); expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it.each(['stop', 'selection', 'realtime'] as const)('ignores a late stream EOF after %s revokes its owner', async action => {
+    const h = harness(undefined, { requestSpeechStream: async () => ({ body: new ReadableStream<Uint8Array>(), mimeType: 'audio/mpeg' }), prefetchLocalSpeech: true });
+    await h.audio.play(); const old = h.handles[0];
+    if (action === 'stop') h.audio.stop();
+    else if (action === 'selection') h.audio.load({ ...target, sourceText: '新的选区。' }, { ...envelope, contextRevision: 2 }, 'live');
+    else h.audio.claimExternalOutput(vi.fn());
+    old.input.onStreamComplete?.(); await tick();
+    expect(h.requestSpeech).not.toHaveBeenCalled(); expect(h.handles).toHaveLength(1); expect(h.audible()).toBe(0); h.audio.dispose();
   });
 
   it('cancels a late stream body after selection changes, with no player or completion', async () => {

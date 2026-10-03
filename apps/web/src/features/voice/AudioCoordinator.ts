@@ -83,6 +83,7 @@ export class AudioCoordinator {
   private active: PlaybackHandle | null = null;
   private externalOutput: { stop: () => void } | null = null;
   private request: AbortController | null = null;
+  private streamingInFlight = false;
   private prefetched: { sentenceIndex: number; text: string; envelope: Envelope; controller: AbortController; promise: Promise<Blob> } | null = null;
   private epoch = 0;
   private playbackAttempt = 0;
@@ -157,6 +158,7 @@ export class AudioCoordinator {
     this.epoch += 1;
     this.request?.abort();
     this.request = null;
+    this.streamingInFlight = false;
     this.prefetched?.controller.abort();
     this.prefetched = null;
     const previous = this.active;
@@ -297,10 +299,14 @@ export class AudioCoordinator {
         }
       }
       if (!valid()) { if (stream) void stream.body.cancel().catch(() => {}); return; }
+      // A streaming HTTP response still owns the server speech lane after it
+      // becomes audible. Only EOF frees that lane for next-sentence synthesis.
+      this.streamingInFlight = !!stream;
       const handle = await this.adapter.create({
         mode: this.state.mode, text: sentence.speechText, blob, stream, rate, generatedRate: this.options.generatedSpeechRate, volume: this.state.volume, signal: request.signal,
         onStarted: () => { if (valid() && this.state.status !== 'paused') { started = true; this.state.status = 'speaking'; this.emit(); this.prefetchNext(); } },
         onBuffering: () => { if (valid() && this.state.status !== 'paused') { this.state.status = 'buffering'; this.emit(); } },
+        onStreamComplete: () => { if (valid()) { this.streamingInFlight = false; this.prefetchNext(true); } },
         onEnded: () => {
           if (!valid() || !started) return;
           // An end racing with pause is not confirmed as read. Discard that
@@ -334,8 +340,8 @@ export class AudioCoordinator {
     return sentence.speechText.length > 1400 || requiresFormulaConfirmation(text);
   }
 
-  private prefetchNext() {
-    if (!(this.options.prefetchSpeech || this.options.prefetchLocalSpeech) || this.state.mode !== 'live' || this.state.status !== 'speaking' || !this.envelope || this.prefetched || this.disposed) return;
+  private prefetchNext(allowPaused = false) {
+    if (!(this.options.prefetchSpeech || this.options.prefetchLocalSpeech) || this.state.mode !== 'live' || (this.state.status !== 'speaking' && !(allowPaused && this.state.status === 'paused')) || this.streamingInFlight || !this.envelope || this.prefetched || this.disposed) return;
     const next = this.state.sentences[this.state.sentenceIndex + 1];
     if (!next || this.requiresReview(next)) return;
     const controller = new AbortController();

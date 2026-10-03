@@ -95,6 +95,7 @@ export function createStreamPlayback(input: PlaybackInput, stream: SpeechStream)
     if (media.readyState !== 'open') throw new Error('声音连接提前关闭');
     complete = true;
     media.endOfStream();
+    input.onStreamComplete?.();
   };
   void pump().catch(error => fail(error instanceof Error ? `流式朗读中断：${error.message}。请重试这句。` : '流式朗读中断，请重试这句。'));
   return {
