@@ -1,5 +1,23 @@
 # M0/M1/M2/M3 验收记录
 
+## 2026-10-03：退休语音与免费替代调查
+
+环境：Windows / Node24.19.0 / npm11.17.0 / Git2.50.1。任务初始Git干净d8cc909，读取AGENTS/PRD/START_HERE；并行编辑分别使用独立worktree与明确文件责任。
+
+| 检查 | 实际结果 |
+|---|---|
+| typecheck / lint | 通过。新增语音请求兜底时曾漏传两个参数，tsc发现后改为完整参数转发；最终桌面构建再次通过类型检查。 |
+| 单元与后端 | 33文件884/884通过。覆盖旧vault迁移、退休HTTP路径拒绝、浏览器不触碰系统语音、云失败不回退及已有状态机。 |
+| 浏览器 | 最终全量98/98通过（53.5秒）。首轮96项92通过、4失败，原因是旧夹具未显式配置云音频；修正夹具后受影响10/10通过，再加入2项旧书签/课堂关闭声音回归，最终全套通过。 |
+| 测试迁移 | 通用暂停/续读/倍速/取消/课堂/RTC覆盖保留，原speechSynthesis夹具换为显式cloud mock。退休模型设备和等待UI断言换为无退休选项、旧配置拒播、关闭时零请求。未用删除通用测试规避失败。 |
+| build / desktop:package | 通过；原Vite >500kB chunk警告保留。桌面resources只有app.asar，主包搜索无LocalTtsProvider/QwenTtsProvider/sherpa及两套runtime路径。 |
+| 真实桌面 smoke | 通过：独立无Key档案、真实PDF鼠标选区、演示板书公式、声音选项仅none/doubao/openai、Windows凭证加密、单实例、回环限制和关闭后服务退出。0页面错误，见 desktop-smoke.json。首轮旧脚本重开后还点击示例按钮，与自动恢复功能冲突；改为断言自动恢复后通过。 |
+| EXE重开阅读恢复 | verify-desktop-reading-reopen.mjs通过：第2页和笔记自动恢复，0远程/模型/语音请求，0页面错误；声音保持停止。终端验收摘要见 desktop-speech-retirement-reopen.json（临时原始报告随后被E2E清理）。 |
+| 目视检查 | 实际EXE的桌面设置720p截图已检查，声音关闭提示与保存/应用可见。截图位于 screenshots/desktop-settings-720.png；PDF与板书位于 screenshots/desktop-workspace.png。 |
+| 真实接口与听感 | 未测新的腾讯/Azure/Edge/Readest中文声音，未调用付费API、未登录新账号、未签署豆包数据授权。不将模拟WAV、源码检查或营销声称当成真人听感通过。 |
+
+项目内已删除local-tts-runtime、qwen-tts-runtime及明确的Qwen模型/构建下载缓存、Kokoro归档分片。npm prune --offline --ignore-scripts清理2个退休的项目依赖，随后884项单元/后端、typecheck和lint再次通过。Windows系统语音、全局依赖和用户其他项目未修改。历史声音样本及回归源码保留，不再作为运行选项。正常桌面恢复记录见 speech-retirement-running.json。
+
 日期：2026-09-29。环境：Windows；Node 24.19.0；npm.cmd 11.17.0；Git 2.50.1；Microsoft Edge 154.0.4258.37（Playwright 本机 channel=msedge）。
 **本记录将真实本地功能、模拟模型/音频、真实付费接口、真人听音分开。**
 

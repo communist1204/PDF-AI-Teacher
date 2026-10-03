@@ -1,5 +1,5 @@
 {
-  "date": "2026-09-30T08:19:37.297Z",
+  "date": "2026-10-03T12:10:14.239Z",
   "kind": "packaged-windows-exe",
   "native": {
     "packaged": true,
@@ -20,5 +20,7 @@
   "serviceClosedWithApp": true,
   "pageErrors": [],
   "officialLogin": "未测；没有真实账号授权",
+  "retiredSpeechOptionsAbsent": true,
+  "defaultSpeechDisabled": true,
   "realModelAndTts": "未测；未调用任何付费模型"
 }

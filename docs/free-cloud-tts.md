@@ -1,0 +1,53 @@
+# 免费云语音候选与试听
+
+核验日期：2026-10-03。用户选择先试听腾讯中文声音。本次仅查询官方资料；未注册账号、签署数据授权、开通后付费或调用真实语音 API。声音自然度需要用户听测，不能凭音色名称或免费额度保证与豆包一样好。
+
+用户进一步明确：只需选中 PDF 正文后自然连续地朗读，公式可以跳过，也接受已有软件。后续选型以这个目标为准，不为了更换模型增加操作步骤。
+
+## 已有软件如何满足这个目标
+
+- **Edge 自带大声朗读**：官方支持 PDF 全文或选区朗读、Natural 声音及调速。它的在线自然声音不同于本项目退役的系统离线声音。可先用同一段正文做免费试听对照。未查到把 Edge 消费者朗读服务正式作为免费 API 嵌入 Electron 的授权文档。[官方功能](https://www.microsoft.com/en-us/edge/features/read-aloud)、[免费阅读工具](https://www.microsoft.com/en-us/edge/learning-center/read-with-immersive-reader)。
+- **Readest**：现成阅读器支持选中文字后 Ctrl+R 朗读和句间导航。免费计划有 AI 朗读，但官网未明确免费时长数值，不能承诺无限。其公开播放器实现会缓存、提前解码和调度音频；值得借鉴这些设计，但不能把其 Edge 消费者端点当成官方开放 API。[朗读说明](https://www.readest.com/docs/listen)、[套餐](https://www.readest.com/pricing)、[播放器源码](https://github.com/readest/readest/blob/main/apps/readest-app/src/services/tts/BufferedTTSClient.ts)、[Edge 接入源码](https://github.com/readest/readest/blob/main/apps/readest-app/src/libs/edgeTTS.ts)。
+- **Read Aloud 扩展**：支持 PDF，开源播放器会提前准备下一段；自然云声音可能需要付费或自备账号，不是装扩展就取得免费额度。[官方仓库](https://github.com/ken107/read-aloud)、[预取源码](https://github.com/ken107/read-aloud/blob/master/js/speech.js)。
+
+这些是资料与源码核验，尚未在用户教材上验证选区顺序、中文听感及长段连续性。最省事的试法：用 Edge 打开同一 PDF，选一段正文，使用大声朗读，在声音选项中选择标有 Online / Natural 的中文声音，以 1× 对照豆包听感。若版本未提供选区菜单，可从工具栏开启大声朗读后选择起点。
+
+## 短视频配音为什么看起来不卡
+
+并非所有作者都在付费调用豆包 API。CapCut 有编辑器内免费配音及导出，部分高级音色需要 Pro；剪映官网虽列出文本朗读，但不能把海外 CapCut 的免费范围直接套给国内剪映。[CapCut 官方工具](https://www.capcut.com/tools/ai-text-to-speech)、[剪映官网](https://www.jianying.com/)。
+
+微软 Clipchamp 个人免费版也包含文字转语音与纯音频导出，底层使用 Azure AI Speech。先输入文字生成声音，存为时间轴素材，再剪辑导出。[官方套餐对比](https://support.microsoft.com/en-us/clipchamp/feature-comparison-between-clipchamp-for-work-and-personal-versions)、[操作说明](https://support.microsoft.com/en-gb/clipchamp/how-to-use-the-text-to-speech-feature)。
+
+基于这个工作流可以推断：观众播放的是事先完成的音轨，生成等待发生在发布前，不会出现在成片里。因此“视频没有卡顿”不能证明合成接口即时或免费。编辑器免费权益也不等于第三方应用免费 API。手动生成、导出再播放虽然可行，但会增加用户每次选段的操作，本轮不作为默认流程。
+
+## 先试听腾讯
+
+打开[腾讯语音合成官网](https://cloud.tencent.com/product/tts)或[合成音频控制台](https://console.cloud.tencent.com/tts)。官方[音色列表](https://cloud.tencent.com/document/product/1073/92668)说明：点击对应音频头像可试听，合成自定义文本则需控制台。优先比较专业梓欣（602005）、温柔小柠（603004），以及阅读女声智菊（501002）。
+
+试听时先用 1×，重点听完整句的语气、逗号与句号停顿、数字和中英文混读。可以在有免费额度的控制台用同一段自制文字比较：
+
+> 2026年，我们开始学习神经网络。每个神经元只关注图像的一小块区域，而不是整张图片。这种局部连接减少了参数量。请先理解这句话，再继续看下一段。
+
+腾讯目前提供超自然音色 2 万字符、大模型音色 10 万字符、基础及精品音色 800 万字符，均为一次领取、3 个月有效；800 万额度不能用于所有大模型音色。需实名后在控制台领取，并检查后付费开关。较新的计费页写明免费用完停服，购买或开启后付费才继续；旧购买说明针对已开通付费版写有默认后付费，因此必须核对自己的账号状态。[计费说明](https://cloud.tencent.com/document/product/1073/34112)、[资源包管理](https://cloud.tencent.com/document/product/1073/56352)、[旧购买说明](https://cloud.tencent.com/document/product/1073/78325)。
+
+本软件尚未接入腾讯。确认满意音色后再做 API 适配；正式 TextToVoice 单请求中文长度有限，需要适配现有分句、预取和取消机制，不能直接更换接口地址。[腾讯 API 文档](https://cloud.tencent.com/document/product/1073/37995)。
+
+## 其他官方候选
+
+| 服务 | 免费范围 | 适用性与限制 |
+|---|---|---|
+| Azure Speech F0 | 普通 Neural 语音每月 50 万字符 | 适合持续月度使用；保持 F0 资源档位，勿当成 S0 或 HD 音色免费。通常需手机号和非预付费银行卡注册；免费账号试用结束需处理订阅状态。 |
+| 阿里云百炼 CosyVoice | 北京地域各模型 1 万字符、90 天 | 适合短试听；实名账号可能转按量收费，可启用“免费额度用完即停”。不是每月赠送。 |
+| MiniMax | 未核实到可持续承诺的免费语音 API 额度 | 网页体验积分不等于 API 免费额度，暂不作为免费 API 推荐。 |
+
+依据：[Azure 定价](https://azure.microsoft.com/en-ca/pricing/details/speech/)、[F0 配额](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-quotas-and-limits)、[Azure 免费账号说明](https://azure.microsoft.com/free/)、[CosyVoice 定价](https://help.aliyun.com/zh/model-studio/model-pricing)、[百炼免费额度及停用开关](https://help.aliyun.com/zh/model-studio/new-free-quota)、[MiniMax 定价](https://platform.minimax.cn/docs/guides/pricing-paygo)。
+
+Azure 可以在[官方音色库](https://speech.microsoft.com/portal/voicegallery)试听 XiaoxiaoNeural、YunxiNeural 和 YunyangNeural。[官方音色能力表](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=tts)。当前未接入 Azure，未验证本机网络与中文听感。
+
+## 豆包数据授权奖励
+
+用户截图显示字数包已用 20,000/20,000、剩余 0、过期时间“—”，证据支持额度耗尽，不能确定是过期。活动横幅确实说首次授权赠语音大模型额度、可抵扣后付费用量，但没有显示赠送数量、有效期或完整数据条款。
+
+需在该活动说明中核对：是否覆盖语音合成 2.0、奖励字数及期限、一次性还是续赠、哪些输入/输出会被授权、用途与撤回条件。公开资料未找到精确对应的完整条款，不能把火山方舟 token 协作活动套用于豆包语音。打开详情阅读即可，未确认前不提交签约。
+
+豆包新版入门说明明确免费余量耗尽后可能按后付费继续计费，有资源包则优先消耗资源包；本软件不能查询或保证余额。[官方快速入门](https://docs.volcengine.com/docs/DoubaoVoice/QuickStartNewConsole?lang=zh)。

@@ -767,7 +767,7 @@ describe('slow speech and rate changes (simulated playback)', () => {
     const audio = new AudioCoordinator({ requestSpeech, onChange: vi.fn(), onError });
     try {
       audio.load(target, envelope, 'demo'); audio.setRate(rate); await audio.play();
-      expect(audio.getSnapshot()).toMatchObject({ status: 'silent', rate, sentenceIndex: 0, hasBookmark: true, error: '系统语音已移除，请在声音设置中配置在线朗读。' });
+      expect(audio.getSnapshot()).toMatchObject({ status: 'silent', rate, sentenceIndex: 0, hasBookmark: true, error: '朗读未能完成：系统语音已移除，请在声音设置中配置在线朗读。' });
       const bookmark = audio.getBookmark();
       expect(onError).toHaveBeenCalledOnce(); expect(requestSpeech).not.toHaveBeenCalled();
       audio.setRate(0.35); await tick();
