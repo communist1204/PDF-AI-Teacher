@@ -1,6 +1,7 @@
 import { ReadingAssistResponseSchema, type ReadingAssistRequest, type ReadingAssistResponse } from '../../../../packages/shared/readingAssist';
 import type { AppConfig, AskRequest, AskResponse, Envelope, TranscriptionRequest, TranscriptionResponse } from '../../../../packages/shared/protocol';
 import { sameEnvelope, TranscriptionResponseSchema, validatePlan } from '../../../../packages/shared/protocol';
+import type { SpeechStream } from '../features/voice/streamPlayback';
 
 // Share only concurrent initialization, including development StrictMode's repeated effect.
 // Clear after completion so explicit reconnection still reads fresh session state.
@@ -22,7 +23,15 @@ async function checked(response: Response) {
   return response;
 }
 export function apiClient(config: AppConfig, lane: 'main' | 'speech' = 'main') {
-  const post = (path: string, body: unknown, signal?: AbortSignal) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-csrf-token': config.csrfToken, ...(lane === 'speech' && (path === '/api/tts' || path === '/api/cancel') ? { 'x-task-lane': 'speech' } : {}) }, body: JSON.stringify(body), signal }).then(checked);
+  const post = (path: string, body: unknown, signal?: AbortSignal, headers: Record<string, string> = {}) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-csrf-token': config.csrfToken, ...(lane === 'speech' && (path === '/api/tts' || path === '/api/cancel') ? { 'x-task-lane': 'speech' } : {}), ...headers }, body: JSON.stringify(body), signal }).then(checked);
+  const speechResponse = async (text: string, envelope: Envelope, speed: number, signal: AbortSignal, streaming = false) => {
+    const response = await post('/api/tts', { ...envelope, text, speed }, signal, streaming ? { 'x-audio-stream': '1' } : {});
+    if (response.headers.get('x-session-id') !== envelope.sessionId || Number(response.headers.get('x-generation-id')) !== envelope.generationId || Number(response.headers.get('x-context-revision')) !== envelope.contextRevision) {
+      await response.body?.cancel();
+      throw new Error('已丢弃过期音频');
+    }
+    return response;
+  };
   return {
     async ask(request: AskRequest, signal: AbortSignal): Promise<AskResponse> {
       const result: AskResponse & { warning?: string } = await (await post('/api/ask', request, signal)).json();
@@ -37,9 +46,17 @@ export function apiClient(config: AppConfig, lane: 'main' | 'speech' = 'main') {
       return result;
     },
     async speech(text: string, envelope: Envelope, speed: number, signal: AbortSignal) {
-      const response = await post('/api/tts', { ...envelope, text, speed }, signal);
-      if (response.headers.get('x-session-id') !== envelope.sessionId || Number(response.headers.get('x-generation-id')) !== envelope.generationId || Number(response.headers.get('x-context-revision')) !== envelope.contextRevision) throw new Error('已丢弃过期音频');
+      const response = await speechResponse(text, envelope, speed, signal);
       return response.blob();
+    },
+    async speechStream(text: string, envelope: Envelope, speed: number, signal: AbortSignal): Promise<Blob | SpeechStream> {
+      const response = await speechResponse(text, envelope, speed, signal, true);
+      if (response.headers.get('x-audio-streaming') !== '1') return response.blob();
+      if (!response.body || response.headers.get('content-type')?.split(';')[0].trim() !== 'audio/mpeg') {
+        await response.body?.cancel();
+        throw new Error('本地语音返回了不支持的流式格式，请重试。');
+      }
+      return { body: response.body, mimeType: 'audio/mpeg' };
     },
     async transcribe(request: TranscriptionRequest, signal: AbortSignal): Promise<TranscriptionResponse> {
       const response = await post('/api/transcribe', request, signal);

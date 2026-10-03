@@ -1,5 +1,6 @@
 import { sameEnvelope, SourceSchema, type Envelope, type PdfTarget, type ReadingCursor, type Sentence, type TeachingStep } from '../../../../../packages/shared/protocol';
 import { browserPlaybackAdapter, type PlaybackAdapter, type PlaybackHandle } from './playback';
+import type { SpeechStream } from './streamPlayback';
 import { MAX_SPEECH_RATE, MIN_SPEECH_RATE } from '../../../../../packages/shared/speechRate';
 import { splitSentences, splitSourceSentences, sourceTextVersion, textVersion, requiresFormulaConfirmation } from './sentences';
 export { splitSentences, toSpeechText, requiresFormulaConfirmation } from './sentences';
@@ -36,6 +37,8 @@ export type ExplanationBookmark = { target: PdfTarget; stepId: string; speechTex
 export type AudioCompletion = { channel: AudioChannel; stepId: string | null; envelope: Envelope };
 export type AudioCoordinatorOptions = {
   requestSpeech: (text: string, envelope: Envelope, speed: number, signal: AbortSignal) => Promise<Blob>;
+  /** Foreground only. Lookahead remains a bounded, complete cacheable clip. */
+  requestSpeechStream?: (text: string, envelope: Envelope, speed: number, signal: AbortSignal) => Promise<Blob | SpeechStream>;
   onChange: (state: AudioState) => void;
   onError: (message: string) => void;
   onComplete?: (event: AudioCompletion) => void;
@@ -274,6 +277,7 @@ export class AudioCoordinator {
     try {
       const rate = this.state.rate;
       let blob: Blob | undefined;
+      let stream: SpeechStream | undefined;
       if (this.state.mode === 'live') {
         if (cached) {
           try { blob = await cached.promise; }
@@ -286,12 +290,17 @@ export class AudioCoordinator {
             // retain the existing single foreground retry for that engine.
           }
         }
-        if (!blob && valid()) blob = await this.options.requestSpeech(sentence.speechText, envelope, rate, request.signal);
+        if (!blob && valid()) {
+          const result = await (this.options.requestSpeechStream ?? this.options.requestSpeech)(sentence.speechText, envelope, rate, request.signal);
+          if (result instanceof Blob) blob = result;
+          else stream = result;
+        }
       }
-      if (!valid()) return;
+      if (!valid()) { if (stream) void stream.body.cancel().catch(() => {}); return; }
       const handle = await this.adapter.create({
-        mode: this.state.mode, text: sentence.speechText, blob, rate, generatedRate: this.options.generatedSpeechRate, volume: this.state.volume, signal: request.signal,
+        mode: this.state.mode, text: sentence.speechText, blob, stream, rate, generatedRate: this.options.generatedSpeechRate, volume: this.state.volume, signal: request.signal,
         onStarted: () => { if (valid() && this.state.status !== 'paused') { started = true; this.state.status = 'speaking'; this.emit(); this.prefetchNext(); } },
+        onBuffering: () => { if (valid() && this.state.status !== 'paused') { this.state.status = 'buffering'; this.emit(); } },
         onEnded: () => {
           if (!valid() || !started) return;
           // An end racing with pause is not confirmed as read. Discard that

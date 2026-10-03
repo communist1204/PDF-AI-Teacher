@@ -31,7 +31,7 @@ test('默认关闭朗读，仍能打字提问和显示固定演示板书',async(
   await expect(page.getByRole('button',{name:'听这次讲解',exact:true})).toBeDisabled();expect(calls).toEqual([]);
 });
 
-test('桌面声音选项仅保留关闭、豆包和 OpenAI，不再显示本地模型设备或系统声音',async({page})=>{
+test('桌面声音加入 CosyVoice 3，仍不显示已移除的声音或设备',async({page})=>{
   await page.addInitScript(()=>{
     const settings:DesktopSettings={mode:'demo',chatModel:'gpt-6-astra',visionModel:'gpt-6-astra',reasoningEffort:'xhigh',ttsEngine:'none',ttsModel:'gpt-4o-mini-tts',ttsVoice:'marin',ttsInstructions:'自然陪读',hasApiKey:false,encryptionAvailable:true,auth:{status:'signed_out',accounts:[]},models:[],restartRequired:false};
     const bridge:DesktopTeacherBridge={getSettings:async()=>structuredClone(settings),saveSettings:async input=>{Object.assign(settings,input);return structuredClone(settings);},login:async()=>{throw Error('No login in fixture');},cancelLogin:async()=>{},logout:async()=>structuredClone(settings),selectAccount:async()=>structuredClone(settings),restart:async()=>{},openAccountPage:async()=>{},createShortcut:async()=>({path:'mock.lnk'})};
@@ -39,7 +39,7 @@ test('桌面声音选项仅保留关闭、豆包和 OpenAI，不再显示本地�
   });
   await page.goto('/');await page.getByRole('button',{name:'声音设置',exact:true}).click();
   const engine=page.getByRole('combobox',{name:'朗读方式',exact:true});await expect(engine).toHaveValue('none');
-  expect(await engine.locator('option').evaluateAll(options=>options.map(option=>(option as HTMLOptionElement).value))).toEqual(['none','doubao','openai']);
+  expect(await engine.locator('option').evaluateAll(options=>options.map(option=>(option as HTMLOptionElement).value))).toEqual(['none','cosy','doubao','openai']);
   await expect(page.getByRole('dialog')).not.toContainText(/Qwen|Kokoro|系统基本语音|CUDA/u);
   await expect(page.getByRole('combobox',{name:'本地中文音色',exact:true})).toHaveCount(0);
   await expect(page.getByRole('combobox',{name:'Qwen3 运算设备',exact:true})).toHaveCount(0);

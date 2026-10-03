@@ -1,12 +1,16 @@
+import { createStreamPlayback, type SpeechStream } from './streamPlayback';
+
 export type PlaybackInput = {
   mode: 'demo' | 'live';
   text: string;
   blob?: Blob;
+  stream?: SpeechStream;
   rate: number;
   generatedRate?: number;
   volume: number;
   signal: AbortSignal;
   onStarted: () => void;
+  onBuffering?: () => void;
   onEnded: () => void;
   onError: (message: string) => void;
 };
@@ -32,6 +36,7 @@ export const browserPlaybackAdapter: PlaybackAdapter = {
   async create(input) {
     if (input.signal.aborted) throw abortError();
     if (input.mode === 'live') {
+      if (input.stream) return createStreamPlayback(input, input.stream);
       if (!input.blob) throw new Error('未收到可播放的语音文件，请重试。');
       const url = URL.createObjectURL(input.blob);
       const audio = new Audio(url);

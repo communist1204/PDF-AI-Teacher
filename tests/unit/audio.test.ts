@@ -1103,3 +1103,40 @@ $$h_l = f(W_l h_{l-1} + b_l)$$
     h.audio.dispose();
   });
 });
+
+describe('foreground streaming uses the same output owner and source anchors', () => {
+  it('starts the foreground stream while the next sentence remains a bounded Blob prefetch', async () => {
+    const body = new ReadableStream<Uint8Array>();
+    const stream = vi.fn(async () => ({ body, mimeType: 'audio/mpeg' as const }));
+    const h = harness(undefined, { requestSpeechStream: stream, generatedSpeechRate: 1, prefetchLocalSpeech: true });
+    await h.audio.play();
+    expect(h.handles[0].input.stream?.body).toBe(body);
+    expect(stream).toHaveBeenCalledOnce();
+    expect(h.requestSpeech.mock.calls.map(call => call[0])).toEqual(['第二句。']);
+    h.handles[0].position = 2.5; h.audio.setRate(3); h.audio.pause(); h.audio.setRate(0.25); await h.audio.resume();
+    expect(h.handles).toHaveLength(1); expect(h.handles[0].position).toBe(2.5);
+    expect(h.handles[0].setRate).toHaveBeenLastCalledWith(0.25); expect(stream).toHaveBeenCalledOnce();
+    h.handles[0].input.onEnded(); await vi.waitFor(() => expect(h.handles).toHaveLength(2));
+    expect(h.handles[1].input.blob).toBeInstanceOf(Blob); expect(h.handles[1].input.stream).toBeUndefined();
+    expect(h.maxAudible()).toBe(1); h.audio.dispose();
+  });
+
+  it('cancels a late stream body after selection changes, with no player or completion', async () => {
+    const cancelled = vi.fn(); const body = new ReadableStream<Uint8Array>({ cancel: cancelled });
+    const pending = deferred<{ body: ReadableStream<Uint8Array>; mimeType: 'audio/mpeg' }>();
+    const h = harness(undefined, { requestSpeechStream: () => pending.promise });
+    const playing = h.audio.play(); h.audio.load({ ...target, sourceText: '新的选段。' }, { ...envelope, contextRevision: 2 }, 'live');
+    pending.resolve({ body, mimeType: 'audio/mpeg' }); await playing;
+    expect(cancelled).toHaveBeenCalledOnce(); expect(h.handles).toHaveLength(0);
+    expect(h.onComplete).not.toHaveBeenCalled(); expect(h.onError).not.toHaveBeenCalled(); h.audio.dispose();
+  });
+
+  it('treats a midstream failure as unfinished reading and never starts the next audio', async () => {
+    const h = harness(undefined, { requestSpeechStream: async () => ({ body: new ReadableStream<Uint8Array>(), mimeType: 'audio/mpeg' }), prefetchLocalSpeech: true });
+    await h.audio.play(); h.handles[0].input.onError('流式连接中断');
+    expect(h.audio.getSnapshot()).toMatchObject({ status: 'silent', hasBookmark: true, sentenceIndex: 0 });
+    expect(h.handles[0].input.signal.aborted).toBe(true); expect(h.audible()).toBe(0);
+    h.handles[0].input.onEnded(); await tick();
+    expect(h.handles).toHaveLength(1); expect(h.onComplete).not.toHaveBeenCalled(); expect(h.onError).toHaveBeenCalledOnce(); h.audio.dispose();
+  });
+});

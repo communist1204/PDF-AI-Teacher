@@ -107,8 +107,13 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
         <p className="desktop-setting-note">复杂理论可优先选择账号可用的高能力模型；不会为了朗读方便更换解题模型。GPT-6 Astra / xhigh 是配置建议，权限、推理强度支持及真实解题质量需验证。{draft.mode === 'chatgpt' && !settings.models.length && ' 账号模型列表尚未取得。'}</p>
       </fieldset>
       <fieldset disabled={busy} className="desktop-model-fields desktop-speech-fields"><legend>朗读声音</legend>
-        <label>朗读方式<select aria-label="朗读方式" value={draft.ttsEngine ?? 'none'} onChange={event => update('ttsEngine', event.target.value as DesktopPreferences['ttsEngine'])}><option value="none">关闭朗读（稍后配置）</option><option value="doubao">豆包语音 2.0（在线·额度按账号）</option><option value="openai">OpenAI AI 声音（按 API 用量计费）</option></select></label>
-        {draft.ttsEngine === 'none' && <p>朗读已关闭。阅读 PDF、文字问答和板书可继续使用；选择在线声音并配置凭证后再试听。</p>}
+        <label>朗读方式<select aria-label="朗读方式" value={draft.ttsEngine ?? 'none'} onChange={event => update('ttsEngine', event.target.value as DesktopPreferences['ttsEngine'])}><option value="none">关闭朗读（稍后配置）</option><option value="cosy">CosyVoice 3（本机 GPU · 无 API 费用）</option><option value="doubao">豆包语音 2.0（在线·额度按账号）</option><option value="openai">OpenAI AI 声音（按 API 用量计费）</option></select></label>
+        {draft.ttsEngine === 'none' && <p>朗读已关闭。阅读 PDF、文字问答和板书可继续使用；选择并配置声音后再试听。</p>}
+        {draft.ttsEngine === 'cosy' && <div className="desktop-cosy-fields">
+          <p>CosyVoice 3 在本机显卡生成 AI 合成声音，不需要 API Key，不上传朗读文字。当前使用一套固定的官方示例音色，是否自然需要你实际试听。</p>
+          <p className="desktop-setting-note">安装好本机模型后，保存并「应用并重启」。首次朗读需要加载模型，后续复用；声音一边生成一边播放。暂停、续读和 0.25–3× 调速仍使用底部播放器。</p>
+          <p className="desktop-setting-note">运行状态见下方「本机语音状态」。保存设置不会生成声音；模型未安装或加载失败会明确提示。</p>
+        </div>}
         {draft.ttsEngine === 'doubao' && <div className="desktop-doubao-fields">
           <p>豆包语音 2.0 是独立的在线 AI 合成声音。你主动朗读的文本会发送至火山引擎，解题继续使用上方选择的账号和专业模型。</p>
           <p className="desktop-setting-note">免费试用资格、剩余额度和有效期请在火山引擎控制台确认。超出免费额度可能计费，本软件不会自动保证免费。</p>
