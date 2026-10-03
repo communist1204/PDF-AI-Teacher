@@ -48,11 +48,11 @@ test('试读自然结束不能虚报完成，能重新播放再试暂停',async(
 });
 
 test('只有图片选区时体验入口不引导无法朗读的麦克风流程',async({page})=>{
-  await prepare(page);await page.getByRole('button',{name:'关闭试读引导',exact:true}).click();await page.getByRole('button',{name:'框选区域',exact:true}).click();const bounds=(await page.locator('.pdf-page').boundingBox())!;await page.mouse.move(bounds.x+20,bounds.y+20);await page.mouse.down();await page.mouse.move(bounds.x+150,bounds.y+95,{steps:10});await page.mouse.up();await expect(page.locator('.crop-preview')).toBeVisible();
+  await mockSpeech(page);await prepare(page);await page.getByRole('button',{name:'关闭试读引导',exact:true}).click();await page.getByRole('button',{name:'框选区域',exact:true}).click();const bounds=(await page.locator('.pdf-page').boundingBox())!;await page.mouse.move(bounds.x+20,bounds.y+20);await page.mouse.down();await page.mouse.move(bounds.x+150,bounds.y+95,{steps:10});await page.mouse.up();await expect(page.locator('.crop-preview')).toBeVisible();
   await page.getByRole('button',{name:'功能体验',exact:true}).click();await page.locator('.guide-microphone>summary').click();await expect(page.getByRole('button',{name:'打开麦克风试打断',exact:true})).toBeDisabled();await expect(page.getByRole('dialog')).toContainText('图片区域不能直接朗读');
 });
 
 test('麦克风权限尚未返回时只显示准备中，取消后不显示已开启',async({page})=>{
-  await page.addInitScript(()=>Object.defineProperty(navigator.mediaDevices,'getUserMedia',{configurable:true,value:()=>new Promise(()=>{})}));await prepare(page);await page.getByRole('button',{name:'功能体验',exact:true}).click();await page.locator('.guide-microphone>summary').click();await page.getByRole('button',{name:'打开麦克风试打断',exact:true}).click();await expect(page.locator('.microphone-chip')).toContainText('语音准备中');await expect(page.locator('.realtime-status')).toContainText('申请麦克风 / 连接中');await expect(page.locator('.realtime-status')).not.toContainText('正在监听');
+  await page.addInitScript(()=>Object.defineProperty(navigator.mediaDevices,'getUserMedia',{configurable:true,value:()=>new Promise(()=>{})}));await mockSpeech(page);await prepare(page);await page.getByRole('button',{name:'功能体验',exact:true}).click();await page.locator('.guide-microphone>summary').click();await page.getByRole('button',{name:'打开麦克风试打断',exact:true}).click();await expect(page.locator('.microphone-chip')).toContainText('语音准备中');await expect(page.locator('.realtime-status')).toContainText('申请麦克风 / 连接中');await expect(page.locator('.realtime-status')).not.toContainText('正在监听');
   await page.locator('.microphone-chip').click();await expect(page.locator('.microphone-chip')).toHaveCount(0);await expect(page.locator('.realtime-body')).toContainText('设备已释放');
 });

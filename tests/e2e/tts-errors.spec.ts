@@ -13,7 +13,7 @@ for (const [code, hint] of [
     await page.route('**/api/config', async route => {
       const response = await route.fetch();
       const config = await response.json();
-      await route.fulfill({ response, json: { ...config, mode: 'live', models: { ...config.models, tts: 'MOCK_TTS_NOT_PAID' }, capabilities: { ...config.capabilities, tts: 'untested' } } });
+      await route.fulfill({ response, json: { ...config, mode: 'live', models: { ...config.models, tts: 'MOCK_TTS_NOT_PAID' }, capabilities: { ...config.capabilities, tts: 'untested' }, speech: { engine: 'openai', ready: true, voice: 'marin', style: '仅模拟', instructionsSupported: true } } });
     });
     await page.route('**/api/tts', async route => {
       calls++;
