@@ -15,7 +15,7 @@ describe('desktop private configuration',()=>{
 });
 
 
-describe('free local speech settings migration',()=>{
+describe('retired local speech settings migration',()=>{
  it('migrates legacy encrypted preferences without changing the account, key or expert model',async()=>temporary(async file=>{
   const first=new SettingsVault(file,cipher);await first.load();
   await first.update({apiKey:'fake-legacy-key',auth:{testOnly:true},preferences:{...defaultPreferences,mode:'chatgpt',chatModel:'expert-model'}});
@@ -23,7 +23,7 @@ describe('free local speech settings migration',()=>{
   delete original.preferences.ttsEngine;delete original.preferences.localTtsVoice;
   await writeFile(file,cipher.encrypt(JSON.stringify(original)));
   const migrated=new SettingsVault(file,cipher);await migrated.load();
-  expect(migrated.get().preferences).toMatchObject({ttsEngine:'local',localTtsVoice:'zf_001',mode:'chatgpt',chatModel:'expert-model'});
+  expect(migrated.get().preferences).toMatchObject({ttsEngine:'none',mode:'chatgpt',chatModel:'expert-model'});
   expect(migrated.get().apiKey).toBe('fake-legacy-key');expect(migrated.get().auth).toEqual({testOnly:true});
   expect(migrated.get().hostId).toBe(original.hostId);
  }));
@@ -31,41 +31,41 @@ describe('free local speech settings migration',()=>{
 
 
 describe('independent free speech configuration',()=>{
- it.each(['local','system'] as const)('ignores hidden cloud model style when %s is selected',engine=>{
+ it.each(['local','qwen','system'] as const)('ignores hidden cloud model style when %s is selected',engine=>{
   const config=serverConfigFor({...defaultPreferences,ttsEngine:engine,ttsModel:'tts-1',ttsInstructions:'旧的云声音风格'},'',4319);
-  expect(config).toMatchObject({ttsEngine:engine,ttsInstructions:'',ttsInstructionsSupported:false});
-  expect(serverConfigFor({...defaultPreferences,ttsEngine:engine,ttsModel:''},'',4319).ttsEngine).toBe(engine);
+  expect(config).toMatchObject({ttsEngine:'none',ttsInstructions:'',ttsInstructionsSupported:false});
+  expect(serverConfigFor({...defaultPreferences,ttsEngine:engine,ttsModel:''},'',4319).ttsEngine).toBe('none');
  });
 });
 
 
 describe('Qwen device preference migration',()=>{
- it('leaves old preferences on CPU and preserves an explicit CUDA selection',async()=>temporary(async file=>{
+ it('disables retired Qwen choices and drops only obsolete CPU/CUDA preferences',async()=>temporary(async file=>{
   const vault=new SettingsVault(file,cipher);await vault.load();
   await vault.update({apiKey:'fake-key',preferences:{...defaultPreferences,ttsEngine:'qwen',qwenTtsDevice:'cuda',chatModel:'expert-model'}});
-  const restored=new SettingsVault(file,cipher);await restored.load();expect(restored.get().preferences.qwenTtsDevice).toBe('cuda');
+  const restored=new SettingsVault(file,cipher);await restored.load();expect(restored.get().preferences.ttsEngine).toBe('none');expect(restored.get().preferences).not.toHaveProperty('qwenTtsDevice');
   const legacy=JSON.parse(cipher.decrypt(await readFile(file)));delete legacy.preferences.qwenTtsDevice;await writeFile(file,cipher.encrypt(JSON.stringify(legacy)));
-  const migrated=new SettingsVault(file,cipher);await migrated.load();expect(migrated.get().preferences.qwenTtsDevice).toBe('cpu');expect(migrated.get().preferences.chatModel).toBe('expert-model');expect(migrated.get().apiKey).toBe('fake-key');
+  const migrated=new SettingsVault(file,cipher);await migrated.load();expect(migrated.get().preferences.ttsEngine).toBe('none');expect(migrated.get().preferences).not.toHaveProperty('qwenTtsDevice');expect(migrated.get().preferences.chatModel).toBe('expert-model');expect(migrated.get().apiKey).toBe('fake-key');
  }));
- it('passes only a validated CPU/CUDA choice into the local service configuration',()=>{
-  expect(serverConfigFor({...defaultPreferences,ttsEngine:'qwen',qwenTtsDevice:'cuda'},'',4319).qwenTtsDevice).toBe('cuda');
+ it('does not pass a retired CPU/CUDA choice into service startup',()=>{
+  expect(serverConfigFor({...defaultPreferences,ttsEngine:'qwen',qwenTtsDevice:'cuda'},'',4319).qwenTtsDevice).toBeUndefined();
   expect(SaveSettingsSchema.safeParse({...defaultPreferences,qwenTtsDevice:'auto'}).success).toBe(false);
  });
 });
 
 describe('Doubao independent credential and preference migration',()=>{
- it('migrates a pre-Doubao vault without changing Qwen GPU, voice, expert models, auth or OpenAI credentials',async()=>temporary(async file=>{
+ it('migrates a pre-Doubao vault with retired Qwen disabled while preserving expert models, auth and credentials',async()=>temporary(async file=>{
   const vault=new SettingsVault(file,cipher);await vault.load();
   const preferences={...defaultPreferences,ttsEngine:'qwen' as const,qwenTtsDevice:'cuda' as const,qwenTtsVoice:'vivian',qwenTtsInstructions:'原有本地语气',mode:'chatgpt' as const,chatModel:'expert-text',visionModel:'expert-vision',reasoningEffort:'xhigh',ttsVoice:'cedar',ttsInstructions:'原有 OpenAI 语气'};
   await vault.update({preferences,apiKey:'fake-openai-existing',auth:{testOnlyAccount:'expert-account',testOnlyToken:'not-real'}});
   const old=JSON.parse(cipher.decrypt(await readFile(file)));delete old.doubaoApiKey;delete old.preferences.doubaoTtsVoice;delete old.preferences.doubaoTtsInstructions;
   const original=cipher.encrypt(JSON.stringify(old));await writeFile(file,original);
   const migrated=new SettingsVault(file,cipher);await migrated.load();
-  expect(migrated.get()).toMatchObject({hostId:old.hostId,apiKey:'fake-openai-existing',doubaoApiKey:'',auth:old.auth,preferences});
+  expect(migrated.get()).toMatchObject({hostId:old.hostId,apiKey:'fake-openai-existing',doubaoApiKey:'',auth:old.auth,preferences:{ttsEngine:'none',mode:'chatgpt',chatModel:'expert-text',visionModel:'expert-vision',reasoningEffort:'xhigh',ttsVoice:'cedar',ttsInstructions:'原有 OpenAI 语气'}});
   expect(migrated.get().preferences.doubaoTtsVoice).toBe(defaultPreferences.doubaoTtsVoice);expect(migrated.get().preferences.doubaoTtsInstructions).toBe(defaultPreferences.doubaoTtsInstructions);
   expect(await readFile(file)).toEqual(original);
   await migrated.update({doubaoApiKey:'fake-doubao-added'});const restored=new SettingsVault(file,cipher);await restored.load();
-  expect(restored.get()).toMatchObject({apiKey:'fake-openai-existing',doubaoApiKey:'fake-doubao-added',auth:old.auth,preferences});
+  expect(restored.get()).toMatchObject({apiKey:'fake-openai-existing',doubaoApiKey:'fake-doubao-added',auth:old.auth,preferences:{ttsEngine:'none',mode:'chatgpt',chatModel:'expert-text',visionModel:'expert-vision',reasoningEffort:'xhigh',ttsVoice:'cedar',ttsInstructions:'原有 OpenAI 语气'}});
  }));
  it('encrypts and clears either key independently, preserving queued preference writes',async()=>temporary(async file=>{
   const vault=new SettingsVault(file,cipher);await vault.load();const hostId=vault.get().hostId;
@@ -81,10 +81,17 @@ describe('Doubao independent credential and preference migration',()=>{
  });
  it('keeps the demo/expert configuration and sends each explicit secret only to its own server field',()=>{
   const preferences={...defaultPreferences,mode:'demo' as const,ttsEngine:'doubao' as const,chatModel:'expert-text',visionModel:'expert-vision',qwenTtsDevice:'cuda' as const,qwenTtsVoice:'vivian',ttsModel:'tts-1',ttsInstructions:'hidden old OpenAI style',doubaoTtsVoice:'zh_female_vv_uranus_bigtts',doubaoTtsInstructions:'平和朗读原文。'};
-  expect(serverConfigFor(preferences,'fake-openai',4319,'fake-doubao')).toMatchObject({demoMode:true,apiKey:'fake-openai',doubaoApiKey:'fake-doubao',ttsEngine:'doubao',doubaoTtsVoice:'zh_female_vv_uranus_bigtts',doubaoTtsInstructions:'平和朗读原文。',chatModel:'expert-text',visionModel:'expert-vision',qwenTtsDevice:'cuda',qwenTtsVoice:'vivian',ttsInstructions:'',ttsInstructionsSupported:false});
+  expect(serverConfigFor(preferences,'fake-openai',4319,'fake-doubao')).toMatchObject({demoMode:true,apiKey:'fake-openai',doubaoApiKey:'fake-doubao',ttsEngine:'doubao',doubaoTtsVoice:'zh_female_vv_uranus_bigtts',doubaoTtsInstructions:'平和朗读原文。',chatModel:'expert-text',visionModel:'expert-vision',ttsInstructions:'',ttsInstructionsSupported:false});
   expect(serverConfigFor(preferences,'fake-openai',4319).doubaoApiKey).toBe('');expect(serverConfigFor(preferences,'',4319,'fake-doubao').apiKey).toBe('');
  });
  it('refuses a Doubao secret when OS encryption is unavailable without changing either stored key',async()=>temporary(async file=>{
   const vault=new SettingsVault(file,{...cipher,available:()=>false});await expect(vault.update({doubaoApiKey:'fake-private'})).rejects.toThrow('加密');expect(vault.get()).toMatchObject({apiKey:'',doubaoApiKey:''});await expect(readFile(file)).rejects.toMatchObject({code:'ENOENT'});
  }));
+});
+
+
+describe('active speech settings only',()=>{
+ it.each(['local','qwen','system'])('rejects selecting retired %s from the current UI',ttsEngine=>{expect(SaveSettingsSchema.safeParse({...defaultPreferences,ttsEngine}).success).toBe(false);});
+ it.each(['none','doubao','openai'])('allows explicit %s without selecting a fallback',ttsEngine=>{expect(SaveSettingsSchema.parse({...defaultPreferences,ttsEngine}).ttsEngine).toBe(ttsEngine);});
+ it('defaults to silence even when old keys remain available',()=>{expect(defaultPreferences.ttsEngine).toBe('none');expect(serverConfigFor({...defaultPreferences},'fake-openai',4319,'fake-doubao').ttsEngine).toBe('none');});
 });

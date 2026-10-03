@@ -1,61 +1,31 @@
-﻿import {describe,expect,it,vi} from 'vitest';
+import {describe,expect,it,vi} from 'vitest';
 import request from 'supertest';
+import {readFile} from 'node:fs/promises';
 import {createApp} from '../../apps/server/src/app';
 import {readConfig} from '../../apps/server/src/config';
 const host='127.0.0.1:4317';
-function fixture(ready=true){return {ready:()=>ready,speak:vi.fn(async()=>({audio:Buffer.from('RIFF-fake-wav')})),dispose:vi.fn()};}
-async function setup(local=fixture(),env:NodeJS.ProcessEnv={}){
- const network=vi.fn(async()=>{throw Error('Network must not be called by local TTS');});
- const app=createApp({config:readConfig({TTS_ENGINE:'local',...env}),localTts:local,fetch:network as typeof fetch});
- const response=await request(app).get('/api/config').set('Host',host).expect(200);
- const config=response.body;
- const headers={Host:host,Origin:`http://${host}`,Cookie:response.headers['set-cookie'][0].split(';')[0],'x-csrf-token':config.csrfToken};
- const envelope={sessionId:config.sessionId,generationId:1,contextRevision:1};
- return {app,local,network,config,headers,envelope,speak:(body={})=>request(app).post('/api/tts').set(headers).send({...envelope,text:'免费本地测试，不发送到云端。',speed:1,...body})};
-}
-describe('independent free local TTS integration (mock inference, no network)',()=>{
- it('reads real local speech in demo without a key while keeping answers explicitly demo',async()=>{
-  const test=await setup();
-  expect(test.config.mode).toBe('demo');
-  expect(test.config.capabilities.text).toBe('unconfigured');
-  expect(test.config.speech).toMatchObject({engine:'local',ready:true,voice:'zf_001'});
-  const audio=await test.speak().expect(200);
-  expect(audio.headers['content-type']).toContain('audio/wav');
-  expect(audio.headers['x-generation-id']).toBe('1');
-  expect(test.local.speak).toHaveBeenCalledOnce();
-  expect(test.network).not.toHaveBeenCalled();
-  const usage=await request(test.app).get('/api/usage').set(test.headers);
-  expect(usage.body.records[0]).toMatchObject({local:true,model:'Kokoro-82M-v1.1-zh'});
-  expect(usage.body.requestCount).toBe(0);
+describe('retired local and system speech (no inference or network)',()=>{
+ it('defaults to closed speech while preserving the keyless demo reader and Q&A',async()=>{
+  const network=vi.fn(async()=>{throw Error('Unexpected network');});
+  const app=createApp({config:readConfig({}),fetch:network});
+  const response=await request(app).get('/api/config').set('Host',host).expect(200);
+  expect(response.body).toMatchObject({mode:'demo',capabilities:{text:'unconfigured',tts:'unconfigured'},speech:{engine:'none',ready:false,voice:'',instructionsSupported:false}});
+  const headers={Host:host,Origin:'http://'+host,Cookie:response.headers['set-cookie'][0].split(';')[0],'x-csrf-token':response.body.csrfToken};
+  const envelope={sessionId:response.body.sessionId,generationId:1,contextRevision:1};
+  const audio=await request(app).post('/api/tts').set(headers).send({...envelope,text:'所选原文。',speed:1}).expect(503);
+  expect(audio.body.error).toBe('speech_not_configured');
+  const answer=await request(app).post('/api/ask').set(headers).send({...envelope,question:'解释原文',history:[],context:{documentId:'book',sources:[{sourceId:'source',documentId:'book',pageIndex:0,pageLabel:null,blockId:'block',rect:null,sourceText:'所选原文。'}],selectedBoardText:null,imageDataUrl:null}}).expect(200);
+  expect(answer.body.mode).toBe('demo');expect(network).not.toHaveBeenCalled();await app.locals.dispose();
  });
- it('uses cached original-speed WAV when playback speed changes and does not spend paid request quota',async()=>{
-  const test=await setup(fixture(),{MAX_SESSION_REQUESTS:'1'});
-  await test.speak({speed:0.25}).expect(200);
-  expect((await test.speak({speed:1.5}).expect(200)).headers['x-audio-cache']).toBe('hit');
-  await test.speak({text:'第二句',generationId:2}).expect(200);
-  expect(test.local.speak).toHaveBeenCalledTimes(2);
-  expect(test.network).not.toHaveBeenCalled();
+ it('removes runtime initialization and hardware probing from both startup paths',async()=>{
+  for(const path of ['apps/desktop/main.ts','apps/server/src/index.ts'])expect(await readFile(path,'utf8')).not.toMatch(/new\s+(?:LocalTtsProvider|QwenTtsProvider)|qwenCudaRuntimeReady|local-tts-runtime|qwen-tts-runtime/);
  });
- it('does not fall back to a configured paid key if the local package is missing',async()=>{
-  const test=await setup(fixture(false),{DEMO_MODE:'false',OPENAI_API_KEY:'fake-only',TTS_MODEL:'gpt-4o-mini-tts'});
-  expect(test.config.speech.ready).toBe(false);
-  const error=await test.speak().expect(503);
-  expect(error.body.error).toBe('local_tts_missing');
-  expect(test.local.speak).not.toHaveBeenCalled();
-  expect(test.network).not.toHaveBeenCalled();
+ it('does not package native runtimes or install sherpa',async()=>{
+  const pkg=JSON.parse(await readFile('package.json','utf8'));expect(pkg.dependencies).not.toHaveProperty('sherpa-onnx-node');expect(Object.keys(pkg.scripts).some(key=>key.startsWith('tts:'))).toBe(false);
+  const lock=JSON.parse(await readFile('package-lock.json','utf8'));expect(Object.keys(lock.packages).some(key=>key.includes('sherpa-onnx'))).toBe(false);
+  for(const path of ['scripts/build-desktop.mjs','scripts/package-desktop.mjs'])expect(await readFile(path,'utf8')).not.toMatch(/local-tts-runtime|qwen-tts-runtime|local-tts-worker/);
  });
- it('discards cancelled local output and clears its resources on app disposal',async()=>{
-  const local=fixture();let signal:AbortSignal|undefined;let finish!:(value:{audio:Buffer<ArrayBuffer>})=>void;
-  local.speak=vi.fn((_text?:string,_speed?:number,abort?:AbortSignal)=>{signal=abort;return new Promise(resolve=>{finish=resolve;});});
-  const test=await setup(local);
-  const pending=test.speak().then(value=>value);
-  await vi.waitFor(()=>expect(signal).toBeDefined());
-  await request(test.app).post('/api/cancel').set(test.headers).send(test.envelope).expect(200);
-  expect(signal!.aborted).toBe(true);
-  finish({audio:Buffer.from('late output')});
-  expect((await pending).status).toBe(409);
-  await test.app.locals.dispose();
-  expect(local.dispose).toHaveBeenCalledOnce();
-  expect(test.network).not.toHaveBeenCalled();
+ it('does not infer cloud selection from an existing OpenAI key or model',()=>{
+  const config=readConfig({DEMO_MODE:'false',OPENAI_API_KEY:'fake-key',TTS_MODEL:'gpt-4o-mini-tts'});expect(config.ttsEngine).toBe('none');expect(config.ttsInstructionsSupported).toBe(false);
  });
 });

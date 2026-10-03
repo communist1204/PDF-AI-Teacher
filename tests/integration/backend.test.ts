@@ -13,7 +13,7 @@ import { OpenAITeachingProvider, TEACHER_INSTRUCTIONS, type TeachingProvider } f
 
 const HOST = '127.0.0.1:4317';
 const ORIGIN = `http://${HOST}`;
-const liveConfig = (): ServerConfig => ({ ...readConfig({}), demoMode: false, apiKey: 'mock-key-never-used', chatModel: 'mock-chat', visionModel: 'mock-vision', ttsModel: 'mock-tts', transcriptionModel: 'mock-transcription' });
+const liveConfig = (): ServerConfig => ({ ...readConfig({ TTS_ENGINE: 'openai' }), demoMode: false, apiKey: 'mock-key-never-used', chatModel: 'mock-chat', visionModel: 'mock-vision', ttsModel: 'mock-tts', transcriptionModel: 'mock-transcription' });
 function mockProvider(): TeachingProvider {
   return { transcribe: vi.fn(async () => ({ text: '为什么 beta 要取 t 次方？', requestId: 'req_transcription' })), ask: vi.fn(async (body: AskRequest) => ({ plan: makeDemoPlan(body), requestId: 'req_mock' })), speak: vi.fn(async () => ({ audio: Buffer.from('mock mp3 bytes'), requestId: 'req_speech' })) };
 }
@@ -75,36 +75,36 @@ describe('local API security and configuration', () => {
 
   it('enables natural delivery only for documented models and explicit compatible services', () => {
     for (const model of ['gpt-4o-mini-tts', 'gpt-4o-mini-tts-2025-12-15']) {
-      const config = readConfig({ TTS_MODEL: model });
+      const config = readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: model });
       expect(config.ttsInstructionsSupported).toBe(true);
       expect(config.ttsInstructions).toBe([DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n'));
     }
     for (const model of ['', 'tts-1', 'tts-1-hd', 'unverified-tts', 'gpt-4o-mini-tts-future']) {
-      const config = readConfig({ TTS_MODEL: model });
+      const config = readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: model });
       expect(config.ttsInstructionsSupported).toBe(false);
       expect(config.ttsInstructions).toBe('');
     }
-    expect(readConfig({ TTS_MODEL: 'gpt-4o-mini-tts', OPENAI_BASE_URL: 'https://compatible.example/v1' }).ttsInstructionsSupported).toBe(false);
-    expect(readConfig({ TTS_MODEL: 'gpt-4o-mini-tts', TTS_SUPPORTS_INSTRUCTIONS: 'false' }).ttsInstructions).toBe('');
-    const declared = readConfig({ TTS_MODEL: 'custom-tts', OPENAI_BASE_URL: 'https://compatible.example/v1', TTS_SUPPORTS_INSTRUCTIONS: 'true', TTS_INSTRUCTIONS: '轻快而温和' });
+    expect(readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: 'gpt-4o-mini-tts', OPENAI_BASE_URL: 'https://compatible.example/v1' }).ttsInstructionsSupported).toBe(false);
+    expect(readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: 'gpt-4o-mini-tts', TTS_SUPPORTS_INSTRUCTIONS: 'false' }).ttsInstructions).toBe('');
+    const declared = readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: 'custom-tts', OPENAI_BASE_URL: 'https://compatible.example/v1', TTS_SUPPORTS_INSTRUCTIONS: 'true', TTS_INSTRUCTIONS: '轻快而温和' });
     expect(declared.ttsInstructions).toBe(['轻快而温和', TTS_SOURCE_FIDELITY].join('\n'));
-    expect(() => readConfig({ TTS_MODEL: 'tts-1', TTS_SUPPORTS_INSTRUCTIONS: 'true' })).toThrow('不支持语气指令');
-    expect(() => readConfig({ TTS_MODEL: 'tts-1-hd', TTS_INSTRUCTIONS: '温和' })).toThrow('未确认支持语气指令');
-    expect(() => readConfig({ TTS_MODEL: 'custom-tts', TTS_INSTRUCTIONS: '温和' })).toThrow('未确认支持语气指令');
-    expect(() => readConfig({ TTS_MODEL: 'gpt-4o-mini-tts', TTS_SUPPORTS_INSTRUCTIONS: 'false', TTS_INSTRUCTIONS: '温和' })).toThrow('未确认支持语气指令');
-    expect(() => readConfig({ TTS_SUPPORTS_INSTRUCTIONS: 'maybe' })).toThrow('必须为 true 或 false');
-    expect(() => readConfig({ TTS_MODEL: 'gpt-4o-mini-tts', TTS_INSTRUCTIONS: 'a'.repeat(3001) })).toThrow('3000');
+    expect(() => readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: 'tts-1', TTS_SUPPORTS_INSTRUCTIONS: 'true' })).toThrow('不支持语气指令');
+    expect(() => readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: 'tts-1-hd', TTS_INSTRUCTIONS: '温和' })).toThrow('未确认支持语气指令');
+    expect(() => readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: 'custom-tts', TTS_INSTRUCTIONS: '温和' })).toThrow('未确认支持语气指令');
+    expect(() => readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: 'gpt-4o-mini-tts', TTS_SUPPORTS_INSTRUCTIONS: 'false', TTS_INSTRUCTIONS: '温和' })).toThrow('未确认支持语气指令');
+    expect(() => readConfig({ TTS_ENGINE: 'openai', TTS_SUPPORTS_INSTRUCTIONS: 'maybe' })).toThrow('必须为 true 或 false');
+    expect(() => readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: 'gpt-4o-mini-tts', TTS_INSTRUCTIONS: 'a'.repeat(3001) })).toThrow('3000');
   });
 
   it('returns safe speech metadata without disclosing private instructions or claiming an API test', async () => {
-    const config = readConfig({ DEMO_MODE: 'false', OPENAI_API_KEY: 'secret-key', TTS_MODEL: 'gpt-4o-mini-tts', TTS_VOICE: 'marin', TTS_INSTRUCTIONS: 'private-style-secret' });
+    const config = readConfig({ TTS_ENGINE: 'openai', DEMO_MODE: 'false', OPENAI_API_KEY: 'secret-key', TTS_MODEL: 'gpt-4o-mini-tts', TTS_VOICE: 'marin', TTS_INSTRUCTIONS: 'private-style-secret' });
     const app = createApp({ config, provider: mockProvider() });
     const response = await request(app).get('/api/config').set('Host', HOST).expect(200);
-    expect(response.body.speech).toEqual({ voice: 'marin', style: '本机自定义语气', instructionsSupported: true });
+    expect(response.body.speech).toEqual({ engine: 'openai', ready: true, voice: 'marin', style: '本机自定义语气', instructionsSupported: true });
     expect(response.body.capabilities.tts).toBe('untested');
     expect(response.text).not.toContain('secret-key');
     expect(response.text).not.toContain('private-style-secret');
-    expect((await browser(createApp({ config: readConfig({ TTS_MODEL: 'gpt-4o-mini-tts' }) }))).config.speech?.style).toBe('自然温和，按语义停顿');
+    expect((await browser(createApp({ config: readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: 'gpt-4o-mini-tts' }) }))).config.speech?.style).toBe('自然温和，按语义停顿');
   });
 
   it('returns generation watermarks on refresh so the browser can resume a cookie session', async () => {
@@ -145,7 +145,7 @@ describe('demo and bounded validated requests', () => {
       expect(Number(row[2])).toBeCloseTo(1 - 0.9 ** t);
       expect(Number(row[3])).toBeCloseTo(previous / (1 - 0.9 ** t));
     }
-    expect((await post(app, client, '/api/tts', { text: '原文', speed: 1 }).expect(409)).body.error).toBe('demo_tts');
+    expect((await post(app, client, '/api/tts', { text: '原文', speed: 1 }).expect(503)).body.error).toBe('speech_not_configured');
     expect(provider.speak).not.toHaveBeenCalled();
   });
 
@@ -294,7 +294,7 @@ describe('mocked live provider lifecycle (no paid calls)', () => {
   });
 
   it('never reuses cached audio after voice, instructions, model, endpoint or input changes', async () => {
-    const config = readConfig({ DEMO_MODE: 'false', OPENAI_API_KEY: 'mock-key', TTS_MODEL: 'gpt-4o-mini-tts', TTS_VOICE: 'marin' });
+    const config = readConfig({ TTS_ENGINE: 'openai', DEMO_MODE: 'false', OPENAI_API_KEY: 'mock-key', TTS_MODEL: 'gpt-4o-mini-tts', TTS_VOICE: 'marin' });
     const provider = mockProvider(); const app = createApp({ config, provider }); const client = await browser(app);
     const speech = { text: '同一句原文。', speed: 1 };
     await post(app, client, '/api/tts', speech).expect(200);
@@ -374,7 +374,7 @@ describe('provider protocol and bounded cache', () => {
       return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'audio/mpeg' } });
     });
     const client = new OpenAI({ apiKey: 'dummy', fetch: fetchMock as typeof fetch, maxRetries: 0 });
-    const config = readConfig({ TTS_MODEL: model });
+    const config = readConfig({ TTS_ENGINE: 'openai', TTS_MODEL: model });
     const adapter = new OpenAITeachingProvider(config, client);
     const selectedText = '只朗读这段原文，β 的 t 次方。';
     await adapter.speak(selectedText, 1, new AbortController().signal);

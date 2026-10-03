@@ -7,7 +7,7 @@ import { ChatGptTeachingProvider, type TeachingProvider } from '../../apps/serve
 import type { AppConfig, AskRequest } from '../../packages/shared/protocol';
 
 const HOST = '127.0.0.1:4317';
-const config = () => ({ ...readConfig({}), demoMode: false, authMode: 'chatgpt' as const, chatModel: 'account-selected-theory', visionModel: 'account-selected-vision', chatReasoningEffort: 'high' as const });
+const config = () => ({ ...readConfig({ TTS_ENGINE: 'openai' }), demoMode: false, authMode: 'chatgpt' as const, chatModel: 'account-selected-theory', visionModel: 'account-selected-vision', chatReasoningEffort: 'high' as const });
 const body: AskRequest = { sessionId: 'test-session', generationId: 1, contextRevision: 1, question: '推导为什么要作修正', context: { documentId: 'book', sources: [{ sourceId: 'source', documentId: 'book', pageIndex: 0, pageLabel: null, blockId: 'block', rect: null, sourceText: 'M0=0，beta=0.9。' }], selectedBoardText: null, imageDataUrl: null }, history: [] };
 function completed(plan: unknown = makeDemoPlan(body)) {
   return { type: 'response.completed', sequence_number: 1, response: { id: 'resp_mock', object: 'response', status: 'completed', created_at: 0, model: 'account-selected-theory', output: [{ type: 'message', id: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: typeof plan === 'string' ? plan : JSON.stringify(plan), annotations: [] }] }], usage: { input_tokens: 12, output_tokens: 34, total_tokens: 46 } } };

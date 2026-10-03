@@ -8,12 +8,13 @@ import { OpenAIRealtimeProvider, RealtimeConnections, realtimeCapability, type R
 import { validateRecording } from './recording';
 import { ReadingAssistRequestSchema, ReadingAssistResponseSchema, validateReadingAssist } from '../../../packages/shared/readingAssist';
 import { AudioCache } from './cache';
-import type { LocalTtsProvider } from './localTts';
+import { normalizeSpeechEngine } from '../../../packages/shared/localSpeech';
 import { DEFAULT_TTS_STYLE, readConfig, TTS_SOURCE_FIDELITY, type ServerConfig } from './config';
 import { makeDemoPlan } from './demo';
 import { HttpError, providerError, safeRequestId } from './errors';
 import { ChatGptTeachingProvider, OpenAITeachingProvider, speechRequest, type ChatGptCredentials, type TeachingProvider } from './provider';
 
+type RetiredSpeechProvider = { ready(): boolean; speak(text: string, speed: number, signal: AbortSignal): Promise<{ audio: Buffer }>; dispose(): void };
 type Job = { envelope: Envelope; controller: AbortController };
 // Teaching and source speech have independent cancellation scopes; authentication and budgets remain shared.
 type TaskLane = { generation: number; revision: number; cancelledThrough: number; jobs: Set<Job> };
@@ -37,7 +38,7 @@ function setEnvelope(res: Response, envelope: Envelope) {
 }
 function cancelledError() { return new HttpError(409, 'cancelled', '本次任务已取消，旧结果不会继续使用；已发生的服务用量可能仍会计费。'); }
 
-export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; localTts?: Pick<LocalTtsProvider, 'ready' | 'speak' | 'dispose'>; doubaoTts?: Pick<DoubaoTtsProvider, 'ready' | 'speak' | 'dispose'>; qwenTts?: Pick<LocalTtsProvider, 'ready' | 'speak' | 'dispose'>; realtimeProvider?: RealtimeProvider; chatGptAuth?: ChatGptCredentials; fetch?: typeof fetch; now?: () => number } = {}) {
+export function createApp(options: { config?: ServerConfig; provider?: TeachingProvider; localTts?: RetiredSpeechProvider; doubaoTts?: Pick<DoubaoTtsProvider, 'ready' | 'speak' | 'dispose'>; qwenTts?: RetiredSpeechProvider; realtimeProvider?: RealtimeProvider; chatGptAuth?: ChatGptCredentials; fetch?: typeof fetch; now?: () => number } = {}) {
   const config = options.config ?? readConfig();
   const now = options.now ?? Date.now;
   const app = express();
@@ -45,16 +46,11 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
   app.set('trust proxy', false);
   const sessions = new Map<string, Session>();
   const cache = new AudioCache(config.cacheMaxBytes);
-  const usingDoubaoTts = config.ttsEngine === 'doubao';
+  const speechEngine = normalizeSpeechEngine(config.ttsEngine);
+  const usingDoubaoTts = speechEngine === 'doubao';
   const doubaoProvider = options.doubaoTts ?? (usingDoubaoTts ? new DoubaoTtsProvider({apiKey:config.doubaoApiKey??'',voice:config.doubaoTtsVoice??'zh_female_xiaohe_uranus_bigtts',instructions:config.doubaoTtsInstructions??'',fetchImpl:options.fetch}) : undefined);
   const doubaoReady = usingDoubaoTts && !!doubaoProvider?.ready();
-  const usingQwenTts = config.ttsEngine === 'qwen';
-  const usingLocalTts = config.ttsEngine === 'local' || usingQwenTts;
-  const localProvider = usingQwenTts ? options.qwenTts : options.localTts;
-  const localReady = usingLocalTts && !!localProvider?.ready();
-  const localVoice = usingQwenTts ? config.qwenTtsVoice ?? 'serena' : config.localTtsVoice ?? 'zf_001';
-  const usingSystemTts = config.ttsEngine === 'system';
-  const ttsModel = usingDoubaoTts ? 'Doubao-Seed-TTS-2.0' : usingQwenTts ? 'Qwen3-TTS-1.7B-CustomVoice-Q4_K_M' : usingLocalTts ? 'Kokoro-82M-v1.1-zh' : usingSystemTts ? 'Windows 本机语音' : config.ttsModel;
+  const ttsModel = usingDoubaoTts ? 'Doubao-Seed-TTS-2.0' : speechEngine === 'openai' ? config.ttsModel : '';
   const usingChatGpt = config.authMode === 'chatgpt';
   const teachingConfigured = !config.demoMode && (usingChatGpt ? Boolean(options.chatGptAuth) : Boolean(config.apiKey));
   const provider = options.provider ?? (!config.demoMode && usingChatGpt && options.chatGptAuth ? new ChatGptTeachingProvider(config, options.chatGptAuth, options.fetch) : !config.demoMode && config.apiKey && !usingChatGpt ? new OpenAITeachingProvider(config, undefined, options.fetch) : undefined);
@@ -65,10 +61,10 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     text: teachingConfigured && config.chatModel ? 'untested' : 'unconfigured',
     vision: teachingConfigured && config.visionModel ? 'untested' : 'unconfigured',
     structuredOutput: teachingConfigured && (config.chatModel || config.visionModel) ? 'untested' : 'unconfigured',
-    tts: usingDoubaoTts ? (doubaoReady ? 'untested' : 'unconfigured') : usingLocalTts ? (localReady ? 'untested' : 'unconfigured') : usingSystemTts ? 'untested' : !config.demoMode && config.apiKey && config.ttsModel ? 'untested' : 'unconfigured',
+    tts: usingDoubaoTts ? (doubaoReady ? 'untested' : 'unconfigured') : speechEngine === 'openai' && !config.demoMode && config.apiKey && config.ttsModel ? 'untested' : 'unconfigured',
     transcription: !config.demoMode && config.apiKey && config.transcriptionModel ? 'untested' : 'unconfigured', realtimeAudio: realtimeState, realtimeTools: realtimeState, interruption: realtimeState,
   };
-  const mode: AppConfig['mode'] = config.demoMode ? 'demo' : (teachingConfigured && (config.chatModel || config.visionModel)) || (config.apiKey && (config.ttsModel || config.transcriptionModel || config.realtimeModel)) ? 'live' : 'unconfigured';
+  const mode: AppConfig['mode'] = config.demoMode ? 'demo' : (teachingConfigured && (config.chatModel || config.visionModel)) || (config.apiKey && ((speechEngine === 'openai' && config.ttsModel) || config.transcriptionModel || config.realtimeModel)) ? 'live' : 'unconfigured';
   const allowedHosts = new Set([`127.0.0.1:${config.port}`, `localhost:${config.port}`]);
 
   app.use((req, res, next) => {
@@ -176,13 +172,12 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     session.touchedAt = now();
     res.cookie(SESSION_COOKIE, session.id, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: SESSION_TTL });
     const body: AppConfig = { authMode: usingChatGpt ? 'chatgpt' : 'api_key', mode, sessionId: session.id, generationId: Math.max(session.generation, session.cancelledThrough), contextRevision: session.revision, csrfToken: session.csrf, capabilities: { ...capabilities }, models: { chat: config.chatModel, vision: config.visionModel, tts: ttsModel, transcription: config.transcriptionModel, realtime: config.realtimeModel }, realtime: { provider: 'openai-realtime', voice: config.realtimeVoice, maxSessionSeconds: REALTIME_MAX_SESSION_SECONDS, idleSeconds: REALTIME_IDLE_SECONDS, inputTranscriptionModel: config.realtimeTranscriptionModel }, teaching: { chatReasoningEffort: config.chatReasoningEffort, visionReasoningEffort: config.visionReasoningEffort, maxOutputTokens: config.teachingMaxOutputTokens, timeoutMs: config.teachingTimeoutMs }, speech: {
-      voice: config.ttsVoice,
+      engine: speechEngine, ready: speechEngine === 'openai' && capabilities.tts !== 'unconfigured', voice: config.ttsVoice,
       style: !config.ttsInstructionsSupported ? '使用模型默认语气' : config.ttsInstructions === [DEFAULT_TTS_STYLE, TTS_SOURCE_FIDELITY].join('\n') ? '自然温和，按语义停顿' : '本机自定义语气',
       instructionsSupported: config.ttsInstructionsSupported,
     }, maxRequests: config.maxRequests };
     if(usingDoubaoTts) body.speech={engine:'doubao',ready:doubaoReady,voice:config.doubaoTtsVoice??'',style:'豆包中文朗读；额度与权限需在官方控制台确认',instructionsSupported:true};
-    if (usingLocalTts || usingSystemTts) body.speech = { engine: config.ttsEngine, ready: usingSystemTts || localReady, voice: usingLocalTts ? localVoice : '系统所选声音', style: usingQwenTts ? '中文自然陪读，可自定义语气' : usingLocalTts ? '本地中文语音；不使用语气提示词' : '系统默认', instructionsSupported: usingQwenTts, ...(usingQwenTts ? {device:config.qwenTtsDevice??'cpu'} : {}) };
-    else if (config.ttsEngine) body.speech!.engine = config.ttsEngine;
+    if (speechEngine === 'none') body.speech = { engine: 'none', ready: false, voice: '', style: '朗读已关闭，请配置可用的云语音服务', instructionsSupported: false };
     res.json({ ...body, speechSession: { generationId: Math.max(session.speech.generation, session.speech.cancelledThrough), contextRevision: session.speech.revision } });
   });
 
@@ -288,21 +283,18 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     const request = parsed.data;
     checkFresh(lane, request);
     setEnvelope(res, request);
-    if (usingSystemTts) throw new HttpError(409, 'system_tts', '当前选择系统本机声音，不调用语音 API。');
-    if (usingLocalTts && !localReady) throw new HttpError(503, 'local_tts_missing', '免费本地声音包未就绪。请修复或重新安装本软件的本地声音包；没有调用付费 API。');
-    if (!usingLocalTts && !usingDoubaoTts && config.demoMode) throw new HttpError(409, 'demo_tts', '演示模式未调用付费 TTS。请使用明确标注的浏览器演示语音，或在本机配置真实 TTS。');
+    if (speechEngine === 'none') throw new HttpError(503, 'speech_not_configured', '朗读未配置。Qwen、Kokoro 和系统声音已移除，请在设置中选择并配置可用的云语音服务；未自动切换服务。');
+    if (!usingDoubaoTts && config.demoMode) throw new HttpError(409, 'demo_tts', '演示模式未调用 OpenAI TTS。请在本机完成相应接口配置后再朗读。');
     if(usingDoubaoTts && !doubaoReady)throw new HttpError(503,'doubao_not_configured','豆包语音尚未配置。请在声音设置中填写本机豆包 API Key，并先到官方控制台确认试用额度；没有改用其他服务。');
-    if (!usingLocalTts && !usingDoubaoTts && (!config.apiKey || !config.ttsModel || !provider)) throw new HttpError(503, 'not_configured', usingChatGpt ? 'ChatGPT 登录用于解题。OpenAI 朗读还需要独立语音 API Key，也可以在设置中选择免费本地朗读。' : 'TTS 模型或 API Key 未配置；未自动切换语音服务。');
-    const contentType = usingLocalTts || usingDoubaoTts ? 'audio/wav' : 'audio/mpeg';
-    const cacheKey = cache.key(session.id, usingDoubaoTts ? ['doubao',ttsModel,config.doubaoTtsVoice,config.doubaoTtsInstructions,request.text] : usingLocalTts ? ['local', ttsModel, localVoice, usingQwenTts ? config.qwenTtsInstructions : '', request.text] : [config.baseUrl, speechRequest(config, request.text, request.speed)]);
+    if (!usingDoubaoTts && (!config.apiKey || !config.ttsModel || !provider)) throw new HttpError(503, 'not_configured', usingChatGpt ? 'ChatGPT 登录用于解题。OpenAI 朗读还需要独立语音 API Key；未自动切换语音服务。' : 'TTS 模型或 API Key 未配置；未自动切换语音服务。');
+    const contentType = usingDoubaoTts ? 'audio/wav' : 'audio/mpeg';
+    const cacheKey = cache.key(session.id, usingDoubaoTts ? ['doubao',ttsModel,config.doubaoTtsVoice,config.doubaoTtsInstructions,request.text] : [config.baseUrl, speechRequest(config, request.text, request.speed)]);
     const cached = cache.get(cacheKey);
     if (cached) { res.set('x-audio-cache', 'hit').type(contentType).send(cached); return; }
     requireIdle(lane);
-    // Local CPU speech has no paid session quota. The provider serializes generation.
-    if (!usingLocalTts) consumeRequest(session);
+    consumeRequest(session);
     const usage = newUsage(session, ttsModel, 'tts', usingDoubaoTts ? null : request.text.length);
-    if (usingLocalTts) usage.local = true;
-    const result = await runJob(session, request, req, res, usage, signal => usingDoubaoTts ? doubaoProvider!.speak(request.text,request.speed,signal,session.id+(lane === session ? '-' : '-speech-')+request.contextRevision+'-'+request.generationId) : usingLocalTts ? localProvider!.speak(request.text, request.speed, signal) : provider!.speak(request.text, request.speed, signal), usingQwenTts ? 305000 : usingDoubaoTts ? 125000 : config.requestTimeoutMs, lane);
+    const result = await runJob(session, request, req, res, usage, signal => usingDoubaoTts ? doubaoProvider!.speak(request.text,request.speed,signal,session.id+(lane === session ? '-' : '-speech-')+request.contextRevision+'-'+request.generationId) : provider!.speak(request.text, request.speed, signal), usingDoubaoTts ? 125000 : config.requestTimeoutMs, lane);
     if (!result.audio.length || result.audio.length > 8 * 1024 * 1024) throw new HttpError(502, 'invalid_audio', '语音返回为空或超出大小限制，未播放。');
     usage.requestId = safeRequestId('requestId' in result ? result.requestId : undefined) ?? usage.requestId;
     if (usingDoubaoTts) usage.characters = 'characters' in result ? result.characters ?? null : null;
@@ -429,8 +421,6 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
         cache.clear(session.id);
       }
       sessions.clear();
-      options.localTts?.dispose();
-      options.qwenTts?.dispose();
       doubaoProvider?.dispose();
       await Promise.allSettled(activeIds.map(id => realtimeConnections.disconnect(id)));
     })();

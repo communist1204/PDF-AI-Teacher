@@ -1,5 +1,5 @@
 import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_VOICES } from '../../../packages/shared/doubaoSpeech';
-import { DEFAULT_QWEN_TTS_INSTRUCTIONS, DEFAULT_QWEN_TTS_VOICE } from '../../../packages/shared/localSpeech';
+import { normalizeSpeechEngine, type SpeechEngine } from '../../../packages/shared/localSpeech';
 import { REASONING_EFFORTS, type TeachingReasoningEffort } from '../../../packages/shared/protocol';
 
 export interface ServerConfig {
@@ -16,7 +16,7 @@ export interface ServerConfig {
   visionReasoningEffort: TeachingReasoningEffort | null;
   teachingMaxOutputTokens: number;
   teachingTimeoutMs: number;
-  ttsEngine?: 'local' | 'qwen' | 'doubao' | 'openai' | 'system';
+  ttsEngine?: SpeechEngine;
   doubaoApiKey?: string;
   doubaoTtsVoice?: string;
   doubaoTtsInstructions?: string;
@@ -67,13 +67,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) {
     throw new Error('OPENAI_BASE_URL 必须为 HTTPS 服务地址或本机回环 HTTP 地址，且不能包含凭证。');
   }
-  if (env.TTS_ENGINE && !['local', 'qwen', 'doubao', 'openai', 'system'].includes(env.TTS_ENGINE)) throw new Error('TTS_ENGINE 必须为 local、qwen、doubao、openai 或 system。');
-  if (env.LOCAL_TTS_VOICE && !['zf_001', 'zf_002', 'zf_003', 'zm_010', 'zm_011', 'zm_012'].includes(env.LOCAL_TTS_VOICE)) throw new Error('本地中文音色无效。');
-  const cloudSpeech = !['local','qwen','doubao','system'].includes(env.TTS_ENGINE || '');
-  if (env.QWEN_TTS_VOICE && !['serena','vivian','uncle_fu'].includes(env.QWEN_TTS_VOICE)) throw new Error('Qwen3 中文音色无效。');
-  if(env.QWEN_TTS_DEVICE && !['cpu','cuda'].includes(env.QWEN_TTS_DEVICE))throw new Error('QWEN_TTS_DEVICE 必须为 cpu 或 cuda。');
-  const qwenTtsInstructions = env.QWEN_TTS_INSTRUCTIONS?.trim() || DEFAULT_QWEN_TTS_INSTRUCTIONS;
-  if(qwenTtsInstructions.length>1000) throw new Error('Qwen3 朗读语气请限制在1000字以内。');
+  if (env.TTS_ENGINE && !['none', 'local', 'qwen', 'doubao', 'openai', 'system'].includes(env.TTS_ENGINE)) throw new Error('TTS_ENGINE 必须为 none、doubao 或 openai。');
+  // Old local/system choices retire to silence, never to a chargeable cloud provider.
+  const ttsEngine = normalizeSpeechEngine(env.TTS_ENGINE);
+  const cloudSpeech = ttsEngine === 'openai';
   const doubaoTtsVoice = env.DOUBAO_TTS_VOICE?.trim() || DEFAULT_DOUBAO_TTS_VOICE;
   if(!DOUBAO_TTS_VOICES.some(voice=>voice.id===doubaoTtsVoice))throw new Error('请选择列表中的豆包音色。');
   const doubaoTtsInstructions = env.DOUBAO_TTS_INSTRUCTIONS?.trim() || DEFAULT_DOUBAO_TTS_INSTRUCTIONS;
@@ -102,11 +99,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     visionReasoningEffort: reasoningEffort(env.VISION_REASONING_EFFORT, 'VISION_REASONING_EFFORT'),
     teachingMaxOutputTokens: integer(env.TEACHING_MAX_OUTPUT_TOKENS, 16000, 1024, 128000, 'TEACHING_MAX_OUTPUT_TOKENS'),
     teachingTimeoutMs: integer(env.TEACHING_TIMEOUT_MS, 180000, 1000, 600000, 'TEACHING_TIMEOUT_MS'),
-    ttsEngine: env.TTS_ENGINE as ServerConfig['ttsEngine'],
+    ttsEngine,
     doubaoApiKey,doubaoTtsVoice,doubaoTtsInstructions,
-    localTtsVoice: env.LOCAL_TTS_VOICE || 'zf_001',
-    qwenTtsDevice: (env.QWEN_TTS_DEVICE || 'cpu') as 'cpu' | 'cuda',
-    qwenTtsVoice: env.QWEN_TTS_VOICE || DEFAULT_QWEN_TTS_VOICE, qwenTtsInstructions,
     ttsModel,
     transcriptionModel: env.TRANSCRIPTION_MODEL?.trim() || '',
     realtimeModel: env.REALTIME_MODEL?.trim() || '',

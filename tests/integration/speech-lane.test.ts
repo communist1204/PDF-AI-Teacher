@@ -13,7 +13,7 @@ const ORIGIN = 'http://' + HOST;
 const apps: Express[] = [];
 type Browser = { config: AppConfig; cookie: string };
 function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
-  return { ...readConfig({}), demoMode: false, apiKey: 'mock-key-not-used', chatModel: 'mock-teacher', visionModel: 'mock-vision', ttsModel: 'mock-speech', ...overrides };
+  return { ...readConfig({ TTS_ENGINE: 'openai' }), demoMode: false, apiKey: 'mock-key-not-used', chatModel: 'mock-teacher', visionModel: 'mock-vision', ttsModel: 'mock-speech', ...overrides };
 }
 function provider(): TeachingProvider {
   return { ask: vi.fn(async (body: AskRequest) => ({ plan: makeDemoPlan(body) })), speak: vi.fn(async () => ({ audio: Buffer.from('mock-audio') })), transcribe: vi.fn(async () => ({ text: 'mock' })) };

@@ -120,6 +120,6 @@ describe('independent Doubao speech HTTP contract (no online calls)', () => {
     const pending = post(h.app,client,'/api/tts',{text:'退出时停止。',speed:1}).then(response => response);
     await began; await h.app.locals.dispose(); await h.app.locals.dispose();
     expect(signal.aborted).toBe(true); expect((await pending).body.error).toBe('cancelled');
-    await usage(h.app,client).expect(401); expect(h.local.dispose).toHaveBeenCalledOnce(); expect(h.qwen.dispose).toHaveBeenCalledOnce(); noFallback(h);
+    await usage(h.app,client).expect(401); expect(h.local.dispose).not.toHaveBeenCalled(); expect(h.qwen.dispose).not.toHaveBeenCalled(); noFallback(h);
   });
 });

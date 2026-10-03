@@ -5,14 +5,9 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app';
 import { readConfig } from './config';
-import { QwenTtsProvider } from './qwenTts';
-import { LocalTtsProvider } from './localTts';
 
 const config = readConfig();
-const runtimePath = resolve(process.cwd(), 'local-tts-runtime');
-const localTts = config.ttsEngine === 'local' ? new LocalTtsProvider({ workerPath: resolve(runtimePath, 'local-tts-worker.cjs'), runtimePath, modelDir: resolve(runtimePath, 'model'), voice: config.localTtsVoice ?? 'zf_001', threads: 2 }) : undefined;
-const qwenTts = config.ttsEngine === 'qwen' ? new QwenTtsProvider({runtimePath:resolve('qwen-tts-runtime'),workPath:resolve('.model-cache/qwen-jobs'),device:config.qwenTtsDevice??'cpu',voice:config.qwenTtsVoice??'serena',instructions:config.qwenTtsInstructions??''}) : undefined;
-const app = createApp({ config, localTts, qwenTts });
+const app = createApp({ config });
 const server = createServer(app);
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 let closeDevServer: (() => Promise<void>) | undefined;
@@ -33,7 +28,7 @@ server.on('error', (error: NodeJS.ErrnoException) => {
 });
 server.listen(config.port, config.host, () => {
   console.log(`PDF-AI-Teacher: http://${config.host}:${config.port}`);
-  console.log(config.demoMode ? '演示模式：不调用模型 API；浏览器演示语音不代表真实 TTS 已验证。' : '真实接口模式：仅用户主动请求时调用已配置服务，可能产生 API 费用。');
+  console.log(config.demoMode ? '演示问答模式：不调用解题 API；朗读仅使用明确配置的云语音，未配置时保持关闭。' : '真实接口模式：仅用户主动请求时调用已配置服务，可能产生 API 费用。');
 });
 let closing = false;
 async function close() {

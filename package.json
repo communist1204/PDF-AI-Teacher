@@ -22,11 +22,7 @@
     "desktop:runtime": "node node_modules/electron/install.js",
     "test:desktop:restart": "node scripts/verify-desktop-restart.mjs",
     "test:desktop:network": "node scripts/verify-desktop-network.mjs",
-    "test:desktop:login": "node scripts/verify-desktop-login.mjs",
-    "tts:setup": "node scripts/setup-local-tts.mjs",
-    "tts:build:qwen": "node scripts/build-qwen-tts.mjs",
-    "tts:build:qwen:cuda": "node scripts/build-qwen-tts-cuda.mjs",
-    "tts:setup:qwen": "node scripts/setup-qwen-tts.mjs"
+    "test:desktop:login": "node scripts/verify-desktop-login.mjs"
   },
   "dependencies": {
     "dotenv": "^18.0.4",
@@ -38,7 +34,6 @@
     "pdfjs-dist": "^6.3.289",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "sherpa-onnx-node": "1.13.8",
     "zod": "^4.6.5"
   },
   "devDependencies": {
