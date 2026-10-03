@@ -1,5 +1,22 @@
 # M0/M1/M2/M3 验收记录
 
+## 2026-10-03：科研TTS资料与测试输入准备
+
+- 实际打开ACL/AAAI会录、作者仓库、模型卡、推理代码与硬件基准；核验结论见 [research-tts.md](research-tts.md)。作者成绩均标明设备/条件，没有写成5080实测或本产品通过。
+- nvidia-smi只读查询：RTX5080，16303MiB，总使用2269MiB、利用率2%（单次快照）；未停止任何进程，未修改Conda/CUDA/驱动。
+- 新增八条原创中文短测例，长文复用已有readest-audition.txt；未生成声音，测例status为not-run。Node实际解析JSON并校验8条唯一id、非空文本/观察项与长文文件存在，全部通过；git diff --check通过，只有既有LF/CRLF提示。这不是语音质量或延迟测试。
+- GitHub元数据API调用出现WebException，未取得锁定SHA/精确实时社区计数。官方公开页面浏览成功；未把失败当成研究数据。
+- 本轮只改研究文档和测试输入，不重跑产品build/typecheck/lint/unit/e2e，也无UI功能变更。真实安装、声音、延迟、长文与GPU兼容性全部待验；未读私有Key/PDF、未请求付费API。
+
+## 2026-10-03：ChatGPT Pro／微信朗读接入研究（非功能交付）
+
+- 完整项目约定与需求已读取，开始时 Git 干净，HEAD c9684ab；本轮只更新四份研究/进度文档。
+- git diff --check 通过；仅出现既有 Windows LF/CRLF 提示，无空白错误。
+- 实际打开官方 Voice、SIWC Models and inference / app-server / token reference、腾讯云实时合成与计费、腾讯微信同声传译示例。公开资料支持范围及未确认项见 [研究说明](free-cloud-tts.md)。
+- 静态审计：doubaoTts.ts:126–174 聚合 PCM/WAV，provider.ts:112–133 聚合 MP3，api.ts:39–42 完整 blob()，playback.ts:34–44 创建 HTMLAudio；App.tsx:147 仅豆包预取并使用 prose 模式。已核对下一句预取的触发与上限，未测真实延迟。
+- 未执行新的 build/typecheck/lint/unit/e2e：运行代码未改，此轮只做资料与静态审计；既往测试不作为本轮新测试。没有界面修改，也未进行本轮浏览器交互验收。
+- 真实 Pro 语音集成、微信同款声音、腾讯 API 调用、真人听感、首音和高倍速连续性均未测。未读取凭证、调用收费接口或签署授权；不以模拟音频/客户端语音存在证明新能力已接入。
+
 ## 2026-10-03：Readest 桌面与上游源码准备
 
 - 用户反馈：上轮网页版长文“效果还不错”；未把该反馈扩大为全部多音字正确或桌面语音通过。

@@ -1,6 +1,33 @@
 # 免费云语音候选与试听
 
-## 最新反馈：排除 Edge 音色（2026-10-03）
+## 2026-10-03：回到本软件，核验 ChatGPT Pro 与微信朗读
+
+用户已试听 Readest 并认为效果不错；本次明确回到 PDF-AI-Teacher，探索能否利用现有 Pro 订阅或微信消息朗读，实现自然、快速、连续的中文朗读。本节覆盖此前仅凭 Edge 来源排除 Readest 的听感推断；真人反馈优先，但不代表两软件已融合。
+
+### ChatGPT Pro
+
+- [官方 Voice 说明](https://learn.chatgpt.com/docs/features/voice)确认 ChatGPT 桌面端存在 GPT-Live 语音并支持 Pro。产品内语音可用，不等于其声音引擎、识别功能或订阅权益可直接复制到外部阅读器。
+- 不能笼统说订阅完全不能用于第三方软件：[Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)允许合资格应用以自有 OAuth 授权调用公开 Responses 端点。当前公开支持路径未提供将 Pro 内置朗读权益用于 Audio Speech/Realtime 的说明。文字/图片推理授权不作为语音授权证据。
+- [SIWC 的 app-server 配置](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server)同样使用公开 Responses provider；[通用 app-server 文档](https://learn.chatgpt.com/docs/app-server)允许已有本机/开源应用继续原有登录方式，但本轮未找到当前、正式支持第三方 Pro 朗读的 voice RPC 文档。Codex 客户端已有 Voice，不足以证明可作为本软件的受支持 TTS 接口。没有探测未公开端点或读取其他应用凭证。
+- [Audio Speech API](https://developers.openai.com/api/docs/guides/text-to-speech)有正式流式生成能力，可在完整文件生成前开始播放；这是独立接口，不承诺与 ChatGPT 内置 Voice 同音色或享有相同套餐权益。
+
+### 微信与腾讯云
+
+- 未找到微信聊天消息朗读向 Windows 第三方软件开放同款音色/API 的官方证据。不能依据腾讯品牌相同就声称听感相同。
+- 腾讯官方[微信同声传译示例](https://github.com/Tencent/Face2FaceTranslator/blob/master/pages/index/index.js)使用 requirePlugin('WechatSI') 与 textToSpeech，是小程序插件形态，不是本机 Node 通用语音接口。
+- [腾讯云实时语音合成](https://cloud.tencent.com/document/product/1073/94308)是可接入的 WebSocket 流式服务。官方[计费页](https://cloud.tencent.com/document/product/1073/34112)列大模型音色 10 万字符、超自然大模型音色 2 万字符免费包，每账号一次、领取后 3 个月；不是永久免费。本轮没有领取、开通后付费或发起真实请求。
+
+### 本软件等待的已知原因与建议
+
+本机 PDF.js 已提取文字，默认 prose 模式本机过滤公式，无需先请求 GPT 识别。豆包 NDJSON/PCM 在 doubaoTts.ts 内完整聚合成 WAV；OpenAI 在 provider.ts 内完整聚合 MP3；HTTP 路由等待全部完成，前端 api.ts 再等待 response.blob()，playback.ts 最后创建 HTMLAudioElement。不是端到端流式。
+
+豆包仅在当前句开始播放后提前生成一句，下一句 Blob 到达后未提前准备播放器；3×播放缩短缓冲可覆盖的时间。OpenAI当前没有同样的预取。因此不能把等待一概归咎于语音模型，也不能以换引擎代替播放链路改进。
+
+建议先用腾讯官方可试听中文声音和同一原创长文做对照，再决定接入；播放侧采用真正增量传输/播放、按可播放时长管理有界预备缓冲、固定音色、按语义断句、公式继续跳过。PCM 流式变速还需保调实现与浏览器验证，不以简单切 WAV 或 AudioBufferSource.playbackRate 代替现有保调播放。
+
+验收需分开测点击到首音、供应商首帧、句间非预期静音、1×/2×/3×缓冲、停止与原位调速；实际声音质量由同文真人试听判断。本轮只核验资料与代码，未改播放功能、未调用真实云语音，也没有声称已接入或已消除卡顿。
+
+## 较早反馈：排除 Edge 音色（后续 Readest 实听反馈见上文，2026-10-03）
 
 用户已实际试过 Edge 并认为效果不满意，不再推荐其作为声音候选。Readest 的现行官方朗读说明明确：在线默认仍为 Edge TTS；因此换 Readest 不能保证改善该用户不喜欢的音色，上一轮推荐需要据此收回。
 
