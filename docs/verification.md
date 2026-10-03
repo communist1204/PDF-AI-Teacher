@@ -557,3 +557,25 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 |真实接口/听感|本轮未测真实ChatGPT/GPT教材解题、模型延迟、豆包云语音或真人听感；没有把mock或结构校验通过称为真实教学能力通过。|
 
 对应验收：A02/A03/A04/A08/A09/A18/A20本地与模拟回归通过；真实模型部分仍待用户复验。普通用户桌面已重新打开，见board-reading-running.json。保持原账号、模型、音色与私有配置；重试一次新截图问题，等待时可选其他段落朗读。开发启动npm run dev；正常使用双击原图标。停止前已发生的云请求可能仍有用量，手动重试不保证免费。
+
+## 2026-10-04：CosyVoice 3 实际安装、GPU合成和桌面播放
+
+环境：Windows、Node24.19.0/npm11.17.0、Python3.11；RTX5080 16GiB、驱动591.86、torch2.8.0+cu128。只在本项目安装虚拟环境、固定官方源与5.43GB所需权重；未改其他项目/训练进程/全局环境。前后端代理在独立worktree提交后合并。
+
+|检查|实际结果与边界|
+|---|---|
+|安装与依赖|权重大小/hash校验通过；pip check通过；真实CUDA张量计算返回2.0。旧Whisper的隔离构建缺pkg_resources曾失败，以项目venv内setuptools80.9.0和no-build-isolation解决。|
+|真实GPU合成|`py -3.11 -u scripts/verify-cosy-runtime.py`：首次ready10.767秒；39/57/319字首PCM1.712/1.001/1.016秒，音频8.84/12.72/62.32秒，生成4.411/5.930/28.537秒。模型torch已分配显存3313MiB（不代表进程总显存或峰值）。|
+|真实音频解码|三个MP3均由ffmpeg成功解码，非零PCM，峰值0.9712/0.9315/0.9854；头部近静音约206/100/266毫秒，不能用第一字节冒充真人听到的首音。见[本机数据](cosy-runtime-verification.json)。|
+|真实取消|`py -3.11 -u scripts/verify-cosy-runtime.py --cancel-only`：首token前取消、输出首块后取消均成功；中途取消排空116毫秒，同一worker随后首PCM1.010秒，无重新冷加载。见[取消记录](cosy-cancellation-verification.json)。|
+|最终unit/integration|`npm test`：37文件911/911通过；模型协议/HTTP使用mock，含流式返回、CPU拒绝、错误、迟到响应、取消不缓存partial、EOF后预取和旧owner回调隔离。|
+|Edge E2E|`npm run test:e2e`完整103/103通过；最后预取修正后代理独立worktree再跑Cosy+Doubao7/7。真实MSE解码自制正弦MP3验证未EOF先播、原位变速/暂停、断流、取消、缓存。未将这些模拟音频计为模型质量验收。|
+|静态检查和打包|typecheck、最终lint、build、desktop:package通过。初次lint误进入独立Readest第三方目录而失败，显式忽略`.external`和模型runtime后通过；未移除产品源码或测试。保留Vite大chunk警告。Python三个脚本py_compile通过。|
+|普通桌面smoke|`node scripts/verify-desktop.mjs --packaged`通过：真实PDF选区、演示KaTeX、窗口单实例、回环隔离、Windows加密、重启笔记；无云模型请求。|
+|真实GPU桌面|`node scripts/verify-desktop-cosy.mjs`通过。隔离无Key档案、真实已打包EXE，首次点击到playing11.129秒含加载；HTTP未结束先播；两句22.344秒+7.584秒在1×播放中无非起始waiting事件；句间交接22毫秒。前后句、0.25/3×原位变速、暂停续播、停止24毫秒、0页面错误。见[桌面记录](cosy-desktop-verification.json)。|
+|界面检查|已打开并目视检查[真实桌面](screenshots/cosy-real-desktop.png)、[已加载模型状态](screenshots/cosy-real-settings.png)，PDF、声音来源、播放器和状态可见。|
+|失败修复记录|首轮隔离进程未继承USERPROFILE导致ModelScope计算home失败；补充必要路径环境并将缓存限定项目后通过。真实桌面最初发现首句未EOF就预取下一句，被speech lane拒绝；改为EOF后预取，复测通过。中途取消最初触发上游零长度RTF日志除零；改为只在取消排空时丢弃哑块并保留清理，真实取消复测通过。最初桌面脚本在读完全部句子后点击禁用的“上一句”失败，改为先重播再检查前后句，未修改产品来迎合断言。|
+|用户配置|通过正常桌面设置接口保存cosy；原账号模式、文字/视觉模型、云Key存在状态保持一致，没有读出/打印Key。|
+|未测|真人音质、长教材多音字/语义发音、与OpenAI/豆包盲听、20分钟真人学习；没有测试真实云服务。固定示例音色不表示声音商用权已核实。|
+
+当前A06/A07/A18音频的本机实测与自动化部分通过，真人听感仍待用户。运行与复现见[CosyVoice说明](cosyvoice-setup.md)。首次加载后约1–2秒首块是本机小样本结果；高倍速、GPU竞争或其他文本可能等待更久，不承诺全场景不卡顿。

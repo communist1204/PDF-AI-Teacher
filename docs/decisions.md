@@ -351,3 +351,12 @@ PDF 单换行视为物理排版，中文相邻不插空格、拉丁文字保留�
 - 按已安装openai 7.23.0类型与官方[Responses流式指南](https://developers.openai.com/api/docs/guides/streaming-responses)、[SDK事件示例](https://developers.openai.com/api/reference/typescript/resources/beta/subresources/responses/methods/create)、[Sign in with ChatGPT模型推理规范](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)核验。ChatGPT路径此前只取response.completed.output；现在同时收集output_item/text/content_part的标准事件，完成快照优先、空完成快照才回补事件文本，避免漏读或重复拼接。只接受有assistant message元数据的最终文本，排除phase=commentary及analysis/reasoning；仍要求response.completed，失败/中断/不完整输出不生成板书。累计2MiB UTF-8/有界条目限制，原schema、来源白名单不放松。
 - 空输出、拒答、超限、JSON错误分别提示；服务端结构校验降级warning在前端显示为失败卡，可手动重试，不伪装为成功教案。等待计时仅表示经过的墙钟时间，不声称已知模型推理阶段或预计完成时间。失败卡/待处理快照仅在当前窗口内保留，重启不自动重发。
 - 本轮不改模型、推理强度、授权路径、声音供应商、API Key或GPU设置，不读取凭证/真实响应内容来诊断，也不自动发起收费测试。真实上游等待可能仍存在，需要用户在自己的账号中手动复验。
+
+## 2026-10-04：CosyVoice 3 本机 GPU 与真正流式朗读
+
+- 用户明确授权新增CosyVoice3试听，替代此前“只保留在线声音”的产品范围，但不恢复已否定的三个引擎。使用[官方源码固定版本](https://github.com/QwenAudio/CosyVoice/tree/074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc)与[官方0.5B权重固定版本](https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512/tree/29e01c4e8d000f4bcd70751be16fa94bf3d85a18)，不把论文其他规模或官方服务器延迟当成本机成绩。参考音色来自官方demo，固定缓存，不开放未经验证的音色克隆。
+- 独立`cosy-tts-runtime/venv`：Python3.11、torch/torchaudio2.8.0+cu128适配RTX5080；fp16真实CUDA张量与合成均验证。ONNX CPU仅在加载时提取一次参考特征；不退回CPU合成。安装器固定源码/子模块/模型revision，校验权重SHA256；lock文件及脚本记录复现方式，完整说明见cosyvoice-setup.md。
+- Node仅向自己创建的Python进程发送已验证正文与requestId，不传API Key；本机流经原Origin/Host、会话、CSRF、预算与speech版本校验。子进程继承必要Windows环境及USERPROFILE路径信息（ModelScope即使已有cache变量也会先计算默认home），缓存显式在本项目；不读取用户账号token/cookie。模型运行强制offline，不自动下载其他模型，不调用云TTS。stderr仅排空，不写源文日志。
+- Python单个常驻GPUworker串行合成，通过stdio输出增量MP3。取消令牌在LLM token间检查，排空上游以清理UUID缓存；上游线程异常显式结束等待，异常污染时退出worker。取消哑块不编码，不给用户播放；避免上游零长度日志除零。每次重设首块hop，避免上游跨请求逐渐增加首音等待。
+- 前端首句使用MSE+同一HTMLAudioElement流式播放，语速使用playbackRate/preservesPitch原位变更。完整成功音频才可缓存；断流错误不得冒充自然结束。单句最多8MiB服务器音频、前端有界缓冲与取消；当前流EOF后才预取下一句，避免与同一speech任务通道冲突。停播、换目标、换书、迟到EOF均保留原有版本隔离。
+- 首次加载与热态首音分开记录；声音内部静音、拼句交接与网络/模型等待分开描述。1×连续测试不推广为3×或所有教材无停顿。没有真人主观试听或同文盲听，不能宣称比豆包/OpenAI好。

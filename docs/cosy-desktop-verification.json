@@ -1,0 +1,94 @@
+{
+  "date": "2026-10-03T16:56:36.270Z",
+  "kind": "real-packaged-Electron-local-GPU",
+  "coldClickToPlayingMs": 11129,
+  "playingBeforeFirstRequestDone": true,
+  "firstPlayingAt": 1791046564178,
+  "requestFinishedAt": [
+    {
+      "at": 1791046574840,
+      "characters": 30
+    },
+    {
+      "at": 1791046595116,
+      "stream": "1",
+      "characters": 102
+    },
+    {
+      "at": 1791046595128,
+      "characters": 30
+    },
+    {
+      "at": 1791046595526,
+      "stream": "1",
+      "characters": 102
+    },
+    {
+      "at": 1791046595538,
+      "characters": 30
+    },
+    {
+      "at": 1791046595959,
+      "characters": 30
+    }
+  ],
+  "midAudioWaits": [],
+  "events": [
+    {
+      "type": "waiting",
+      "index": 0,
+      "at": 1791046564129,
+      "position": 0
+    },
+    {
+      "type": "playing",
+      "index": 0,
+      "at": 1791046564178,
+      "position": 0
+    },
+    {
+      "type": "pause",
+      "index": 0,
+      "at": 1791046586562,
+      "position": 22.344
+    },
+    {
+      "type": "ended",
+      "index": 0,
+      "at": 1791046586562,
+      "position": 22.344
+    },
+    {
+      "type": "waiting",
+      "index": 1,
+      "at": 1791046586568,
+      "position": 0
+    },
+    {
+      "type": "playing",
+      "index": 1,
+      "at": 1791046586584,
+      "position": 0
+    },
+    {
+      "type": "pause",
+      "index": 1,
+      "at": 1791046594202,
+      "position": 7.584
+    },
+    {
+      "type": "ended",
+      "index": 1,
+      "at": 1791046594202,
+      "position": 7.584
+    }
+  ],
+  "sentenceCount": 2,
+  "rateChangesPreserveAudio": true,
+  "pauseResume": true,
+  "previousSentence": true,
+  "stopMs": 24,
+  "pageErrors": [],
+  "cloudRequests": false,
+  "humanListening": "未测；这里只验证真实合成、播放事件与调度"
+}

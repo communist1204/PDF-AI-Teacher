@@ -95,7 +95,7 @@ export class CosyTtsProvider {
     this.starting = new Promise<void>((resolveReady, reject) => {
       this.startupResolve = resolveReady; this.startupReject = reject;
       try {
-        const child = (this.options.spawn ?? spawn)(resolve(this.runtimeDir, 'venv/Scripts/python.exe'), ['-u', this.workerPath, '--runtime-dir', this.runtimeDir], { cwd: this.runtimeDir, windowsHide: true, stdio: 'pipe', env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => /^(path|systemroot|windir|temp|tmp|comspec|pathext)$/i.test(name))), HF_HOME: resolve(this.runtimeDir, 'cache'), PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1' } });
+        const child = (this.options.spawn ?? spawn)(resolve(this.runtimeDir, 'venv/Scripts/python.exe'), ['-u', this.workerPath, '--runtime-dir', this.runtimeDir], { cwd: this.runtimeDir, windowsHide: true, stdio: 'pipe', env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => /^(path|systemroot|windir|temp|tmp|comspec|pathext|userprofile)$/i.test(name))), HF_HOME: resolve(this.runtimeDir, 'cache'), PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1' } });
         this.child = child;
         child.stdout.setEncoding('utf8');
         child.stdout.on('data', (data: string) => {

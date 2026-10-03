@@ -21,3 +21,5 @@ models/
 .external/
 local-tts-runtime/
 qwen-tts-runtime/
+cosy-tts-runtime/
+__pycache__/
