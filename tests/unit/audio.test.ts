@@ -222,56 +222,67 @@ describe('AudioCoordinator (mock playback; no hardware audio claims)', () => {
 });
 // These adapter checks use fake browser objects, never a real speaker.
 describe('browser adapter capability boundaries', () => {
-  it('rejects remote-only voices instead of silently sending demo text off-device', async () => {
-    vi.useFakeTimers();
-    const events = new EventTarget();
-    const synth = {
-      getVoices: () => [{ localService: false, lang: 'zh-CN', name: 'remote' }],
-      addEventListener: events.addEventListener.bind(events),
-      removeEventListener: events.removeEventListener.bind(events),
-      speak: vi.fn(), resume: vi.fn(), pause: vi.fn(), cancel: vi.fn(),
-    };
-    vi.stubGlobal('window', { speechSynthesis: synth });
-    vi.stubGlobal('SpeechSynthesisUtterance', class {});
+  function blockSystemSpeech() {
+    const access = vi.fn(() => { throw new Error('System speech must not be accessed'); });
+    vi.stubGlobal('window', Object.defineProperty({}, 'speechSynthesis', { get: access }));
+    vi.stubGlobal('SpeechSynthesisUtterance', access);
+    return access;
+  }
+
+  it('rejects the retired demo voice immediately without accessing system synthesis', async () => {
+    const systemAccess = blockSystemSpeech();
+    const onStarted = vi.fn(); const onEnded = vi.fn(); const onError = vi.fn();
     try {
       const { browserPlaybackAdapter } = await import('../../apps/web/src/features/voice/playback');
-      const pending = browserPlaybackAdapter.create({ mode: 'demo', text: '本机测试', rate: 1, volume: 1, signal: new AbortController().signal, onStarted: vi.fn(), onEnded: vi.fn(), onError: vi.fn() });
-      const assertion = expect(pending).rejects.toThrow('未找到可用的本机语音');
-      await vi.advanceTimersByTimeAsync(1800);
-      await assertion;
-      expect(synth.speak).not.toHaveBeenCalled();
-    } finally { vi.unstubAllGlobals(); vi.useRealTimers(); }
+      await expect(browserPlaybackAdapter.create({ mode: 'demo', text: '本机测试', rate: 1, volume: 1, signal: new AbortController().signal, onStarted, onEnded, onError }))
+        .rejects.toThrow('系统语音已移除，请在声音设置中配置在线朗读。');
+      expect(systemAccess).not.toHaveBeenCalled();
+      expect(onStarted).not.toHaveBeenCalled(); expect(onEnded).not.toHaveBeenCalled(); expect(onError).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
   });
 
-  it('marks demo speaking only after start and clears start timeout even for immediate events', async () => {
-    vi.useFakeTimers();
-    const events = new EventTarget();
-    const local = { localService: true, lang: 'zh-CN', name: 'local' };
-    const synth = {
-      getVoices: () => [local],
-      addEventListener: events.addEventListener.bind(events),
-      removeEventListener: events.removeEventListener.bind(events),
-      speak: vi.fn((utterance: { onstart?: () => void }) => utterance.onstart?.()),
-      resume: vi.fn(), pause: vi.fn(), cancel: vi.fn(),
-    };
-    vi.stubGlobal('window', { speechSynthesis: synth });
-    vi.stubGlobal('SpeechSynthesisUtterance', class { constructor(public text: string) {} });
+  it('reports the same retirement error even when no system speech API exists', async () => {
+    vi.stubGlobal('window', undefined); vi.stubGlobal('SpeechSynthesisUtterance', undefined);
     try {
       const { browserPlaybackAdapter } = await import('../../apps/web/src/features/voice/playback');
-      const onStarted = vi.fn();
-      const onError = vi.fn();
-      const handle = await browserPlaybackAdapter.create({ mode: 'demo', text: '本机测试', rate: 1, volume: 1, signal: new AbortController().signal, onStarted, onEnded: vi.fn(), onError });
-      expect(onStarted).not.toHaveBeenCalled();
-      await handle.play();
-      expect(onStarted).toHaveBeenCalledOnce();
-      await vi.advanceTimersByTimeAsync(9000);
-      expect(onError).not.toHaveBeenCalled();
-      handle.pause();
-      expect(synth.pause).toHaveBeenCalledOnce();
-      handle.stop();
-      handle.dispose();
-      expect(synth.cancel).toHaveBeenCalledOnce();
-    } finally { vi.unstubAllGlobals(); vi.useRealTimers(); }
+      await expect(browserPlaybackAdapter.create({ mode: 'demo', text: '本机测试', rate: 1, volume: 1, signal: new AbortController().signal, onStarted: vi.fn(), onEnded: vi.fn(), onError: vi.fn() }))
+        .rejects.toThrow('系统语音已移除，请在声音设置中配置在线朗读。');
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('rejects missing cloud audio without falling back to system synthesis', async () => {
+    const systemAccess = blockSystemSpeech(); const onStarted = vi.fn();
+    try {
+      const { browserPlaybackAdapter } = await import('../../apps/web/src/features/voice/playback');
+      await expect(browserPlaybackAdapter.create({ mode: 'live', text: '云端测试', rate: 1, volume: 1, signal: new AbortController().signal, onStarted, onEnded: vi.fn(), onError: vi.fn() }))
+        .rejects.toThrow('未收到可播放的语音文件');
+      expect(systemAccess).not.toHaveBeenCalled(); expect(onStarted).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('keeps cloud play rejection and media errors visible without a system-voice fallback', async () => {
+    const systemAccess = blockSystemSpeech(); const onStarted = vi.fn(); const onError = vi.fn();
+    const rejection = new DOMException('mock browser playback rejection', 'NotAllowedError');
+    const play = vi.fn(async () => { throw rejection; }); const pause = vi.fn();
+    const instances: AudioMock[] = [];
+    class AudioMock {
+      playbackRate = 1; preservesPitch = false; volume = 1;
+      onplaying: (() => void) | null = null; onended: (() => void) | null = null; onerror: (() => void) | null = null;
+      constructor() { instances.push(this); }
+      play = play; pause = pause; load() {} removeAttribute() {}
+    }
+    vi.stubGlobal('Audio', AudioMock);
+    let handle: PlaybackHandle | undefined;
+    try {
+      const { browserPlaybackAdapter } = await import('../../apps/web/src/features/voice/playback');
+      handle = await browserPlaybackAdapter.create({ mode: 'live', text: '云端测试', blob: new Blob(['mock audio']), rate: 1, volume: 1, signal: new AbortController().signal, onStarted, onEnded: vi.fn(), onError });
+      await expect(handle.play()).rejects.toBe(rejection);
+      expect(play).toHaveBeenCalledOnce(); expect(onStarted).not.toHaveBeenCalled();
+      instances[0].onerror?.();
+      expect(onError).toHaveBeenCalledWith('语音文件无法播放，请检查浏览器音频权限或重试。');
+      expect(systemAccess).not.toHaveBeenCalled();
+      handle.dispose(); expect(pause).toHaveBeenCalledOnce(); expect(instances[0].onerror).toBeNull();
+    } finally { handle?.dispose(); vi.unstubAllGlobals(); }
   });
 });
 
@@ -748,22 +759,21 @@ describe('slow speech and rate changes (simulated playback)', () => {
     expect(h.audio.getBookmark()).toEqual(bookmark); expect(h.audible()).toBe(0); h.audio.dispose();
   });
 
-  it.each([0.25, 3])('passes %sx to a system utterance and restarts when changed', async rate => {
-    const events = new EventTarget(); const spoken: Array<{ text: string; rate: number; onstart?: () => void }> = [];
-    const synth = { getVoices: () => [{ localService: true, lang: 'zh-CN', name: 'local' }],
-      addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events),
-      speak: vi.fn((value: (typeof spoken)[number]) => { spoken.push(value); value.onstart?.(); }), resume: vi.fn(), pause: vi.fn(), cancel: vi.fn(),
-    };
-    vi.stubGlobal('window', { speechSynthesis: synth });
-    vi.stubGlobal('SpeechSynthesisUtterance', class { constructor(public text: string) {} });
-    const audio = new AudioCoordinator({ requestSpeech: vi.fn(), onChange: vi.fn(), onError: vi.fn() });
+  it.each([0.25, 3])('keeps the reading bookmark and stays silent for the retired demo voice at %sx', async rate => {
+    const systemAccess = vi.fn(() => { throw new Error('System speech must not be accessed'); });
+    vi.stubGlobal('window', Object.defineProperty({}, 'speechSynthesis', { get: systemAccess }));
+    vi.stubGlobal('SpeechSynthesisUtterance', systemAccess);
+    const requestSpeech = vi.fn(); const onError = vi.fn();
+    const audio = new AudioCoordinator({ requestSpeech, onChange: vi.fn(), onError });
     try {
       audio.load(target, envelope, 'demo'); audio.setRate(rate); await audio.play();
-      expect(spoken[0]).toMatchObject({ text: '第一句。', rate });
-      audio.setRate(0.35); await tick(); await tick();
-      expect(synth.cancel).toHaveBeenCalledOnce();
-      expect(spoken[1]).toMatchObject({ text: '第一句。', rate: 0.35 });
-      expect(spoken[1]).not.toBe(spoken[0]); expect(audio.getSnapshot().sentenceIndex).toBe(0);
+      expect(audio.getSnapshot()).toMatchObject({ status: 'silent', rate, sentenceIndex: 0, hasBookmark: true, error: '系统语音已移除，请在声音设置中配置在线朗读。' });
+      const bookmark = audio.getBookmark();
+      expect(onError).toHaveBeenCalledOnce(); expect(requestSpeech).not.toHaveBeenCalled();
+      audio.setRate(0.35); await tick();
+      expect(audio.getSnapshot()).toMatchObject({ status: 'silent', rate: 0.35, sentenceIndex: 0, hasBookmark: true });
+      expect(audio.getBookmark()).toEqual(bookmark); expect(requestSpeech).not.toHaveBeenCalled();
+      expect(systemAccess).not.toHaveBeenCalled();
     } finally { audio.dispose(); vi.unstubAllGlobals(); }
   });
 });
