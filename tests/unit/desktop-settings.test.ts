@@ -2,6 +2,8 @@
 import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {SettingsVault,defaultPreferences,SaveSettingsSchema,serverConfigFor} from '../../apps/desktop/settings';
+import { COSY_TTS_VOICE_IDS, DEFAULT_COSY_TTS_VOICE } from '../../packages/shared/cosySpeech';
+import { readConfig } from '../../apps/server/src/config';
 const root=resolve('test-results');
 const cipher={available:()=>true,encrypt:(value:string)=>Buffer.from('TEST-CIPHER:'+Buffer.from(value).toString('base64')),decrypt:(bytes:Buffer)=>{if(!bytes.toString().startsWith('TEST-CIPHER:'))throw Error('Bad encrypted file');return Buffer.from(bytes.toString().slice(12),'base64').toString();}};
 async function temporary(run:(file:string)=>Promise<void>){await import('node:fs/promises').then(fs=>fs.mkdir(root,{recursive:true}));const directory=await mkdtemp(join(root,'vault-'));if(!directory.startsWith(root+'\\')&&!directory.startsWith(root+'/'))throw Error('Unsafe test path');try{await run(join(directory,'private.bin'));}finally{await rm(directory,{recursive:true,force:true});}}
@@ -94,4 +96,33 @@ describe('active speech settings only',()=>{
  it.each(['local','qwen','system'])('rejects selecting retired %s from the current UI',ttsEngine=>{expect(SaveSettingsSchema.safeParse({...defaultPreferences,ttsEngine}).success).toBe(false);});
  it.each(['none','doubao','openai'])('allows explicit %s without selecting a fallback',ttsEngine=>{expect(SaveSettingsSchema.parse({...defaultPreferences,ttsEngine}).ttsEngine).toBe(ttsEngine);});
  it('defaults to silence even when old keys remain available',()=>{expect(defaultPreferences.ttsEngine).toBe('none');expect(serverConfigFor({...defaultPreferences},'fake-openai',4319,'fake-doubao').ttsEngine).toBe('none');});
+});
+
+describe('CosyVoice independent voice settings',()=>{
+ it('allows only six voices in preferences and server environment',()=>{
+  for(const cosyTtsVoice of COSY_TTS_VOICE_IDS){
+   const preferences=SaveSettingsSchema.parse({...defaultPreferences,ttsEngine:'cosy',cosyTtsVoice});
+   expect(preferences.cosyTtsVoice).toBe(cosyTtsVoice);
+   expect(serverConfigFor(preferences,'',4319).cosyTtsVoice).toBe(cosyTtsVoice);
+  }
+  for(const invalid of ['unknown','../reference.wav','https://voice.example/ref.wav']){
+   expect(SaveSettingsSchema.safeParse({...defaultPreferences,cosyTtsVoice:invalid}).success).toBe(false);
+   expect(()=>readConfig({COSY_TTS_VOICE:invalid})).toThrow('CosyVoice');
+  }
+  expect(readConfig({}).cosyTtsVoice).toBe(DEFAULT_COSY_TTS_VOICE);
+ });
+ it('migrates the original fixed voice and saves a new voice while preserving both secrets and account state',async()=>temporary(async file=>{
+  const vault=new SettingsVault(file,cipher);await vault.load();
+  await vault.update({preferences:{...defaultPreferences,ttsEngine:'cosy',mode:'chatgpt',chatModel:'expert-model'},apiKey:'fake-openai-existing',doubaoApiKey:'fake-doubao-existing',auth:{testOnly:true}});
+  const old=JSON.parse(cipher.decrypt(await readFile(file)));delete old.preferences.cosyTtsVoice;
+  const oldBytes=cipher.encrypt(JSON.stringify(old));await writeFile(file,oldBytes);
+  const migrated=new SettingsVault(file,cipher);await migrated.load();
+  expect(migrated.get().preferences.cosyTtsVoice).toBe('cosy_default');expect(await readFile(file)).toEqual(oldBytes);
+  const preferences=SaveSettingsSchema.parse({...migrated.get().preferences,cosyTtsVoice:'cosy_female_2'});
+  await migrated.update({preferences});
+  const restored=new SettingsVault(file,cipher);await restored.load();
+  expect(restored.get()).toMatchObject({hostId:old.hostId,apiKey:'fake-openai-existing',doubaoApiKey:'fake-doubao-existing',auth:{testOnly:true},preferences:{ttsEngine:'cosy',cosyTtsVoice:'cosy_female_2',mode:'chatgpt',chatModel:'expert-model',ttsVoice:defaultPreferences.ttsVoice,doubaoTtsVoice:defaultPreferences.doubaoTtsVoice}});
+  const bytes=await readFile(file);expect(bytes.includes(Buffer.from('fake-openai-existing'))).toBe(false);expect(bytes.includes(Buffer.from('fake-doubao-existing'))).toBe(false);
+  expect(serverConfigFor(restored.get().preferences,'',4319)).toMatchObject({cosyTtsVoice:'cosy_female_2',ttsEngine:'cosy',apiKey:'',doubaoApiKey:''});
+ }));
 });

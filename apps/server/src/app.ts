@@ -182,7 +182,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
       instructionsSupported: config.ttsInstructionsSupported,
     }, maxRequests: config.maxRequests };
     if(usingDoubaoTts) body.speech={engine:'doubao',ready:doubaoReady,voice:config.doubaoTtsVoice??'',style:'豆包中文朗读；额度与权限需在官方控制台确认',instructionsSupported:true};
-    if (usingCosyTts) body.speech = { engine: 'cosy', ready: !!cosyProvider?.ready(), status: cosyProvider?.status() ?? 'missing', streaming: true, device: 'cuda', voice: DEFAULT_COSY_TTS_VOICE, style: '本地 CosyVoice 3 · 固定参考音色 · 首次使用加载模型', instructionsSupported: false };
+    if (usingCosyTts) body.speech = { engine: 'cosy', ready: !!cosyProvider?.ready(), status: cosyProvider?.status() ?? 'missing', streaming: true, device: 'cuda', voice: config.cosyTtsVoice ?? DEFAULT_COSY_TTS_VOICE, style: '本地 CosyVoice 3 · 可选参考音色 · 首次使用加载模型', instructionsSupported: false };
     if (speechEngine === 'none') body.speech = { engine: 'none', ready: false, voice: '', style: '朗读已关闭，请选择并配置可用语音', instructionsSupported: false };
     res.json({ ...body, speechSession: { generationId: Math.max(session.speech.generation, session.speech.cancelledThrough), contextRevision: session.speech.revision } });
   });
@@ -285,8 +285,10 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     const session = requireMutation(req);
     const lane = taskLaneFor(req, session);
     const parsed = TtsRequestSchema.safeParse(req.body);
-    if (!parsed.success) throw new HttpError(400, 'invalid_request', `朗读文本不能为空或超过 1600 字，语速范围为 ${MIN_SPEECH_RATE} 到 ${MAX_SPEECH_RATE}。`);
+    if (!parsed.success) throw new HttpError(400, 'invalid_request', `请选择有效音色；朗读文本不能为空或超过 1600 字，语速范围为 ${MIN_SPEECH_RATE} 到 ${MAX_SPEECH_RATE}。`);
     const request = parsed.data;
+    if (request.cosyVoice !== undefined && !usingCosyTts) throw new HttpError(400, 'cosy_voice_engine', 'CosyVoice 音色试听仅支持当前已配置的 CosyVoice 朗读方式，请先切换并应用设置。');
+    const cosyVoice = request.cosyVoice ?? config.cosyTtsVoice ?? DEFAULT_COSY_TTS_VOICE;
     checkFresh(lane, request);
     setEnvelope(res, request);
     if (speechEngine === 'none') throw new HttpError(503, 'speech_not_configured', '朗读未配置。Qwen、Kokoro 和系统声音已移除，请在设置中选择并配置可用语音；未自动切换服务。');
@@ -295,7 +297,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     if (usingDoubaoTts && !doubaoReady) throw new HttpError(503, 'doubao_not_configured', '豆包语音尚未配置。请在声音设置中填写本机豆包 API Key，并先到官方控制台确认试用额度；没有改用其他服务。');
     if (!usingCosyTts && !usingDoubaoTts && (!config.apiKey || !config.ttsModel || !provider)) throw new HttpError(503, 'not_configured', usingChatGpt ? 'ChatGPT 登录用于解题。OpenAI 朗读还需要独立语音 API Key；未自动切换语音服务。' : 'TTS 模型或 API Key 未配置；未自动切换语音服务。');
     const contentType = usingDoubaoTts ? 'audio/wav' : 'audio/mpeg';
-    const cacheKey = cache.key(session.id, usingCosyTts ? ['cosy', ttsModel, DEFAULT_COSY_TTS_VOICE, request.text] : usingDoubaoTts ? ['doubao',ttsModel,config.doubaoTtsVoice,config.doubaoTtsInstructions,request.text] : [config.baseUrl, speechRequest(config, request.text, request.speed)]);
+    const cacheKey = cache.key(session.id, usingCosyTts ? ['cosy', ttsModel, cosyVoice, request.text] : usingDoubaoTts ? ['doubao',ttsModel,config.doubaoTtsVoice,config.doubaoTtsInstructions,request.text] : [config.baseUrl, speechRequest(config, request.text, request.speed)]);
     const cached = cache.get(cacheKey);
     if (cached) { res.set('x-audio-cache', 'hit').type(contentType).send(cached); return; }
     requireIdle(lane);
@@ -313,7 +315,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
           if (!res.headersSent) res.set({ 'x-audio-streaming': '1', 'x-audio-cache': 'miss', 'x-request-id': usage.requestId }).type(contentType);
           res.write(audio);
         } : undefined;
-        return usingCosyTts ? cosyProvider!.speak(request.text, request.speed, signal, onAudio) : usingDoubaoTts ? doubaoProvider!.speak(request.text,request.speed,signal,session.id+(lane === session ? '-' : '-speech-')+request.contextRevision+'-'+request.generationId) : provider!.speak(request.text, request.speed, signal);
+        return usingCosyTts ? cosyProvider!.speak(request.text, request.speed, signal, onAudio, cosyVoice) : usingDoubaoTts ? doubaoProvider!.speak(request.text,request.speed,signal,session.id+(lane === session ? '-' : '-speech-')+request.contextRevision+'-'+request.generationId) : provider!.speak(request.text, request.speed, signal);
       }, usingCosyTts ? 310000 : usingDoubaoTts ? 125000 : config.requestTimeoutMs, lane);
       if (!result.audio.length || result.audio.length > 8 * 1024 * 1024) throw new HttpError(502, 'invalid_audio', '语音返回为空或超出大小限制，未播放。');
       if (streaming && streamedBytes > 0 && streamedBytes !== result.audio.length) throw new HttpError(502, 'invalid_audio', '本地语音流不完整，未缓存。');

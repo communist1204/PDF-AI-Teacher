@@ -1,5 +1,6 @@
 import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_VOICES } from '../../packages/shared/doubaoSpeech';
 import { normalizeSpeechEngine } from '../../packages/shared/localSpeech';
+import { COSY_TTS_VOICE_IDS, DEFAULT_COSY_TTS_VOICE } from '../../packages/shared/cosySpeech';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -10,6 +11,7 @@ import type { DesktopPreferences } from '../../packages/shared/desktop';
 export const PreferenceSchema = z.object({
   mode: z.enum(['demo','chatgpt','api']),
   ttsEngine:z.enum(['none','cosy','doubao','openai']).default('none'),
+  cosyTtsVoice:z.enum(COSY_TTS_VOICE_IDS).default(DEFAULT_COSY_TTS_VOICE),
   doubaoTtsVoice:z.string().refine(value=>DOUBAO_TTS_VOICES.some(voice=>voice.id===value)).default(DEFAULT_DOUBAO_TTS_VOICE),
   doubaoTtsInstructions:z.string().trim().max(1000).refine(value=>!value.includes("\0")).default(DEFAULT_DOUBAO_TTS_INSTRUCTIONS),
   chatModel:z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9._:-]+$/),
@@ -20,7 +22,7 @@ export const PreferenceSchema = z.object({
   ttsInstructions:z.string().trim().max(3000),
 }).strict();
 export const SaveSettingsSchema = PreferenceSchema.extend({apiKey:z.string().trim().max(500).optional(),clearApiKey:z.boolean().optional(),doubaoApiKey:z.string().trim().max(500).optional(),clearDoubaoApiKey:z.boolean().optional()}).strict();
-export const defaultPreferences:DesktopPreferences = {ttsEngine:'none',doubaoTtsVoice:DEFAULT_DOUBAO_TTS_VOICE,doubaoTtsInstructions:DEFAULT_DOUBAO_TTS_INSTRUCTIONS,mode:'demo',chatModel:'gpt-6-astra',visionModel:'gpt-6-astra',reasoningEffort:'xhigh',ttsModel:'gpt-4o-mini-tts',ttsVoice:'marin',ttsInstructions:'像面对面陪读的中文老师，温和自然，按句意停顿，避免播音腔。'};
+export const defaultPreferences:DesktopPreferences = {ttsEngine:'none',cosyTtsVoice:DEFAULT_COSY_TTS_VOICE,doubaoTtsVoice:DEFAULT_DOUBAO_TTS_VOICE,doubaoTtsInstructions:DEFAULT_DOUBAO_TTS_INSTRUCTIONS,mode:'demo',chatModel:'gpt-6-astra',visionModel:'gpt-6-astra',reasoningEffort:'xhigh',ttsModel:'gpt-4o-mini-tts',ttsVoice:'marin',ttsInstructions:'像面对面陪读的中文老师，温和自然，按句意停顿，避免播音腔。'};
 export interface PrivateSettings {version:1;hostId:string;port:number;preferences:DesktopPreferences;apiKey:string;doubaoApiKey:string;auth:unknown|null}
 export interface Cipher {available():boolean;encrypt(value:string):Buffer;decrypt(value:Buffer):string}
 export class SettingsVault {
@@ -55,5 +57,5 @@ export class SettingsVault {
 }
 
 export function serverConfigFor(preferences:DesktopPreferences,apiKey:string,port:number,doubaoApiKey = ''){
- return readConfig({DOUBAO_TTS_API_KEY:doubaoApiKey,DOUBAO_TTS_VOICE:preferences.doubaoTtsVoice,DOUBAO_TTS_INSTRUCTIONS:preferences.doubaoTtsInstructions,TTS_ENGINE:normalizeSpeechEngine(preferences.ttsEngine),APP_PORT:String(port),DEMO_MODE:String(preferences.mode==='demo'),OPENAI_API_KEY:apiKey,CHAT_MODEL:preferences.chatModel,VISION_MODEL:preferences.visionModel,CHAT_REASONING_EFFORT:preferences.reasoningEffort,VISION_REASONING_EFFORT:preferences.reasoningEffort,TTS_MODEL:preferences.ttsModel,TTS_VOICE:preferences.ttsVoice,TTS_INSTRUCTIONS:preferences.ttsInstructions,TEACHING_MAX_OUTPUT_TOKENS:'32000',TEACHING_TIMEOUT_MS:'300000'});
+ return readConfig({COSY_TTS_VOICE:preferences.cosyTtsVoice,DOUBAO_TTS_API_KEY:doubaoApiKey,DOUBAO_TTS_VOICE:preferences.doubaoTtsVoice,DOUBAO_TTS_INSTRUCTIONS:preferences.doubaoTtsInstructions,TTS_ENGINE:normalizeSpeechEngine(preferences.ttsEngine),APP_PORT:String(port),DEMO_MODE:String(preferences.mode==='demo'),OPENAI_API_KEY:apiKey,CHAT_MODEL:preferences.chatModel,VISION_MODEL:preferences.visionModel,CHAT_REASONING_EFFORT:preferences.reasoningEffort,VISION_REASONING_EFFORT:preferences.reasoningEffort,TTS_MODEL:preferences.ttsModel,TTS_VOICE:preferences.ttsVoice,TTS_INSTRUCTIONS:preferences.ttsInstructions,TEACHING_MAX_OUTPUT_TOKENS:'32000',TEACHING_TIMEOUT_MS:'300000'});
 }

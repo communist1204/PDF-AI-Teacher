@@ -1,5 +1,7 @@
 import type { SpeechEngine } from './localSpeech';
 
+import type { CosyVoiceId } from './cosySpeech';
+
 export type DesktopMode = 'demo' | 'chatgpt' | 'api';
 
 /** Preferences contain no credential material. Persisted by the desktop main process. */
@@ -9,6 +11,7 @@ export interface DesktopPreferences {
   visionModel: string;
   reasoningEffort: string;
   ttsEngine?: SpeechEngine;
+  cosyTtsVoice?: CosyVoiceId;
   localTtsVoice?: string;
   qwenTtsVoice?: string;
   qwenTtsDevice?: 'cpu' | 'cuda';

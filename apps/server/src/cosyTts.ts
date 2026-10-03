@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { COSY_TTS_MODEL, DEFAULT_COSY_TTS_VOICE, type CosySpeechStatus } from '../../../packages/shared/cosySpeech';
+import { COSY_TTS_MODEL, DEFAULT_COSY_TTS_VOICE, isCosyVoice, type CosySpeechStatus, type CosyVoiceId } from '../../../packages/shared/cosySpeech';
 import { HttpError } from './errors';
 
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
@@ -13,6 +13,7 @@ type Pending = { chunks: Buffer[]; bytes: number; onAudio?: (audio: Buffer) => v
 const cancelled = () => new HttpError(409, 'cosy_cancelled', '已取消本地 CosyVoice 朗读。');
 const failed = () => new HttpError(503, 'cosy_worker_failed', 'CosyVoice 本地进程未完成合成，请检查本项目语音环境后重试；没有切换到 CPU 或云服务。');
 function workerError(code: unknown): HttpError {
+  if (code === 'voice_unavailable') return new HttpError(503, 'cosy_voice_unavailable', '当前 CosyVoice 音色参考文件未安装完整，请重新安装本项目音色包或选择其他音色。');
   if (typeof code === 'string' && /cuda|gpu|memory/i.test(code)) return new HttpError(503, 'cosy_gpu_unavailable', 'CosyVoice 无法使用本机显卡或显存不足，请关闭不需要的本软件朗读任务后重试；没有切换到 CPU。');
   if (code === 'cancelled') return cancelled();
   return failed();
@@ -124,7 +125,8 @@ export class CosyTtsProvider {
     void loading.catch(() => { if (this.starting === loading) this.starting = undefined; });
     return loading;
   }
-  async speak(text: string, _speed: number, signal: AbortSignal, onAudio?: (audio: Buffer) => void): Promise<CosyTtsResult> {
+  async speak(text: string, _speed: number, signal: AbortSignal, onAudio?: (audio: Buffer) => void, voice: CosyVoiceId = DEFAULT_COSY_TTS_VOICE): Promise<CosyTtsResult> {
+    if (!isCosyVoice(voice)) throw new HttpError(400, 'cosy_voice', '请选择列表中的 CosyVoice 音色。');
     if (!text.trim() || text.length > 1600 || text.includes('\0')) throw new HttpError(400, 'cosy_text', '请选择不超过 1600 字的有效朗读文字。');
     if (signal.aborted) throw cancelled();
     const start = this.start();
@@ -151,7 +153,7 @@ export class CosyTtsProvider {
       this.pending.set(id, { chunks: [], bytes: 0, onAudio, resolve: resolveResult, reject, clean: () => { clearTimeout(timer); signal.removeEventListener('abort', abort); } });
       signal.addEventListener('abort', abort, { once: true });
       if (signal.aborted) { abort(); return; }
-      try { this.write({ type: 'speak', id, text, voice: DEFAULT_COSY_TTS_VOICE }); } catch { this.fail(failed()); }
+      try { this.write({ type: 'speak', id, text, voice }); } catch { this.fail(failed()); }
     });
   }
   dispose(): void { if (this.disposed) return; this.disposed = true; this.fail(cancelled()); }

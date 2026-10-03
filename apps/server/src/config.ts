@@ -1,5 +1,6 @@
 import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_VOICES } from '../../../packages/shared/doubaoSpeech';
 import { normalizeSpeechEngine, type SpeechEngine } from '../../../packages/shared/localSpeech';
+import { DEFAULT_COSY_TTS_VOICE, isCosyVoice, type CosyVoiceId } from '../../../packages/shared/cosySpeech';
 import { REASONING_EFFORTS, type TeachingReasoningEffort } from '../../../packages/shared/protocol';
 
 export interface ServerConfig {
@@ -19,6 +20,7 @@ export interface ServerConfig {
   ttsEngine?: SpeechEngine;
   cosyRuntimeDir?: string;
   cosyWorkerPath?: string;
+  cosyTtsVoice?: CosyVoiceId;
   doubaoApiKey?: string;
   doubaoTtsVoice?: string;
   doubaoTtsInstructions?: string;
@@ -72,6 +74,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   if (env.TTS_ENGINE && !['none', 'local', 'qwen', 'cosy', 'doubao', 'openai', 'system'].includes(env.TTS_ENGINE)) throw new Error('TTS_ENGINE 必须为 none、cosy、doubao 或 openai。');
   // Old local/system choices retire to silence, never to a chargeable cloud provider.
   const ttsEngine = normalizeSpeechEngine(env.TTS_ENGINE);
+  const cosyTtsVoice = env.COSY_TTS_VOICE?.trim() || DEFAULT_COSY_TTS_VOICE;
+  if (!isCosyVoice(cosyTtsVoice)) throw new Error('请选择列表中的 CosyVoice 音色。');
   const cloudSpeech = ttsEngine === 'openai';
   const doubaoTtsVoice = env.DOUBAO_TTS_VOICE?.trim() || DEFAULT_DOUBAO_TTS_VOICE;
   if(!DOUBAO_TTS_VOICES.some(voice=>voice.id===doubaoTtsVoice))throw new Error('请选择列表中的豆包音色。');
@@ -104,6 +108,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     ttsEngine,
     cosyRuntimeDir: env.COSY_TTS_RUNTIME_DIR?.trim() || undefined,
     cosyWorkerPath: env.COSY_TTS_WORKER_PATH?.trim() || undefined,
+    cosyTtsVoice,
     doubaoApiKey,doubaoTtsVoice,doubaoTtsInstructions,
     ttsModel,
     transcriptionModel: env.TRANSCRIPTION_MODEL?.trim() || '',

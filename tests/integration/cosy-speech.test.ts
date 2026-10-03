@@ -8,13 +8,14 @@ import { HttpError } from '../../apps/server/src/errors';
 import type { CosyTtsProvider, CosyTtsResult } from '../../apps/server/src/cosyTts';
 import { defaultPreferences, SaveSettingsSchema, serverConfigFor } from '../../apps/desktop/settings';
 import { normalizeSpeechEngine, usesPlaybackRate } from '../../packages/shared/localSpeech';
+import { COSY_TTS_VOICE_IDS } from '../../packages/shared/cosySpeech';
 
 const HOST = '127.0.0.1:4317', ORIGIN = `http://${HOST}`;
 const apps: Express[] = [], servers: Server[] = [];
-function harness(ready = true) {
+function harness(ready = true, env: NodeJS.ProcessEnv = {}) {
   const cosy = { ready: vi.fn(() => ready), status: vi.fn(() => ready ? 'idle' as const : 'missing' as const), speak: vi.fn<CosyTtsProvider['speak']>(async (_text, _speed, _signal, onAudio) => { const audio = Buffer.from('MP3-test-data'); onAudio?.(audio); return { audio }; }), dispose: vi.fn() };
   const fallback = { ready: vi.fn(() => true), speak: vi.fn(async () => ({ audio: Buffer.from('DO NOT USE') })), dispose: vi.fn() };
-  const app = createApp({ config: readConfig({ TTS_ENGINE: 'cosy' }), cosyTts: cosy, doubaoTts: fallback }); apps.push(app);
+  const app = createApp({ config: readConfig({ TTS_ENGINE: 'cosy', ...env }), cosyTts: cosy, doubaoTts: fallback }); apps.push(app);
   return { app, cosy, fallback };
 }
 async function browser(app: Express) {
@@ -40,6 +41,34 @@ describe('CosyVoice local HTTP contract (mock audio, no real model)', () => {
     await post(h.app, client, '/api/tts', { speed: 3 }).set('x-audio-stream', '1').expect(200).expect('x-audio-cache', 'hit');
     expect(h.cosy.speak).toHaveBeenCalledOnce(); expect(h.fallback.speak).not.toHaveBeenCalled();
     expect((await usage(h.app, client)).records[0]).toMatchObject({ local: true, model: 'Fun-CosyVoice3-0.5B-2512', cancelled: false });
+  });
+  it('keeps six voice cache entries separate and leaves the saved voice unchanged by previews', async () => {
+    const h = harness(true, { COSY_TTS_VOICE: 'cosy_male_2' }); const client = await browser(h.app);
+    expect(client.config.speech.voice).toBe('cosy_male_2');
+    for (const voice of COSY_TTS_VOICE_IDS) {
+      await post(h.app, client, '/api/tts', { cosyVoice: voice }).expect(200).expect('x-audio-cache', 'miss');
+      expect(h.cosy.speak.mock.lastCall?.[4]).toBe(voice);
+      await post(h.app, client, '/api/tts', { cosyVoice: voice, speed: 2 }).set('x-audio-stream', '1').expect(200).expect('x-audio-cache', 'hit');
+    }
+    expect(h.cosy.speak).toHaveBeenCalledTimes(6); expect((await usage(h.app, client)).cache.entries).toBe(6);
+    await post(h.app, client).expect(200).expect('x-audio-cache', 'hit');
+    expect((await request(h.app).get('/api/config').set({ Host: HOST, Cookie: client.headers.Cookie })).body.speech.voice).toBe('cosy_male_2');
+    expect(h.fallback.speak).not.toHaveBeenCalled();
+  });
+  it('rejects unknown/path voices before changing either task lane or consuming the request budget', async () => {
+    const h = harness(); const client = await browser(h.app);
+    for (const cosyVoice of ['unknown', '../voice.wav', 'https://evil.example/voice.wav', 1, null]) {
+      expect((await post(h.app, client, '/api/tts', { cosyVoice, generationId: 99, contextRevision: 99 }).expect(400)).body.error).toBe('invalid_request');
+    }
+    const current = (await request(h.app).get('/api/config').set({ Host: HOST, Cookie: client.headers.Cookie })).body;
+    expect(current.generationId).toBe(client.config.generationId); expect(current.speechSession).toEqual(client.config.speechSession);
+    expect((await usage(h.app, client)).requestCount).toBe(0); expect(h.cosy.speak).not.toHaveBeenCalled();
+  });
+  it.each(['none', 'doubao', 'openai'])('never turns a local voice preview into a %s request', async engine => {
+    const h = harness(true, { TTS_ENGINE: engine, DOUBAO_TTS_API_KEY: 'fake-doubao', OPENAI_API_KEY: 'fake-openai', TTS_MODEL: 'gpt-4o-mini-tts', DEMO_MODE: 'false' });
+    const client = await browser(h.app);
+    expect((await post(h.app, client, '/api/tts', { cosyVoice: 'cosy_male_1' }).expect(400)).body.error).toBe('cosy_voice_engine');
+    expect(h.cosy.speak).not.toHaveBeenCalled(); expect(h.fallback.speak).not.toHaveBeenCalled(); expect((await usage(h.app, client)).requestCount).toBe(0);
   });
   it('does not start uninstalled speech or bypass Origin and CSRF protection', async () => {
     const h = harness(false); const client = await browser(h.app);

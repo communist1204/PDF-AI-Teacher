@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAX_SPEECH_RATE, MIN_SPEECH_RATE } from './speechRate';
+import { COSY_TTS_VOICE_IDS } from './cosySpeech';
 
 export const EnvelopeSchema = z.object({ sessionId: z.string().min(1).max(100), generationId: z.number().int().nonnegative(), contextRevision: z.number().int().nonnegative() });
 export type Envelope = z.infer<typeof EnvelopeSchema>;
@@ -26,7 +27,7 @@ export const AskRequestSchema = EnvelopeSchema.extend({ question: z.string().tri
 export type AskRequest = z.infer<typeof AskRequestSchema>;
 export type AskResponse = Envelope & { plan: TeachingPlan; mode: 'demo' | 'live'; usage: UsageRecord };
 export type UsageRecord = { requestId: string; model: string; category: 'text' | 'tts' | 'transcription' | 'realtime'; connectionSeconds?: number | null; upstreamCancellation?: 'confirmed' | 'unconfirmed'; audioSeconds?: number | null; inputTokens: number | null; outputTokens: number | null; characters: number | null; estimatedCost: null; local?: boolean; cancelled: boolean };
-export const TtsRequestSchema = EnvelopeSchema.extend({ text: z.string().min(1).max(1600), speed: z.number().min(MIN_SPEECH_RATE).max(MAX_SPEECH_RATE) });
+export const TtsRequestSchema = EnvelopeSchema.extend({ text: z.string().min(1).max(1600), speed: z.number().min(MIN_SPEECH_RATE).max(MAX_SPEECH_RATE), cosyVoice: z.enum(COSY_TTS_VOICE_IDS).optional() });
 export const MAX_RECORDING_BYTES = 4 * 1024 * 1024;
 export const MAX_RECORDING_MS = 60000;
 export const AudioMimeSchema = z.enum(['audio/webm', 'audio/ogg', 'audio/mp4']);
