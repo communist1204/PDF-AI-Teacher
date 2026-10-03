@@ -2,14 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import type { DesktopPreferences, DesktopSettings, DesktopTeacherBridge } from '../../../../../packages/shared/desktop';
 import { normalizeSpeechEngine } from '../../../../../packages/shared/localSpeech';
 import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_VOICES } from '../../../../../packages/shared/doubaoSpeech';
+import { COSY_TTS_VOICES, DEFAULT_COSY_TTS_VOICE, type CosyVoiceId } from '../../../../../packages/shared/cosySpeech';
+import { COSY_AUDITION_TEXT, type CosyAuditionState } from '../voice/CosyVoiceAudition';
 import './desktopSettings.css';
 
 function preferences(settings: DesktopSettings): DesktopPreferences {
   const { mode, chatModel, visionModel, reasoningEffort, ttsModel, ttsVoice, ttsInstructions } = settings;
-  return { mode, chatModel, visionModel, reasoningEffort, ttsModel, ttsVoice, ttsInstructions, ttsEngine: normalizeSpeechEngine(settings.ttsEngine), doubaoTtsVoice: settings.doubaoTtsVoice ?? DEFAULT_DOUBAO_TTS_VOICE, doubaoTtsInstructions: settings.doubaoTtsInstructions ?? DEFAULT_DOUBAO_TTS_INSTRUCTIONS };
+  return { mode, chatModel, visionModel, reasoningEffort, ttsModel, ttsVoice, ttsInstructions, ttsEngine: normalizeSpeechEngine(settings.ttsEngine), cosyTtsVoice: settings.cosyTtsVoice ?? DEFAULT_COSY_TTS_VOICE, doubaoTtsVoice: settings.doubaoTtsVoice ?? DEFAULT_DOUBAO_TTS_VOICE, doubaoTtsInstructions: settings.doubaoTtsInstructions ?? DEFAULT_DOUBAO_TTS_INSTRUCTIONS };
 }
 
-export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccountChange }: { bridge: DesktopTeacherBridge; onChange: (settings: DesktopSettings) => void; onBeforeAccountChange: () => void }) {
+type Props = { bridge: DesktopTeacherBridge; onChange: (settings: DesktopSettings) => void; onBeforeAccountChange: () => void; auditionAvailable: boolean; auditionState: CosyAuditionState; onAudition: (voice: CosyVoiceId) => void; onStopAudition: () => void };
+export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccountChange, auditionAvailable, auditionState, onAudition, onStopAudition }: Props) {
   const [settings, setSettings] = useState<DesktopSettings | null>(null);
   const [draft, setDraft] = useState<DesktopPreferences | null>(null);
   const [apiKey, setApiKey] = useState('');
@@ -107,12 +110,19 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
         <p className="desktop-setting-note">复杂理论可优先选择账号可用的高能力模型；不会为了朗读方便更换解题模型。GPT-6 Astra / xhigh 是配置建议，权限、推理强度支持及真实解题质量需验证。{draft.mode === 'chatgpt' && !settings.models.length && ' 账号模型列表尚未取得。'}</p>
       </fieldset>
       <fieldset disabled={busy} className="desktop-model-fields desktop-speech-fields"><legend>朗读声音</legend>
-        <label>朗读方式<select aria-label="朗读方式" value={draft.ttsEngine ?? 'none'} onChange={event => update('ttsEngine', event.target.value as DesktopPreferences['ttsEngine'])}><option value="none">关闭朗读（稍后配置）</option><option value="cosy">CosyVoice 3（本机 GPU · 无 API 费用）</option><option value="doubao">豆包语音 2.0（在线·额度按账号）</option><option value="openai">OpenAI AI 声音（按 API 用量计费）</option></select></label>
+        <label>朗读方式<select aria-label="朗读方式" value={draft.ttsEngine ?? 'none'} onChange={event => { onStopAudition(); update('ttsEngine', event.target.value as DesktopPreferences['ttsEngine']); }}><option value="none">关闭朗读（稍后配置）</option><option value="cosy">CosyVoice 3（本机 GPU · 无 API 费用）</option><option value="doubao">豆包语音 2.0（在线·额度按账号）</option><option value="openai">OpenAI AI 声音（按 API 用量计费）</option></select></label>
         {draft.ttsEngine === 'none' && <p>朗读已关闭。阅读 PDF、文字问答和板书可继续使用；选择并配置声音后再试听。</p>}
         {draft.ttsEngine === 'cosy' && <div className="desktop-cosy-fields">
-          <p>CosyVoice 3 在本机显卡生成 AI 合成声音，不需要 API Key，不上传朗读文字。当前使用一套固定的官方示例音色，是否自然需要你实际试听。</p>
+          <p>CosyVoice 3 在本机显卡生成 AI 合成声音，不需要 API Key，不上传朗读文字。选一种声音，用同一段文字比较听感。</p>
+          <label>CosyVoice 中文音色<select aria-label="CosyVoice 中文音色" value={draft.cosyTtsVoice ?? DEFAULT_COSY_TTS_VOICE} onChange={event => { onStopAudition(); update('cosyTtsVoice', event.target.value as CosyVoiceId); }}>{COSY_TTS_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</select></label>
+          <p className="desktop-setting-note cosy-voice-description">{COSY_TTS_VOICES.find(voice => voice.id === (draft.cosyTtsVoice ?? DEFAULT_COSY_TTS_VOICE))?.description}</p>
+          <div className="cosy-audition-card">
+            <span className="eyebrow">同文试听 · 1× 语速</span><p>{COSY_AUDITION_TEXT}</p>
+            <div className="desktop-setting-actions"><button className="primary-button" disabled={!auditionAvailable} onClick={() => onAudition(draft.cosyTtsVoice ?? DEFAULT_COSY_TTS_VOICE)}>试听这个音色</button><button className="secondary-button" disabled={!['loading','playing'].includes(auditionState.status)} onClick={onStopAudition}>停止试听</button></div>
+            <p className="cosy-audition-status" role={auditionState.status === 'error' ? 'alert' : 'status'}>{!auditionAvailable ? '本次运行尚未启用可用的 CosyVoice 3。请先保存并应用本机朗读方式，再试听；不会调用在线声音。' : auditionState.status === 'loading' ? '正在准备试听…首次加载需要稍等，可随时停止。' : auditionState.status === 'playing' ? '正在试听 AI 合成声音。' : auditionState.status === 'finished' ? '试听结束。喜欢这个音色的话，保存并应用即可用于 PDF 朗读。' : auditionState.status === 'error' ? `试听未完成：${auditionState.message}` : '点击才会发声。试听会停止当前朗读并保留阅读位置，不影响正在生成的文字解答。'}</p>
+          </div>
           <p className="desktop-setting-note">安装好本机模型后，保存并「应用并重启」。首次朗读需要加载模型，后续复用；声音一边生成一边播放。暂停、续读和 0.25–3× 调速仍使用底部播放器。</p>
-          <p className="desktop-setting-note">运行状态见下方「本机语音状态」。保存设置不会生成声音；模型未安装或加载失败会明确提示。</p>
+          <p className="desktop-setting-note">试听可使用尚未保存的音色；选择和保存不会自动发声。保存并应用后，PDF 朗读使用所选音色。关闭设置会停止试听，原文由你点击继续。运行状态见下方「本机语音状态」。</p>
         </div>}
         {draft.ttsEngine === 'doubao' && <div className="desktop-doubao-fields">
           <p>豆包语音 2.0 是独立的在线 AI 合成声音。你主动朗读的文本会发送至火山引擎，解题继续使用上方选择的账号和专业模型。</p>

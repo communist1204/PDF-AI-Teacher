@@ -12,5 +12,6 @@
 @media(max-width:720px){.desktop-settings{padding:14px}.desktop-fields-row{grid-template-columns:1fr;gap:0}.desktop-account-entry{font-size:11px;padding:7px}.desktop-settings-heading h3{font-size:18px}}
 
 .desktop-pending-banner{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 24px;background:#f6edda;color:#795c2b;font-size:12px}.desktop-pending-banner .text-button{color:inherit;white-space:nowrap}
+.cosy-audition-card{background:#fff;border:1px solid #ccddd0;border-radius:9px;padding:15px 16px;margin:12px 0}.cosy-audition-card>p{font-size:13px;line-height:1.8}.cosy-audition-card .cosy-audition-status{font-size:12px;color:#5f7666;margin-bottom:0;min-height:22px}.cosy-audition-card .cosy-audition-status[role=alert]{color:#9d432e}.desktop-settings .cosy-voice-description{margin-top:-3px}
 
 .desktop-account-feedback:empty{display:none}.desktop-account-feedback p{margin:12px 0 0;padding:10px 12px;border-radius:6px;font-size:12px;line-height:1.7;overflow-wrap:anywhere}.desktop-account-feedback .desktop-account-pending{background:#edf3ef;color:#365e49}.desktop-account-feedback .desktop-setting-error{background:#fff0e9;border:1px solid #eac3b5;color:#873b29}.desktop-account-feedback .desktop-setting-notice{background:#edf5ee;border:1px solid #c9dfcf;color:#315f40}

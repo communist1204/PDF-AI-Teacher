@@ -10,7 +10,7 @@ export type AudioChannel = 'source' | 'explanation';
 export type AudioState = {
   status: 'silent' | 'buffering' | 'speaking' | 'paused';
   /** Ownership is separate from local playback status and microphone input. */
-  outputOwner?: 'local' | 'realtime';
+  outputOwner?: 'local' | 'realtime' | 'preview';
   channel: AudioChannel;
   teachingStepId: string | null;
   error: string | null;
@@ -81,7 +81,7 @@ export class AudioCoordinator {
   private explanationText = '';
   private envelope: Envelope | null = null;
   private active: PlaybackHandle | null = null;
-  private externalOutput: { stop: () => void } | null = null;
+  private externalOutput: { stop: () => void; kind: 'realtime' | 'preview' } | null = null;
   private request: AbortController | null = null;
   private streamingInFlight = false;
   private prefetched: { sentenceIndex: number; text: string; envelope: Envelope; controller: AbortController; promise: Promise<Blob> } | null = null;
@@ -95,7 +95,7 @@ export class AudioCoordinator {
   }
 
   getSnapshot(): AudioState {
-    return { ...this.state, outputOwner: this.externalOutput ? 'realtime' : 'local', sentences: this.state.sentences.map(sentence => ({ ...sentence })), cursor: this.sourceBookmark ? { ...this.sourceBookmark.cursor } : null };
+    return { ...this.state, outputOwner: this.externalOutput?.kind ?? 'local', sentences: this.state.sentences.map(sentence => ({ ...sentence })), cursor: this.sourceBookmark ? { ...this.sourceBookmark.cursor } : null };
   }
 
   /**
@@ -107,13 +107,13 @@ export class AudioCoordinator {
    * lease during cleanup. All local playback/stop/pause operations revoke it;
    * release is idempotent and an old lease cannot release a newer owner.
    */
-  claimExternalOutput(stop: () => void): ExternalOutputLease {
+  claimExternalOutput(stop: () => void, kind: 'realtime' | 'preview' = 'realtime'): ExternalOutputLease {
     const inactive: ExternalOutputLease = { isCurrent: () => false, release: () => {} };
     if (this.disposed) { stop(); return inactive; }
     this.cancel();
     // Cleanup may synchronously dispose this coordinator or start another owner.
     if (this.disposed || this.externalOutput || this.active || this.request) { stop(); return inactive; }
-    const owner = { stop };
+    const owner = { stop, kind };
     this.externalOutput = owner;
     this.state.status = 'silent';
     this.state.error = null;

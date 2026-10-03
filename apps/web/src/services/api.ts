@@ -2,6 +2,7 @@ import { ReadingAssistResponseSchema, type ReadingAssistRequest, type ReadingAss
 import type { AppConfig, AskRequest, AskResponse, Envelope, TranscriptionRequest, TranscriptionResponse } from '../../../../packages/shared/protocol';
 import { sameEnvelope, TranscriptionResponseSchema, validatePlan } from '../../../../packages/shared/protocol';
 import type { SpeechStream } from '../features/voice/streamPlayback';
+import { isCosyVoice, type CosyVoiceId } from '../../../../packages/shared/cosySpeech';
 
 // Share only concurrent initialization, including development StrictMode's repeated effect.
 // Clear after completion so explicit reconnection still reads fresh session state.
@@ -24,8 +25,9 @@ async function checked(response: Response) {
 }
 export function apiClient(config: AppConfig, lane: 'main' | 'speech' = 'main') {
   const post = (path: string, body: unknown, signal?: AbortSignal, headers: Record<string, string> = {}) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-csrf-token': config.csrfToken, ...(lane === 'speech' && (path === '/api/tts' || path === '/api/cancel') ? { 'x-task-lane': 'speech' } : {}), ...headers }, body: JSON.stringify(body), signal }).then(checked);
-  const speechResponse = async (text: string, envelope: Envelope, speed: number, signal: AbortSignal, streaming = false) => {
-    const response = await post('/api/tts', { ...envelope, text, speed }, signal, streaming ? { 'x-audio-stream': '1' } : {});
+  const speechResponse = async (text: string, envelope: Envelope, speed: number, signal: AbortSignal, streaming = false, cosyVoice?: CosyVoiceId) => {
+    if (cosyVoice !== undefined && (config.speech?.engine !== 'cosy' || !isCosyVoice(cosyVoice))) throw new Error('请先应用 CosyVoice 3 朗读方式，再试听本机音色。');
+    const response = await post('/api/tts', { ...envelope, text, speed, ...(cosyVoice ? { cosyVoice } : {}) }, signal, streaming ? { 'x-audio-stream': '1' } : {});
     if (response.headers.get('x-session-id') !== envelope.sessionId || Number(response.headers.get('x-generation-id')) !== envelope.generationId || Number(response.headers.get('x-context-revision')) !== envelope.contextRevision) {
       await response.body?.cancel();
       throw new Error('已丢弃过期音频');
@@ -45,12 +47,12 @@ export function apiClient(config: AppConfig, lane: 'main' | 'speech' = 'main') {
       if (!sameEnvelope(request, result)) throw new Error('已丢弃过期的朗读稿');
       return result;
     },
-    async speech(text: string, envelope: Envelope, speed: number, signal: AbortSignal) {
-      const response = await speechResponse(text, envelope, speed, signal);
+    async speech(text: string, envelope: Envelope, speed: number, signal: AbortSignal, cosyVoice?: CosyVoiceId) {
+      const response = await speechResponse(text, envelope, speed, signal, false, cosyVoice);
       return response.blob();
     },
-    async speechStream(text: string, envelope: Envelope, speed: number, signal: AbortSignal): Promise<Blob | SpeechStream> {
-      const response = await speechResponse(text, envelope, speed, signal, true);
+    async speechStream(text: string, envelope: Envelope, speed: number, signal: AbortSignal, cosyVoice?: CosyVoiceId): Promise<Blob | SpeechStream> {
+      const response = await speechResponse(text, envelope, speed, signal, true, cosyVoice);
       if (response.headers.get('x-audio-streaming') !== '1') return response.blob();
       if (!response.body || response.headers.get('content-type')?.split(';')[0].trim() !== 'audio/mpeg') {
         await response.body?.cancel();
