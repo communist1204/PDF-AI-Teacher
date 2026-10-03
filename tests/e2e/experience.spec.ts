@@ -1,16 +1,12 @@
+import { mockCloudSpeech } from './cloudSpeechHarness';
 import {test,expect,type Page} from '@playwright/test';
 import {realtimeHarness,openRealtime} from './realtimeHarness';
 type Speech={rates:number[];texts:string[];active:number;maximum:number;finish:()=>void};
-async function mockSpeech(page:Page){await page.addInitScript(()=>{
-  class Utterance{onstart:(()=>void)|null=null;onresume:(()=>void)|null=null;onend:(()=>void)|null=null;rate=1;constructor(public text:string){}}
-  let current:Utterance|null=null;const state={rates:[] as number[],texts:[] as string[],active:0,maximum:0,finish(){state.active=0;current?.onend?.();}};
-  Object.defineProperty(window,'__trialSpeech',{value:state});Object.defineProperty(window,'SpeechSynthesisUtterance',{value:Utterance});
-  Object.defineProperty(window,'speechSynthesis',{value:{getVoices:()=>[{name:'Mock Chinese',lang:'zh-CN',localService:true}],speak(value:Utterance){current=value;state.rates.push(value.rate);state.texts.push(value.text);state.active++;state.maximum=Math.max(state.maximum,state.active);queueMicrotask(()=>value.onstart?.());},pause(){state.active=0;},resume(){if(current){state.active=1;current.onresume?.();}},cancel(){state.active=0;current=null;},addEventListener(){},removeEventListener(){}}});
-});}
+const mockSpeech = mockCloudSpeech;
 async function prepare(page:Page){await page.goto('/');await page.getByRole('button',{name:'功能体验',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('当前解题 AI 未连接');await page.getByRole('button',{name:'用练习走一遍',exact:true}).click();await expect(page.locator('main')).toHaveAttribute('aria-busy','false');await expect(page.locator('.textLayer span').first()).toBeVisible();await page.getByRole('button',{name:'帮我选一小段',exact:true}).click();await expect(page.locator('.practice-coach')).toContainText('2 / 4');}
 
 test('功能引导使用真实 PDF 选区与播放状态，0.25倍速暂停后同一句续读并记住速度',async({page})=>{
-  await mockSpeech(page);const calls:string[]=[];page.on('request',request=>{if(/\/api\/(ask|tts|transcribe|realtime\/connect)$/.test(new URL(request.url()).pathname))calls.push(request.url());});await prepare(page);
+  await mockSpeech(page);const calls:string[]=[];page.on('request',request=>{if(/\/api\/(ask|transcribe|realtime\/connect)$/.test(new URL(request.url()).pathname))calls.push(request.url());});await prepare(page);
   const preview=await page.locator('.selection-preview').textContent();expect(preview?.length).toBeGreaterThan(30);expect(await page.evaluate(()=>window.getSelection()?.toString().trim())).toBe(preview?.trim());
   await page.getByRole('combobox',{name:'语速',exact:true}).selectOption('0.25');await page.getByRole('button',{name:'开始试读',exact:true}).click();await expect(page.locator('.practice-coach')).toContainText('3 / 4');
   expect(await page.evaluate(()=>(window as unknown as {__trialSpeech:Speech}).__trialSpeech.rates.at(-1))).toBe(0.25);const sentence=await page.getByTestId('reading-subtitle').textContent();
@@ -20,7 +16,7 @@ test('功能引导使用真实 PDF 选区与播放状态，0.25倍速暂停后�
   await page.reload();await expect(page.getByRole('combobox',{name:'语速',exact:true})).toHaveValue('0.25');expect(await page.evaluate(()=>(window as unknown as {__trialSpeech:Speech}).__trialSpeech.texts)).toEqual([]);
 });
 
-test('最低速在朗读中立即从本句重播，暂停时改速不自动出声；无叠音（模拟输出）',async({page})=>{
+test('最低速在朗读中立即原位生效，暂停时改速不自动出声；无叠音（模拟输出）',async({page})=>{
   await mockSpeech(page);await prepare(page);await page.getByRole('button',{name:'开始试读',exact:true}).click();await expect(page.locator('.audio-source strong')).toContainText('正在朗读');const sentence=await page.getByTestId('reading-subtitle').textContent();
   await page.getByRole('combobox',{name:'语速',exact:true}).selectOption('0.25');await expect.poll(()=>page.evaluate(()=>(window as unknown as {__trialSpeech:Speech}).__trialSpeech.rates.at(-1))).toBe(0.25);await expect(page.getByTestId('reading-subtitle')).toHaveText(sentence??'');
   await page.getByRole('button',{name:'暂停朗读',exact:true}).click();await page.getByRole('combobox',{name:'语速',exact:true}).selectOption('0.35');await expect(page.locator('.audio-source strong')).toContainText('已暂停');expect(await page.evaluate(()=>(window as unknown as {__trialSpeech:Speech}).__trialSpeech.active)).toBe(0);

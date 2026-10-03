@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { mockSourceSpeech } from './realtimeHarness';
 
 type Probe = { elements: HTMLAudioElement[] };
-async function setup(page: Page, engine: 'local' | 'qwen') {
+async function setup(page: Page, engine: 'doubao') {
   await page.addInitScript(() => {
     const probe: Probe = { elements: [] }; Object.defineProperty(window, '__positionProbe', { value: probe });
     const NativeAudio = window.Audio;
@@ -10,7 +10,7 @@ async function setup(page: Page, engine: 'local' | 'qwen') {
   });
   await page.route('**/api/config', async route => {
     const response = await route.fetch(); const config = await response.json();
-    await route.fulfill({ json: { ...config, mode: 'demo', capabilities: { ...config.capabilities, tts: 'supported' }, speech: { engine, ready: true, voice: 'test', style: '本地测试', instructionsSupported: false } } });
+    await route.fulfill({ json: { ...config, mode: 'demo', capabilities: { ...config.capabilities, tts: 'supported' }, speech: { engine, ready: true, voice: 'test', style: '云端模拟测试', instructionsSupported: false } } });
   });
   const texts: string[] = [];
   page.on('request', request => { if (new URL(request.url()).pathname === '/api/tts') texts.push(request.postDataJSON().text); });
@@ -32,7 +32,7 @@ async function snapshot(page: Page) {
     return audio ? { count: elements.length, rate: audio.playbackRate, pitch: audio.preservesPitch, paused: audio.paused, time: audio.currentTime } : null;
   });
 }
-for (const engine of ['local', 'qwen'] as const) {
+for (const engine of ['doubao'] as const) {
   test(`${engine}: 改速保留真实 HTMLAudio 位置与预取，暂停改速不自行播放（WAV 模拟）`, async ({ page }) => {
     const texts = await setup(page, engine); await selectSource(page);
     const rate = page.getByRole('combobox', { name: '语速', exact: true });
@@ -55,7 +55,7 @@ for (const engine of ['local', 'qwen'] as const) {
     await page.getByRole('button', { name: '继续朗读', exact: true }).click();
     await expect.poll(async () => (await snapshot(page))?.time ?? 0).toBeGreaterThan(paused.time);
     expect((await snapshot(page))?.count).toBe(1);
-    await expect.poll(() => texts.length).toBe(3); // Pause cancels lookahead; explicit resume may prepare it again.
+    expect(texts).toHaveLength(2); // Ready cloud lookahead survives pause and rate changes.
     const beforeSecondChange = (await snapshot(page))!;
     await rate.selectOption('3'); expect((await snapshot(page))?.count).toBe(1);
     expect((await snapshot(page))!.time).toBeGreaterThanOrEqual(beforeSecondChange.time);
@@ -63,7 +63,7 @@ for (const engine of ['local', 'qwen'] as const) {
     await page.evaluate(() => { const audio = (window as unknown as { __positionProbe: Probe }).__positionProbe.elements[0]; audio.currentTime = audio.duration - 0.02; });
     await expect.poll(async () => (await snapshot(page))?.count).toBe(2);
     expect((await snapshot(page))?.rate).toBe(3); expect(texts.filter(text => text === nextText)).toHaveLength(nextCount);
-    if (engine === 'qwen') { await page.setViewportSize({ width: 1280, height: 720 }); await page.screenshot({ path: 'test-results/local-rate-position-720.png', fullPage: true }); }
+    if (engine === 'doubao') { await page.setViewportSize({ width: 1280, height: 720 }); await page.screenshot({ path: 'test-results/local-rate-position-720.png', fullPage: true }); }
     await page.getByRole('button', { name: '停止', exact: true }).click();
     await expect.poll(async () => (await snapshot(page))?.paused).toBe(true);
   });

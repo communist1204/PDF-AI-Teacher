@@ -1,15 +1,11 @@
-﻿import { test, expect, type Page } from '@playwright/test';
+import { mockCloudSpeech } from './cloudSpeechHarness';
+import { test, expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { PDFDocument } from 'pdf-lib';
 
 async function sample(page:Page){await page.goto('/');await page.getByRole('button',{name:/示例/}).click();await expect(page.locator('.textLayer span').filter({hasText:'指数移动平均将过去'}).first()).toBeVisible();await expect(page.locator('main')).toHaveAttribute('aria-busy','false');}
 async function select(page:Page){const text=page.locator('.textLayer span').filter({hasText:'指数移动平均将过去'}).first();const b=await text.boundingBox();if(!b)throw Error('text missing');await page.mouse.move(b.x+1,b.y+b.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width-1,b.y+b.height/2,{steps:12});await page.mouse.up();await expect(page.locator('.selection-preview')).toContainText('指数移动平均');}
-async function mockSpeech(page:Page){await page.addInitScript(()=>{
-  class Utterance{onstart:(()=>void)|null=null;onresume:(()=>void)|null=null;onend:(()=>void)|null=null;onerror:(()=>void)|null=null;constructor(public text:string){}}
-  let active:Utterance|null=null;const state={texts:[] as string[],finish(){active?.onend?.();}};
-  Object.defineProperty(window,'__speech',{value:state});Object.defineProperty(window,'SpeechSynthesisUtterance',{value:Utterance});
-  Object.defineProperty(window,'speechSynthesis',{value:{getVoices:()=>[{name:'Mock Chinese',lang:'zh-CN',localService:true}],speak(value:Utterance){active=value;state.texts.push(value.text);queueMicrotask(()=>value.onstart?.());},pause(){},resume(){active?.onresume?.();},cancel(){active=null;},addEventListener(){},removeEventListener(){}}});
-});}
+const mockSpeech = mockCloudSpeech;
 async function finishWhile(page:Page,label:string){for(let i=0;i<35;i++){if(!(await page.locator('.classroom-progress').textContent())?.includes(label))return;await page.evaluate(()=>(window as unknown as {__speech:{finish:()=>void}}).__speech.finish());await page.waitForTimeout(30);}throw Error('audio did not complete');}
 async function saved(page:Page){return page.evaluate(async()=>new Promise<Record<string,unknown>[]>((resolve,reject)=>{const open=indexedDB.open('pdf-ai-teacher-learning');open.onsuccess=()=>{const db=open.result;const request=db.transaction('books').objectStore('books').getAll();request.onsuccess=()=>{resolve(request.result);db.close();};request.onerror=()=>reject(request.error);};open.onerror=()=>reject(open.error);}));}
 async function ask(page:Page,text:string){await page.getByRole('textbox',{name:'输入文字问题'}).fill(text);await page.getByRole('button',{name:'发送问题',exact:true}).click();await expect(page.locator('.message.assistant').last()).toBeVisible();}

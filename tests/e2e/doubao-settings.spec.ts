@@ -6,8 +6,8 @@ type Save = Parameters<DesktopTeacherBridge['saveSettings']>[0];
 type Probe = { state: DesktopSettings; saves: Save[]; pages: string[]; events: string[]; failNext: boolean };
 const seed: DesktopSettings = {
   mode: 'chatgpt', chatModel: 'expert-text', visionModel: 'expert-vision', reasoningEffort: 'xhigh',
-  ttsEngine: 'qwen', qwenTtsVoice: 'serena', qwenTtsInstructions: '原有本地语气', qwenTtsDevice: 'cuda', qwenTtsReady: true, qwenCudaReady: true,
-  localTtsVoice: 'zf_001', localTtsReady: true, ttsModel: 'gpt-4o-mini-tts', ttsVoice: 'marin', ttsInstructions: '原有 OpenAI 语气',
+  ttsEngine: 'none',
+  ttsModel: 'gpt-4o-mini-tts', ttsVoice: 'marin', ttsInstructions: '原有 OpenAI 语气',
   hasApiKey: true, hasDoubaoApiKey: false, encryptionAvailable: true, restartRequired: false,
   auth: { status: 'signed_in', activeAccountId: 'test-account', accounts: [{id:'test-account',label:'模拟专业解题账号',status:'signed_in'}] },
   models: [{id:'expert-text',name:'模拟专业文字模型'},{id:'expert-vision',name:'模拟专业看图模型'}],
@@ -40,10 +40,10 @@ async function setup(page: Page, patch: Partial<DesktopSettings> = {}) {
 }
 async function probe(page: Page) { return page.evaluate(() => (window as unknown as {__doubaoSettings:Probe}).__doubaoSettings); }
 async function chooseDoubao(page: Page) { await page.getByRole('combobox', {name:'朗读方式',exact:true}).selectOption('doubao'); }
-const retained: Partial<DesktopPreferences> = {mode:'chatgpt',chatModel:'expert-text',visionModel:'expert-vision',reasoningEffort:'xhigh',ttsModel:'gpt-4o-mini-tts',ttsVoice:'marin',ttsInstructions:'原有 OpenAI 语气',qwenTtsVoice:'serena',qwenTtsDevice:'cuda',qwenTtsInstructions:'原有本地语气'};
+const retained: Partial<DesktopPreferences> = {mode:'chatgpt',chatModel:'expert-text',visionModel:'expert-vision',reasoningEffort:'xhigh',ttsModel:'gpt-4o-mini-tts',ttsVoice:'marin',ttsInstructions:'原有 OpenAI 语气'};
 
-test('默认保留 Qwen，豆包三种声音可无 Key 保存，入口说明额度和文本外发且不自动请求', async ({page}) => {
-  const tts = await setup(page); const engine = page.getByRole('combobox',{name:'朗读方式',exact:true}); await expect(engine).toHaveValue('qwen');
+test('默认关闭朗读，豆包三种声音可无 Key 保存，入口说明额度和文本外发且不自动请求', async ({page}) => {
+  const tts = await setup(page); const engine = page.getByRole('combobox',{name:'朗读方式',exact:true}); await expect(engine).toHaveValue('none');
   await chooseDoubao(page); const panel = page.locator('.desktop-doubao-fields');
   await expect(panel).toContainText('尚未配置豆包声音'); await expect(panel).toContainText('文本会发送至火山引擎');
   await expect(panel).toContainText('超出免费额度可能计费'); await expect(panel).toContainText('不会自动保证免费');

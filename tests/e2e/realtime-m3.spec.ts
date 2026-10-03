@@ -1,4 +1,5 @@
-﻿import {test,expect} from '@playwright/test';
+import { mockCloudSpeech } from './cloudSpeechHarness';
+import {test,expect} from '@playwright/test';
 import {realtimeHarness,openRealtime,mockSourceSpeech} from './realtimeHarness';
 type Harness={speech:(text:string,id?:string)=>void;finish:()=>void;sent:Array<{type:string;response?:{output_modalities:string[]};item?:{type:string}}> ;ackBoardCounts:number[];input:MediaStream;peer:RTCPeerConnection;holdTools:boolean;held:(()=>void)|null;clearDelay:number;dropClear:boolean;emit:(value:Record<string,unknown>)=>void};
 
@@ -56,14 +57,10 @@ test('原文真实播放器与实时音频交接：语音打断后恢复同一�
 
 
 
-test('无 Key 本机演练：真实 AudioContext 检测合成输入并暂停，书签恢复且不上传',async({page})=>{
-  await realtimeHarness(page,false);const calls:string[]=[];page.on('request',request=>{if(/\/api\/(realtime\/connect|transcribe|ask|tts)$/.test(new URL(request.url()).pathname))calls.push(request.url());});
-  await page.addInitScript(()=>{
-    class Utterance{onstart:(()=>void)|null=null;onresume:(()=>void)|null=null;onend:(()=>void)|null=null;constructor(public text:string){}}
-    let active:Utterance|null=null;Object.defineProperty(window,'SpeechSynthesisUtterance',{value:Utterance});
-    Object.defineProperty(window,'speechSynthesis',{value:{getVoices:()=>[{name:'Mock Chinese',lang:'zh-CN',localService:true}],speak(value:Utterance){active=value;queueMicrotask(()=>value.onstart?.());},pause(){},resume(){active?.onresume?.();},cancel(){active=null;},addEventListener(){},removeEventListener(){}}});
-  });
-  await openRealtime(page,'local');await expect(page.getByText('演示模式 · AI 未连接',{exact:true})).toBeVisible();
+test('本机演练：真实 AudioContext 检测合成输入并暂停云音频模拟，书签恢复且麦克风不上传',async({page})=>{
+  await realtimeHarness(page,false);const calls:string[]=[];page.on('request',request=>{if(/\/api\/(realtime\/connect|transcribe|ask)$/.test(new URL(request.url()).pathname))calls.push(request.url());});
+  await mockCloudSpeech(page);
+  await openRealtime(page,'local');await expect(page.getByText('演示模式 · 解题 AI 未连接',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'朗读所选',exact:true}).click();await expect(page.locator('.audio-source strong')).toContainText('正在朗读');
   await page.getByRole('button',{name:'下一句',exact:true}).click();const sentence=await page.getByTestId('reading-subtitle').textContent();
   await page.evaluate(()=>{(window as unknown as {__rt:{gain:GainNode}}).__rt.gain.gain.value=0.1;});

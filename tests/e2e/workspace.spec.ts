@@ -1,3 +1,4 @@
+import { mockCloudSpeech } from './cloudSpeechHarness';
 import { test, expect, type Page } from '@playwright/test';
 import { PDFDocument } from 'pdf-lib';
 import { readFile } from 'node:fs/promises';
@@ -27,7 +28,7 @@ test('中文 PDF 真实鼠标选区 → 演示教案 → 公式表格及来源',
   page.on('pageerror', e=>errors.push(e.message));
   await openSample(page);
   await selectText(page);
-  await expect(page.getByText('演示模式 · AI 未连接')).toBeVisible();
+  await expect(page.getByText('演示模式 · 解题 AI 未连接')).toBeVisible();
   await askSelection(page);
   await expect(page.getByTestId('board-step').first()).toBeVisible();
   await expect(page.locator('.katex').first()).toBeVisible();
@@ -87,23 +88,7 @@ test('同名不同内容的 PDF 丢弃前一本书的迟到回答',async({page})
 
 
 test('音频模拟：同一句暂停续播，文字打断后恢复未完成句，无旧声复活', async ({page})=>{
-  await page.addInitScript(()=>{
-    class Utterance {
-      onstart: (()=>void)|null=null; onresume:(()=>void)|null=null; onend:(()=>void)|null=null;
-      onerror:((event: {error:string})=>void)|null=null;
-      constructor(public text:string) {}
-    }
-    let current:Utterance|null=null;
-    const state={speaks:[] as string[],pauses:0,cancels:0,finish(){current?.onend?.();}};
-    Object.defineProperty(window,'__testSpeech',{value:state});
-    Object.defineProperty(window,'SpeechSynthesisUtterance',{value:Utterance});
-    Object.defineProperty(window,'speechSynthesis',{value:{
-      getVoices:()=>[{name:'Test Chinese voice (mock)',lang:'zh-CN',localService:true},{name:'Test English voice (mock)',lang:'en-US',localService:true}],
-      speak(value:Utterance){current=value;state.speaks.push(value.text);queueMicrotask(()=>value.onstart?.());},
-      pause(){state.pauses++;},resume(){current?.onresume?.();},cancel(){current=null;state.cancels++;},
-      addEventListener(){},removeEventListener(){}
-    }});
-  });
+  await mockCloudSpeech(page);
   await openSample(page);
   await page.getByRole('button',{name:'切换为跟随当前页',exact:true}).click();
   await page.getByRole('button',{name:'选本页文字',exact:true}).click();
@@ -202,16 +187,10 @@ test('后端错误清楚显示且不自动切换为假回答',async({page})=>{
   await expect(page.getByRole('alert')).toContainText('文字模型未配置');
   await expect(page.getByTestId('board-step')).toHaveCount(0);
 });
-test('真实浏览器本机语音能力诊断（不评价扬声器听感）',async({page},testInfo)=>{
-  await page.goto('/');
-  await page.waitForFunction(()=>window.speechSynthesis.getVoices().length>0,{},{timeout:2000}).catch(()=>{});
-  const voices=await page.evaluate(()=>window.speechSynthesis.getVoices().map(v=>({name:v.name,lang:v.lang,localService:v.localService})));
-  await testInfo.attach('real-browser-voices',{body:JSON.stringify({mock:false,voices,localChinese:voices.filter(v=>v.localService&&v.lang.startsWith('zh')).length,humanListening:'未测'},null,2),contentType:'application/json'});
-  console.log('Real browser voice diagnostic:',JSON.stringify({total:voices.length,localChinese:voices.filter(v=>v.localService&&v.lang.startsWith('zh')).length,humanListening:'未测'}));
-  await expect(page.getByText('演示模式 · AI 未连接')).toBeVisible();
+test('默认未配置声音时仍显示独立的解题演示模式',async({page})=>{
+  await page.goto('/'); await expect(page.locator('.audio-kind')).toHaveText('朗读未启用');
+  await expect(page.getByText('演示模式 · 解题 AI 未连接',{exact:true})).toBeVisible();
 });
-
-
 
 test('刷新恢复会话版本，本书笔记按指纹保留',async({page})=>{
   await openSample(page);await selectText(page);
@@ -334,15 +313,12 @@ test('显式取消解答丢弃迟到回答，清选区仍可清除正在拖动�
   await expect(page.getByAltText('即将发送的公式截图')).toHaveCount(0);
 });
 
-test('声音设置明确区分本机演示和自然语音模型',async({page})=>{
-  await page.goto('/');
-  await expect(page.locator('.audio-kind')).toHaveText('系统基本语音 · 免费');
-  await page.getByRole('button',{name:'声音设置',exact:true}).click();
-  const dialog=page.getByRole('dialog');
-  await expect(dialog).toContainText('系统基本语音');
-  await expect(dialog).toContainText('当前朗读免费，不消耗 OpenAI API 额度');
+test('声音设置明确未配置状态与独立的云语音能力',async({page})=>{
+  await page.goto('/'); await expect(page.locator('.audio-kind')).toHaveText('朗读未启用');
+  await page.getByRole('button',{name:'声音设置',exact:true}).click(); const dialog=page.getByRole('dialog');
+  await expect(dialog).toContainText('朗读未启用');
+  await expect(dialog).not.toContainText('系统基本语音');
   await expect(dialog).toContainText('仅用打字提问和朗读，不需要配置转写或 Realtime');
   await expect(dialog).toContainText('Realtime：未配置');
-  await expect(dialog).toContainText('实际语音效果待真人验收');
-  await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);
+  await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0);
 });
