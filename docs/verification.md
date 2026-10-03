@@ -1,5 +1,9 @@
 # M0/M1/M2/M3 验收记录
 
+## 2026-10-03 补充：Readest 与现有提取流程只读核验
+
+读取Readest官方reading/listen说明及发布记录，确认文字PDF选区、Ctrl+R选区读完停止、默认Edge TTS。未确认仅当前物理页自动停止的专门按钮，未在用户PDF实测Readest或声音。只读检查本项目PdfReader.selectCurrentPage和getTextContent调用，确认本页/选区朗读输入来自PDF文字层。工作代码未改，未重新运行构建或测试；上一节功能变更的884单元/后端与98浏览器结果仍为上轮记录，不能写作本次新增测试。
+
 ## 2026-10-03：退休语音与免费替代调查
 
 环境：Windows / Node24.19.0 / npm11.17.0 / Git2.50.1。任务初始Git干净d8cc909，读取AGENTS/PRD/START_HERE；并行编辑分别使用独立worktree与明确文件责任。
