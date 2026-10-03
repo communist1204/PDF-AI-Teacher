@@ -1,0 +1,11 @@
+﻿{
+    "pid":  32420,
+    "exe":  "D:\\PDF-AI-Teacher\\release\\Readest\\Readest_0.12.10_x64-portable.exe",
+    "sample":  "D:\\PDF-AI-Teacher\\docs\\readest-audition.txt",
+    "startedAt":  "2026-10-03T20:58:02.0461119+08:00",
+    "processVerification":  {
+                                "Id":  32420,
+                                "MainWindowTitle":  "Readest - readest-audition",
+                                "Responding":  true
+                            }
+}

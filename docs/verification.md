@@ -1,5 +1,23 @@
 # M0/M1/M2/M3 验收记录
 
+## 2026-10-03：Readest 桌面与上游源码准备
+
+- 用户反馈：上轮网页版长文“效果还不错”；未把该反馈扩大为全部多音字正确或桌面语音通过。
+- releases/latest 返回 v0.12.10，Windows X64；portable 101337600 bytes，SHA256 与 GitHub asset digest 相同：288faaa55119211338494e2d631b6f228c82ace1cfbff3978389854bb7b54d09。详见 readest-download.json。
+- 原始 git clone 和 curl 大文件请求停滞；仅中止本次下载会话，改用官方 codeload ZIP 与 Invoke-WebRequest 完成，不改代理。补齐固定 revision 子模块，保留许可证，源码版本见 readest-source.json；未把依赖安装包或 Git 历史声称为已下载。
+- 官方程序实际启动，PID 32420，窗口标题 Readest - readest-audition，Responding=true；桌面及项目内启动快捷方式已创建，见 readest-launch.json。启动不自动播放。
+- UI 自动化初始化仍报 helper/sandbox 故障，没有目视验收窗口内部布局、导入状态、音色切换、倍率、真实音频或免费额度。以上桌面听感与交互为待验。
+- 源码构建未执行：本机未检出 Cargo/Rust，未安装全局工具，交付使用官方预编译程序。本项目只有文档、材料、.gitignore 变更，未重跑既有产品 build/typecheck/lint/unit/e2e，不引用旧通过数冒充本轮测试。
+- 未调用收费语音、操作安全放行、签署数据授权、改原软件配置或迁移私有 PDF/账号。下载源码不等于已完成问答/板书融合。
+
+## 2026-10-03：Readest 试听入口与长文
+
+- 项目初始 Git 干净，HEAD 239805e；已读取 AGENTS/PRD/START_HERE。新增原创长文 docs/readest-audition.txt 和本节文档，没有改产品代码。
+- 已执行 Edge `--new-window https://web.readest.com`，启动命令成功退出；官方网页与入门/朗读说明可通过网络读取。
+- 浏览器 CUA 初始化失败；电脑操作工具重置后仍报 `windows sandbox failed: helper_unknown_error: setup refresh had errors`。实际 Readest 页面、登录/导入、声源选择与播放 UI 验证受阻，没有声称已导入或听到声音。
+- 真人试听待验：2026年是否二零二六年；3.5%与12:30；银行/行业/行走；重新/重庆/重量；还款/还有；八段衔接有无不自然长停、漏读、重复或音色切换。
+- 未调用真实 TTS 或收费服务，未安装软件。仅材料/文档变更，未重跑产品 build/typecheck/lint/unit/e2e；上轮测试结果不计入本轮。
+
 ## 2026-10-03 补充：Readest 与现有提取流程只读核验
 
 读取Readest官方reading/listen说明及发布记录，确认文字PDF选区、Ctrl+R选区读完停止、默认Edge TTS。未确认仅当前物理页自动停止的专门按钮，未在用户PDF实测Readest或声音。只读检查本项目PdfReader.selectCurrentPage和getTextContent调用，确认本页/选区朗读输入来自PDF文字层。工作代码未改，未重新运行构建或测试；上一节功能变更的884单元/后端与98浏览器结果仍为上轮记录，不能写作本次新增测试。

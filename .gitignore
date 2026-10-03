@@ -18,5 +18,6 @@ release/
 
 models/
 .model-cache/
+.external/
 local-tts-runtime/
 qwen-tts-runtime/

@@ -1,0 +1,73 @@
+﻿{
+    "release":  "v0.12.10",
+    "assetUrl":  "https://github.com/readest/readest/releases/download/v0.12.10/Readest_0.12.10_x64-portable.exe",
+    "bytes":  101337600,
+    "sha256":  "288faaa55119211338494e2d631b6f228c82ace1cfbff3978389854bb7b54d09",
+    "digestVerified":  true,
+    "path":  "D:\\PDF-AI-Teacher\\release\\Readest\\Readest_0.12.10_x64-portable.exe",
+    "submoduleSources":  [
+                             {
+                                 "path":  "apps/readest-app/.claude/skills/gstack",
+                                 "revision":  "a3259400a366593e0c909dd9ac3e59752efd2488",
+                                 "archive":  "https://codeload.github.com/garrytan/gstack/zip/a3259400a366593e0c909dd9ac3e59752efd2488",
+                                 "sha256":  "C1511DB992A062B82F59299C34D00DB7C6164C6A22EDECB4088E4145CE74CC76",
+                                 "downloaded":  true
+                             },
+                             {
+                                 "path":  "apps/readest-app/src-tauri/plugins/tauri-plugin-turso",
+                                 "revision":  "3c4be4fd92fbe11e8e374b6e8e85dbf9a3b1b4ac",
+                                 "archive":  "https://codeload.github.com/readest/tauri-plugin-turso/zip/3c4be4fd92fbe11e8e374b6e8e85dbf9a3b1b4ac",
+                                 "sha256":  "645ACEC8981069DB35D033EF8420EFF3E7704F0BA31B573E3BC714AEACF81AF9",
+                                 "downloaded":  true
+                             },
+                             {
+                                 "path":  "apps/readest-app/src-tauri/plugins/tauri-plugin-webview-upgrade",
+                                 "revision":  "bbb5bd33ef4ab644e915f7264ef15a8da97cb284",
+                                 "archive":  "https://codeload.github.com/readest/tauri-plugin-webview-upgrade/zip/bbb5bd33ef4ab644e915f7264ef15a8da97cb284",
+                                 "sha256":  "13D71CB0935E43B570578BC1DE3FF50464208D4F8A4DA4FF3CFD47068AF764AD",
+                                 "downloaded":  true
+                             },
+                             {
+                                 "path":  "packages/foliate-js",
+                                 "revision":  "341dc63cda7ad26b31ada4ee905e40b5020da88a",
+                                 "archive":  "https://codeload.github.com/readest/foliate-js/zip/341dc63cda7ad26b31ada4ee905e40b5020da88a",
+                                 "sha256":  "B5262A42B9711F8F8243A4A5C762AB5EA982C5616F1038C493914C751D24B726",
+                                 "downloaded":  true
+                             },
+                             {
+                                 "path":  "packages/js-mdict",
+                                 "revision":  "d01bf62af872b1fbeacb2f18446460960e7400de",
+                                 "archive":  "https://codeload.github.com/readest/js-mdict/zip/d01bf62af872b1fbeacb2f18446460960e7400de",
+                                 "sha256":  "D9EE2F1D80589174D2A8AB970C83B649307566A693D6853CB9BF61C7CEE79C57",
+                                 "downloaded":  true
+                             },
+                             {
+                                 "path":  "packages/qcms",
+                                 "revision":  "fc23a407f1ed9ccfea15875d27e0936dcc798a1f",
+                                 "archive":  "https://codeload.github.com/mozilla/pdf.js.qcms/zip/fc23a407f1ed9ccfea15875d27e0936dcc798a1f",
+                                 "sha256":  "E27E2BB55954B8C6830916BE5F428E39C59BDB549AC6EB38B97CB50A4442B321",
+                                 "downloaded":  true
+                             },
+                             {
+                                 "path":  "packages/simplecc-wasm",
+                                 "revision":  "5e5b56f5b82394e7df07f9171ac70f4578b24a32",
+                                 "archive":  "https://codeload.github.com/readest/simplecc-wasm/zip/5e5b56f5b82394e7df07f9171ac70f4578b24a32",
+                                 "sha256":  "9BE9A1CA6278BD1A283443FFD7E318D5B0F5D9D2C34F5AE32DB0786479DFDE92",
+                                 "downloaded":  true
+                             },
+                             {
+                                 "path":  "packages/tauri",
+                                 "revision":  "382ea858bdd29458a5447e49c401b3ac64f0c3c0",
+                                 "archive":  "https://codeload.github.com/readest/tauri/zip/382ea858bdd29458a5447e49c401b3ac64f0c3c0",
+                                 "sha256":  "4A18727352BBE7EB67003F003686B8583D88D519ED31166E1E9598FE708A3C81",
+                                 "downloaded":  true
+                             },
+                             {
+                                 "path":  "packages/simplecc-wasm/OpenCC",
+                                 "revision":  "e0d41d7f5e7c62f9be1cfdd9e6cb1d03847c06e7",
+                                 "archive":  "https://codeload.github.com/BYVoid/OpenCC/zip/e0d41d7f5e7c62f9be1cfdd9e6cb1d03847c06e7",
+                                 "sha256":  "AA4AF2BDC1B9D5578719F281B18A8BC861D76EA771D9FB004EF9D77B5A4B2F62",
+                                 "downloaded":  true
+                             }
+                         ]
+}

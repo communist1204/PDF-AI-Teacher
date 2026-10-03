@@ -1,5 +1,19 @@
 # 设计取舍与接口核验
 
+## 2026-10-03：先交付 Readest 独立桌面版，保留源码适配路线
+
+用户已实听网页版满意，授权下载并成为本地软件。采用官方 Windows x64 portable v0.12.10，避免为直接使用而先安装 Rust/全局构建环境。另保存 release 源码快照与固定 SHA 子模块，原作者及 AGPL 许可证保持完整，暂不复制到现有产品代码中。用户未选择合并方向，按已说明的独立桌面版默认先交付。
+
+核验 [稳定版源码](https://github.com/readest/readest/tree/v0.12.10)：Tauri 可接收本地文件 argv；选区朗读由 useTTSControl 的 oneTime/range 路径处理；EdgeTTSClient 在桌面通过原生 WebSocket 连接微软，非 Readest 本机语音模型。官网 Web 与 main 可能领先稳定 release，不承诺完全同版。在线额度、网络可用性和免费政策不能由开源许可证保证。
+
+Readest 是 Next.js/Tauri 完整工程，不能无适配嵌入现有 Vite/Electron。融合时优先评估以 Readest 阅读侧为底座、接现有教学后端和侧栏；必须映射 bookKey/Range/CFI 与真实 PDF pageIndex/selection/context snapshot，并统一音源与任务取消。本轮只交付上游桌面程序和源码，没有声称完成融合。
+
+## 2026-10-03：用原始长文试听 Readest
+
+用户要求先亲耳比较上文软件，因此提供官方网页版入口与原创 TXT 试听材料，避免先安装或改本应用声源。TXT 将发音和连续播放与 PDF 抽取问题分开检验；不预先改写 2026年、3.5%、12:30 或给多音字注音，以免掩盖引擎的错误。先听 1×，再尝试播放中变速。通过后才值得用用户自己的 PDF 验证文字提取、读序与断行。
+
+核验依据：[官方入门](https://www.readest.com/docs/getting-started)支持 TXT 导入；[官方朗读说明](https://www.readest.com/docs/listen)说明耳机/T 连续朗读、展开播放器选声、Ctrl+R 仅读选区。Readest 在线默认仍为 Edge TTS，不声称换阅读器会获得新模型或一定胜过豆包。未代用户注册、订阅、调用付费 API，也未将测试材料自动上传。
+
 ## 2026-10-03 补充：不再把 Readest 当成不同声源
 
 用户不满意 Edge 音色。Readest 官方文档明确在线默认 Edge TTS，因此阅读器的PDF操作能力与其声音来源应分别判断，不再以更换Readest暗示音质升级。当前优先保留本项目真实PDF选区/本页文字提取，用用户试听满意且有额度的独立TTS发声。整本PDF抽取正文可后续评估，文字型PDF不需GPT；扫描文档需要OCR，复杂多栏需核对顺序。依据与界限见 free-cloud-tts.md 最新节。
