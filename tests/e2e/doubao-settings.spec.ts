@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { DesktopPreferences, DesktopSettings, DesktopTeacherBridge } from '../../packages/shared/desktop';
-import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE } from '../../packages/shared/doubaoSpeech';
+import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_VOICES } from '../../packages/shared/doubaoSpeech';
 import { COSY_TTS_VOICES, DEFAULT_COSY_TTS_VOICE } from '../../packages/shared/cosySpeech';
 
 type Save = Parameters<DesktopTeacherBridge['saveSettings']>[0];
@@ -43,11 +43,9 @@ async function probe(page: Page) { return page.evaluate(() => (window as unknown
 async function chooseLocal(page: Page) { await page.getByRole('combobox', {name:'朗读方式',exact:true}).selectOption('cosy'); }
 const retained: Partial<DesktopPreferences> = {mode:'chatgpt',chatModel:'expert-text',visionModel:'expert-vision',reasoningEffort:'xhigh',ttsModel:'gpt-4o-mini-tts',ttsVoice:'marin',ttsInstructions:'原有 OpenAI 语气'};
 
-// The user retired cloud reading. These replace its former settings expectations
-// while retaining persistence, credential isolation, failure and encryption coverage.
-test('关闭朗读和六个本地参考音色取代旧云声音，保存及应用不自动合成', async ({page}) => {
+test('豆包与六个本地参考音色并存，保存及应用不自动合成', async ({page}) => {
   const tts = await setup(page); const engine = page.getByRole('combobox',{name:'朗读方式',exact:true}); await expect(engine).toHaveValue('none');
-  expect(await engine.locator('option').evaluateAll(items=>items.map(item=>(item as HTMLOptionElement).value))).toEqual(['none','cosy']);
+  expect(await engine.locator('option').evaluateAll(items=>items.map(item=>(item as HTMLOptionElement).value))).toEqual(['none','cosy','doubao']);
   await chooseLocal(page); const panel = page.locator('.desktop-cosy-fields');
   await expect(panel).toContainText('不上传朗读文字'); await expect(panel).toContainText('不等同于官方云端原版');
   await expect(page.getByRole('textbox',{name:'豆包语音 API Key',exact:true})).toHaveCount(0);
@@ -66,7 +64,7 @@ test('关闭朗读和六个本地参考音色取代旧云声音，保存及应�
   expect((await probe(page)).events.slice(-2)).toEqual(['save','restart']); expect(tts).toEqual([]);
 });
 
-test('解题 API 密钥仍独立保存且不回显，移除云朗读不影响专业模型，720p可操作', async ({page}) => {
+test('解题 API 密钥仍独立保存且不回显，不影响豆包凭证与专业模型，720p可操作', async ({page}) => {
   const tts = await setup(page,{hasDoubaoApiKey:true}); await chooseLocal(page);
   await page.locator('.desktop-advanced summary').click(); const openai = page.getByRole('textbox',{name:'OpenAI API Key',exact:true});
   await expect(openai).toHaveAttribute('type','password'); await openai.fill('mock-openai-key-not-a-secret');
@@ -81,15 +79,51 @@ test('解题 API 密钥仍独立保存且不回显，移除云朗读不影响专
   await page.screenshot({path:'test-results/local-reference-expert-settings-720.png',fullPage:true});
 });
 
-test('旧豆包记录迁到本地选择，保存不删除旧密钥、专业账号与隐藏音色偏好', async ({page}) => {
-  await setup(page,{ttsEngine:'doubao',hasDoubaoApiKey:true,doubaoTtsVoice:DEFAULT_DOUBAO_TTS_VOICE,doubaoTtsInstructions:DEFAULT_DOUBAO_TTS_INSTRUCTIONS});
-  await expect(page.getByRole('combobox',{name:'朗读方式',exact:true})).toHaveValue('cosy');
-  await expect(page.getByRole('textbox',{name:'豆包语音 API Key',exact:true})).toHaveCount(0);
-  await page.getByRole('combobox',{name:'CosyVoice 中文音色',exact:true}).selectOption(COSY_TTS_VOICES[2].id);
+test('已存豆包选择保留，留空保存不删除旧密钥、本机音色与专业账号', async ({page}) => {
+  const tts = await setup(page,{ttsEngine:'doubao',hasDoubaoApiKey:true,cosyTtsVoice:COSY_TTS_VOICES[2].id,doubaoTtsVoice:DEFAULT_DOUBAO_TTS_VOICE,doubaoTtsInstructions:DEFAULT_DOUBAO_TTS_INSTRUCTIONS});
+  await expect(page.getByRole('combobox',{name:'朗读方式',exact:true})).toHaveValue('doubao');
+  await expect(page.getByRole('textbox',{name:'豆包语音 API Key',exact:true})).toHaveValue('');
+  await page.getByRole('combobox',{name:'豆包中文音色',exact:true}).selectOption(DOUBAO_TTS_VOICES[1].id);
   await page.getByRole('button',{name:'保存设置',exact:true}).click(); const state = await probe(page);
-  expect(state.saves.at(-1)).toMatchObject({...retained,ttsEngine:'cosy',cosyTtsVoice:COSY_TTS_VOICES[2].id,doubaoTtsVoice:DEFAULT_DOUBAO_TTS_VOICE,doubaoTtsInstructions:DEFAULT_DOUBAO_TTS_INSTRUCTIONS});
+  expect(state.saves.at(-1)).toMatchObject({...retained,ttsEngine:'doubao',cosyTtsVoice:COSY_TTS_VOICES[2].id,doubaoTtsVoice:DOUBAO_TTS_VOICES[1].id,doubaoTtsInstructions:DEFAULT_DOUBAO_TTS_INSTRUCTIONS});
   expect(state.saves.at(-1)).not.toHaveProperty('clearApiKey'); expect(state.saves.at(-1)).not.toHaveProperty('clearDoubaoApiKey'); expect(state.state.hasApiKey).toBe(true); expect(state.state.hasDoubaoApiKey).toBe(true);
-  expect(state.state.auth.activeAccountId).toBe('test-account');
+  expect(state.saves.at(-1)).not.toHaveProperty('doubaoApiKey'); expect(state.state.auth.activeAccountId).toBe('test-account'); expect(tts).toEqual([]);
+});
+
+test('新增和替换豆包 Key 后清空输入，删除须显式勾选，切换本机不丢配置', async ({page}) => {
+  const tts = await setup(page); const engine = page.getByRole('combobox',{name:'朗读方式',exact:true});
+  await engine.selectOption('doubao'); const key = page.getByRole('textbox',{name:'豆包语音 API Key',exact:true});
+  await expect(key).toHaveAttribute('type','password'); await expect(page.locator('.desktop-doubao-fields')).toContainText('主动朗读的文本会发送至火山引擎');
+  await expect(page.getByRole('button',{name:'试听这个音色',exact:true})).toHaveCount(0);
+  for (const value of ['mock-doubao-new-key-not-real','mock-doubao-replacement-not-real']) {
+    await key.fill(value); await page.getByRole('button',{name:'保存设置',exact:true}).click(); await expect(key).toHaveValue('');
+    const state = await probe(page); expect(state.saves.at(-1)).toMatchObject({...retained,ttsEngine:'doubao',doubaoApiKey:value});
+    expect(state.saves.at(-1)).not.toHaveProperty('apiKey'); expect(state.state.hasApiKey).toBe(true); expect(state.state.hasDoubaoApiKey).toBe(true);
+    expect(await page.evaluate(() => JSON.stringify({local:{...localStorage},session:{...sessionStorage},text:document.body.innerText}))).not.toContain(value);
+  }
+  await page.getByRole('combobox',{name:'豆包中文音色',exact:true}).selectOption(DOUBAO_TTS_VOICES[2].id);
+  await page.getByRole('textbox',{name:'豆包朗读语气',exact:true}).fill('温和自然，按语义停顿。');
+  await chooseLocal(page); await page.getByRole('button',{name:'保存设置',exact:true}).click();
+  expect((await probe(page)).state).toMatchObject({hasDoubaoApiKey:true,doubaoTtsVoice:DOUBAO_TTS_VOICES[2].id});
+  await engine.selectOption('doubao'); await expect(page.getByRole('textbox',{name:'豆包朗读语气',exact:true})).toHaveValue('温和自然，按语义停顿。');
+  await page.getByRole('checkbox',{name:'删除本机保存的豆包 API Key（保存后生效）',exact:true}).check();
+  await page.getByRole('button',{name:'保存设置',exact:true}).click();
+  expect((await probe(page)).state).toMatchObject({hasDoubaoApiKey:false,hasApiKey:true}); expect((await probe(page)).saves.at(-1)).toMatchObject({clearDoubaoApiKey:true});
+  expect(tts).toEqual([]); expect((await probe(page)).events).not.toContain('restart');
+});
+
+test('豆包凭证保存失败仍清空，重新填写后应用；官方链接与720p窗口可操作', async ({page}) => {
+  const tts = await setup(page); await page.getByRole('combobox',{name:'朗读方式',exact:true}).selectOption('doubao');
+  await page.evaluate(() => { (window as unknown as {__doubaoSettings:Probe}).__doubaoSettings.failNext = true; });
+  const key = page.getByRole('textbox',{name:'豆包语音 API Key',exact:true}); await key.fill('mock-doubao-failed-key');
+  await page.getByRole('button',{name:'保存设置',exact:true}).click(); await expect(key).toHaveValue(''); await expect(page.locator('.desktop-setting-error')).toContainText('模拟保存失败');
+  expect((await probe(page)).state.hasDoubaoApiKey).toBe(false);
+  await key.fill('mock-doubao-retry-key'); await page.getByRole('button',{name:'应用并重启',exact:true}).click(); await expect(key).toHaveValue('');
+  expect((await probe(page)).events.slice(-2)).toEqual(['save','restart']);
+  await page.getByRole('button',{name:'打开豆包官方试用指南',exact:true}).click(); await page.getByRole('button',{name:'打开火山引擎控制台',exact:true}).click();
+  expect((await probe(page)).pages).toEqual(['doubao-guide','doubao-console']); expect(tts).toEqual([]);
+  await page.setViewportSize({width:1280,height:720}); await key.scrollIntoViewIfNeeded(); await expect(key).toBeInViewport({ratio:1});
+  await page.screenshot({path:'test-results/doubao-restored-settings-720.png',fullPage:true});
 });
 
 test('专业解题凭证提交失败仍清空，允许重新填写后显式重试', async ({page}) => {
@@ -105,4 +139,6 @@ test('本机加密不可用时禁止填写解题凭证，本地参考音色仍�
   const tts = await setup(page,{encryptionAvailable:false}); await chooseLocal(page); await page.locator('.desktop-advanced summary').click();
   await expect(page.getByRole('textbox',{name:'OpenAI API Key',exact:true})).toBeDisabled(); await expect(page.getByRole('combobox',{name:'CosyVoice 中文音色',exact:true})).toBeEnabled();
   await page.getByRole('button',{name:'保存设置',exact:true}).click(); expect((await probe(page)).saves.at(-1)).toMatchObject({ttsEngine:'cosy'}); expect(tts).toEqual([]);
+  await page.getByRole('combobox',{name:'朗读方式',exact:true}).selectOption('doubao');
+  await expect(page.getByRole('textbox',{name:'豆包语音 API Key',exact:true})).toBeDisabled();
 });

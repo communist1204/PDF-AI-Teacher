@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DesktopPreferences, DesktopSettings, DesktopTeacherBridge } from '../../../../../packages/shared/desktop';
 import { normalizeSpeechEngine } from '../../../../../packages/shared/localSpeech';
-import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE } from '../../../../../packages/shared/doubaoSpeech';
+import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_VOICES } from '../../../../../packages/shared/doubaoSpeech';
 import { COSY_TTS_VOICES, DEFAULT_COSY_TTS_VOICE, isCosyVoice, type CosyVoiceId } from '../../../../../packages/shared/cosySpeech';
 import { COSY_AUDITION_TEXT, type CosyAuditionState } from '../voice/CosyVoiceAudition';
 import './desktopSettings.css';
 
 function preferences(settings: DesktopSettings): DesktopPreferences {
   const { mode, chatModel, visionModel, reasoningEffort, ttsModel, ttsVoice, ttsInstructions } = settings;
-  return { mode, chatModel, visionModel, reasoningEffort, ttsModel, ttsVoice, ttsInstructions, ttsEngine: settings.ttsEngine === 'doubao' || settings.ttsEngine === 'openai' ? 'cosy' : normalizeSpeechEngine(settings.ttsEngine), cosyTtsVoice: isCosyVoice(settings.cosyTtsVoice) ? settings.cosyTtsVoice : DEFAULT_COSY_TTS_VOICE, doubaoTtsVoice: settings.doubaoTtsVoice ?? DEFAULT_DOUBAO_TTS_VOICE, doubaoTtsInstructions: settings.doubaoTtsInstructions ?? DEFAULT_DOUBAO_TTS_INSTRUCTIONS };
+  return { mode, chatModel, visionModel, reasoningEffort, ttsModel, ttsVoice, ttsInstructions, ttsEngine: settings.ttsEngine === 'openai' ? 'cosy' : normalizeSpeechEngine(settings.ttsEngine), cosyTtsVoice: isCosyVoice(settings.cosyTtsVoice) ? settings.cosyTtsVoice : DEFAULT_COSY_TTS_VOICE, doubaoTtsVoice: settings.doubaoTtsVoice ?? DEFAULT_DOUBAO_TTS_VOICE, doubaoTtsInstructions: settings.doubaoTtsInstructions ?? DEFAULT_DOUBAO_TTS_INSTRUCTIONS };
 }
 
 type Props = { bridge: DesktopTeacherBridge; onChange: (settings: DesktopSettings) => void; onBeforeAccountChange: () => void; auditionAvailable: boolean; auditionState: CosyAuditionState; onAudition: (voice: CosyVoiceId) => void; onStopAudition: () => void };
@@ -17,6 +17,8 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
   const [draft, setDraft] = useState<DesktopPreferences | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [clearApiKey, setClearApiKey] = useState(false);
+  const [doubaoApiKey, setDoubaoApiKey] = useState('');
+  const [clearDoubaoApiKey, setClearDoubaoApiKey] = useState(false);
   const [pending, setPending] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -72,16 +74,18 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
     if (draft.mode === 'chatgpt' && settings.models.length && [draft.chatModel, draft.visionModel].some(id => !settings.models.some(model => model.id === id))) throw new Error('请从此账号返回的模型列表中选择文字和看图解题模型。');
     if (draft.mode === 'api' && !apiKey.trim() && (!settings.hasApiKey || clearApiKey)) throw new Error('API 模式需要填写本机 API Key。也可以使用 ChatGPT 登录或本地演示。');
     const key = apiKey.trim();
-    setApiKey('');
-    const value = await bridge.saveSettings({ ...draft, ...(key ? { apiKey: key } : {}), ...(clearApiKey ? { clearApiKey: true } : {}) });
+    const doubaoKey = doubaoApiKey.trim();
+    setApiKey(''); setDoubaoApiKey('');
+    const value = await bridge.saveSettings({ ...draft, ...(key ? { apiKey: key } : {}), ...(clearApiKey ? { clearApiKey: true } : {}), ...(doubaoKey ? { doubaoApiKey: doubaoKey } : {}), ...(clearDoubaoApiKey ? { clearDoubaoApiKey: true } : {}) });
     setApiKey(''); setClearApiKey(false);
+    setDoubaoApiKey(''); setClearDoubaoApiKey(false);
     if (!mounted.current) return;
     accept(value);
     if (restart) { onBeforeAccountChange(); await bridge.restart(); }
     else setNotice('设置已保存在本机，点击「应用并重启」后生效。');
   };
   const update = <K extends keyof DesktopPreferences>(field: K, value: DesktopPreferences[K]) => setDraft(current => current ? { ...current, [field]: value } : current);
-  const dirty = !!draft && !!settings && (JSON.stringify(draft) !== JSON.stringify(preferences(settings)) || !!apiKey || clearApiKey);
+  const dirty = !!draft && !!settings && (JSON.stringify(draft) !== JSON.stringify(preferences(settings)) || !!apiKey || clearApiKey || !!doubaoApiKey || clearDoubaoApiKey);
   const account = settings?.auth;
   const busy = !!pending;
   const modelInput = (field: 'chatModel' | 'visionModel', label: string) => draft && <label>{label}{draft.mode === 'chatgpt' && settings?.models.length ? <select aria-label={label} value={draft[field]} onChange={event => update(field, event.target.value)}>{!settings.models.some(model => model.id === draft[field]) && <option value={draft[field]}>请选择账号可用模型</option>}{settings.models.map(model => <option key={model.id} value={model.id}>{model.name} · {model.id}</option>)}</select> : <input aria-label={label} value={draft[field]} onChange={event => update(field, event.target.value)} maxLength={120} placeholder="例如 gpt-6-astra"/>}</label>;
@@ -107,7 +111,7 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
         <p className="desktop-setting-note">复杂理论可优先选择账号可用的高能力模型；不会为了朗读方便更换解题模型。GPT-6 Astra / xhigh 是配置建议，权限、推理强度支持及真实解题质量需验证。{draft.mode === 'chatgpt' && !settings.models.length && ' 账号模型列表尚未取得。'}</p>
       </fieldset>
       <fieldset disabled={busy} className="desktop-model-fields desktop-speech-fields"><legend>朗读声音</legend>
-        <label>朗读方式<select aria-label="朗读方式" value={draft.ttsEngine ?? 'none'} onChange={event => { onStopAudition(); update('ttsEngine', event.target.value as DesktopPreferences['ttsEngine']); }}><option value="none">关闭朗读（稍后配置）</option><option value="cosy">CosyVoice 3（本机 GPU · 六种参考音色）</option></select></label>
+        <label>朗读方式<select aria-label="朗读方式" value={draft.ttsEngine ?? 'none'} onChange={event => { onStopAudition(); update('ttsEngine', event.target.value as DesktopPreferences['ttsEngine']); }}><option value="none">关闭朗读（稍后配置）</option><option value="cosy">CosyVoice 3（本机 GPU · 六种参考音色）</option><option value="doubao">豆包语音 2.0（在线额度按账号）</option></select></label>
         {draft.ttsEngine === 'none' && <p>朗读已关闭。阅读 PDF、文字问答和板书可继续使用；选择并配置声音后再试听。</p>}
         {draft.ttsEngine === 'cosy' && <div className="desktop-cosy-fields">
           <p>CosyVoice 3 在本机显卡生成 AI 合成声音，不需要 API Key，不上传朗读文字。这里是你选定六种声音的本地参考版，参考官方公开样音近似生成，不等同于官方云端原版。</p>
@@ -122,8 +126,21 @@ export default function DesktopSettingsPanel({ bridge, onChange, onBeforeAccount
           <p className="desktop-setting-note">安装好本机模型后，保存并「应用并重启」。首次朗读需要加载模型，后续复用；声音一边生成一边播放。暂停、续读和 0.25–3× 调速仍使用底部播放器。</p>
           <p className="desktop-setting-note">试听可使用尚未保存的音色；选择和保存不会自动发声。保存并应用后，PDF 朗读使用所选音色。关闭设置会停止试听，原文由你点击继续。运行状态见下方「本机语音状态」。</p>
         </div>}
+        {draft.ttsEngine === 'doubao' && <div className="desktop-doubao-fields">
+          <p>豆包语音 2.0 是在线 AI 合成声音。你主动朗读的文本会发送至火山引擎，解题继续使用上方选择的账号和专业模型。</p>
+          <fieldset disabled={!settings.encryptionAvailable} aria-label="豆包声音凭证">
+            <label>豆包语音 API Key<input type="password" aria-label="豆包语音 API Key" autoComplete="new-password" spellCheck={false} value={doubaoApiKey} onChange={event => { setDoubaoApiKey(event.target.value); setClearDoubaoApiKey(false); }} placeholder={settings.hasDoubaoApiKey ? '已保存；填新 Key 可替换，留空保留' : '只在本机填写，不要发送到聊天'} maxLength={500}/></label>
+            <p className="desktop-setting-note" role="status">{settings.hasDoubaoApiKey ? '已保存豆包 API Key；在上方粘贴新 Key 后保存即可替换，留空保持原 Key。' : '请填写火山引擎「豆包语音」服务的 API Key，并确认已开通语音合成 2.0。'} 凭证由本机桌面程序加密保管，提交后输入框清空，不会回显。</p>
+            {settings.hasDoubaoApiKey && <label className="desktop-check"><input type="checkbox" checked={clearDoubaoApiKey} onChange={event => { setClearDoubaoApiKey(event.target.checked); if (event.target.checked) setDoubaoApiKey(''); }}/>删除本机保存的豆包 API Key（保存后生效）</label>}
+          </fieldset>
+          <label>豆包中文音色<select aria-label="豆包中文音色" value={draft.doubaoTtsVoice ?? DEFAULT_DOUBAO_TTS_VOICE} onChange={event => update('doubaoTtsVoice', event.target.value)}>{DOUBAO_TTS_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</select></label>
+          <label>豆包朗读语气<textarea aria-label="豆包朗读语气" value={draft.doubaoTtsInstructions ?? DEFAULT_DOUBAO_TTS_INSTRUCTIONS} onChange={event => update('doubaoTtsInstructions', event.target.value)} rows={3} maxLength={1000}/></label>
+          <p className="desktop-setting-note">保存设置 → 应用并重启 → 选一小段 PDF 正文 → 朗读所选。保存和切换选项不会请求语音；播放时仍可原位调速、暂停和续读。</p>
+          <p className="desktop-setting-note">剩余额度及有效期请在火山引擎控制台确认；超出额度可能计费。提前准备的下一句也可能使用额度，停止会取消尚未完成的准备。</p>
+          <div className="desktop-setting-actions"><button className="text-button" onClick={() => void run('link', () => bridge.openAccountPage('doubao-guide'))}>打开豆包官方试用指南</button><button className="text-button" onClick={() => void run('link', () => bridge.openAccountPage('doubao-console'))}>打开火山引擎控制台</button></div>
+        </div>}
       </fieldset>
-      <details className="desktop-advanced"><summary>高级 API 配置（可选）</summary><p>仅独立 API 解题需要此配置。使用 ChatGPT 账号解题或本机语音朗读，都不需要在这里填写 Key；专业解题模型保持上方选择。</p><fieldset disabled={busy || !settings.encryptionAvailable}>
+      <details className="desktop-advanced"><summary>高级 API 配置（可选）</summary><p>这里仅用于独立 API 解题。豆包朗读请填写上方的「豆包语音 API Key」；使用 ChatGPT 账号解题或本机语音朗读无需在这里填写 Key。</p><fieldset disabled={busy || !settings.encryptionAvailable}>
         <label>OpenAI API Key<input type="password" aria-label="OpenAI API Key" autoComplete="new-password" spellCheck={false} value={apiKey} onChange={event => { setApiKey(event.target.value); setClearApiKey(false); }} placeholder={settings.hasApiKey ? '已保存；留空保持原 Key' : '只在本机填写，不要发送到聊天'} maxLength={512}/></label>
         <p className="desktop-setting-note">{settings.hasApiKey ? '本机已保存 API Key；不会回显。' : '尚未保存 API Key。'} 保存后输入框清空，凭证由桌面程序加密保管。</p>
         {settings.hasApiKey && <label className="desktop-check"><input type="checkbox" checked={clearApiKey} onChange={event => { setClearApiKey(event.target.checked); if (event.target.checked) setApiKey(''); }}/>删除本机保存的 API Key（保存后生效）</label>}

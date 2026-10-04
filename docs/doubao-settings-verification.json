@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-04T09:33:07.913Z",
+  "kind": "packaged-desktop-dummy-keys",
+  "encryptionAvailable": true,
+  "addAndReplaceKey": true,
+  "plaintextAbsentFromVaultPublicSettingsAndBrowserStorage": true,
+  "restartPreservesDoubaoVoiceAndInstruction": true,
+  "cosySixVoicesRetained": true,
+  "switchPreservesKey": true,
+  "explicitDelete": true,
+  "professionalPreferencesUnchanged": true,
+  "speechRequests": 0,
+  "pageErrors": [],
+  "realDoubaoApi": "未测；仅隔离配置与假 Key，不调用真实语音服务",
+  "userProfileAccessed": false
+}

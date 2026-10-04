@@ -39,7 +39,7 @@ test('桌面声音加入 CosyVoice 3，仍不显示已移除的声音或设备',
   });
   await page.goto('/');await page.getByRole('button',{name:'声音设置',exact:true}).click();
   const engine=page.getByRole('combobox',{name:'朗读方式',exact:true});await expect(engine).toHaveValue('none');
-  expect(await engine.locator('option').evaluateAll(options=>options.map(option=>(option as HTMLOptionElement).value))).toEqual(['none','cosy']);
+  expect(await engine.locator('option').evaluateAll(options=>options.map(option=>(option as HTMLOptionElement).value))).toEqual(['none','cosy','doubao']);
   await expect(page.getByRole('dialog')).not.toContainText(/Qwen|Kokoro|系统基本语音|CUDA/u);
   await expect(page.getByRole('combobox',{name:'本地中文音色',exact:true})).toHaveCount(0);
   await expect(page.getByRole('combobox',{name:'Qwen3 运算设备',exact:true})).toHaveCount(0);

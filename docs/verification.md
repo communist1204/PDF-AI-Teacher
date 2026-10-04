@@ -1,5 +1,15 @@
 # M0/M1/M2/M3 验收记录
 
+## 2026-10-04：豆包入口恢复与本机新 Key 配置
+
+- 修改前完整读取项目约定与需求；根仓库起始 HEAD 3278ec6，工作区干净。Node 24.19.0、npm 11.17.0、Git 2.50.1.windows.1。后端使用独立 worktree，最小改动 cherry-pick 为 8b809fb。只操作本项目，不改 Conda/CUDA、代理或训练进程。
+- 静态/单元：`npm run typecheck`、`npm run lint`、`npm test -- --reporter=dot` 通过，38 文件 / 952 项测试。覆盖豆包选择保留、独立 Key 替换、专业偏好保留与两引擎配置。新桌面验证脚本 lint 初次发现 localStorage/sessionStorage 全局声明缺失，改为显式 window 属性后 lint 通过。
+- 浏览器：`npx playwright test tests/e2e/doubao-settings.spec.ts tests/e2e/desktop-settings.spec.ts tests/e2e/retired-speech-ui.spec.ts tests/e2e/cosy-voices.spec.ts tests/e2e/cloud-speech-ui.spec.ts tests/e2e/cloud-rate-position.spec.ts tests/e2e/cloud-wait-ui.spec.ts` 初次 32/33 通过。唯一失败为旧高级 API 文案断言；更新成两类 Key 的正确指引后，`npx playwright test tests/e2e/desktop-settings.spec.ts` 4/4 通过。共 33 个相关用例最终通过，非全量 e2e。云音频为模拟 WAV，不能视为豆包真实服务通过。
+- `npm run desktop:package` 实际通过（包含 typecheck、Vite build、桌面 build、Windows 打包）。Vite 提示已有 bundle 超 500KB，开发测试提示 HMR 配置弃用；未阻断构建，不为消除提示扩大本次修复范围。
+- `node scripts/verify-desktop-doubao-settings.mjs`：真实打包 EXE、隔离 profile、两条固定假 Key；新增/替换后清空、Windows 加密文件不含假 Key 明文、公共设置与浏览器存储不回显；关闭重开保留豆包/音色/语气；切回本机六音色保留 Key；显式删除生效。0 次 TTS 请求、0 个页面错误。证据：[结果 JSON](doubao-settings-verification.json)、[豆包配置窗口](screenshots/doubao-restored-desktop-720.png)、[应用按钮窗口](screenshots/doubao-restored-actions-720.png)。两张 1280×720 实际页面截图已查看，输入、音色、语气和保存/应用按钮可滚动到达。
+- `node scripts/verify-desktop.mjs --packaged` 通过：PDF 真实选区、演示问答/KaTeX、关闭恢复笔记、单窗口、回环访问保护和桌面加密验证；[结果](desktop-smoke.json)。Computer Use 原生工具初始化失败，改用项目 Playwright/Electron 实际交互，不以终端成功代替 UI 检查。
+- 未读取用户真实 Key、未请求真实豆包服务、未真人试听。本轮不能确认新 Key 权限/余额、实际延迟或音质。自动审批对外发授权的首次拒绝及用户随后明确同意已记录于 decisions；最终恢复以主动朗读为触发条件，无启动/保存自动朗读。
+
 ## 2026-10-03：科研TTS资料与测试输入准备
 
 - 实际打开ACL/AAAI会录、作者仓库、模型卡、推理代码与硬件基准；核验结论见 [research-tts.md](research-tts.md)。作者成绩均标明设备/条件，没有写成5080实测或本产品通过。

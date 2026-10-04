@@ -83,7 +83,8 @@ test('专业解题 API 凭证独立保存且不回显、不写入网页存储，
   await setup(page, true); await page.getByRole('button', { name: 'ChatGPT 账号设置', exact: true }).click();
   await page.getByRole('combobox', { name: '朗读方式' }).selectOption('cosy');
   await page.locator('.desktop-advanced summary').click();
-  await expect(page.locator('.desktop-advanced')).toContainText('仅独立 API 解题需要此配置');
+  await expect(page.locator('.desktop-advanced')).toContainText('这里仅用于独立 API 解题');
+  await expect(page.locator('.desktop-advanced')).toContainText('豆包朗读请填写上方的「豆包语音 API Key」');
   const key = page.getByRole('textbox', { name: 'OpenAI API Key' });
   await expect(key).toHaveAttribute('type', 'password');
   await key.fill('mock-key-only-not-a-secret'); await page.getByRole('combobox', { name: 'CosyVoice 中文音色' }).selectOption('local_longfei_v3');

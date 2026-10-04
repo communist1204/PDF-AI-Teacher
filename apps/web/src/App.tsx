@@ -390,7 +390,7 @@ export default function App() {
   const startLesson=async(mode=lessonMode)=>{
     if(!readingTarget?.sourceText.trim()||!config){setError('请先选择原文。');return;}
     if(!canPlaySpeech(config)){setError(speechUnavailableMessage(config));return;}
-    if(mode!=='read'&&config.mode==='unconfigured'){setError('解题模型尚未配置。可启用本机声音后选择「只朗读」。');return;}
+    if(mode!=='read'&&config.mode==='unconfigured'){setError('解题模型尚未配置。可配置朗读声音后选择「只朗读」。');return;}
     if(mode==='read'&&!splitSourceSentences(readingTarget.sourceText,'prose').length){cancel();setError('已跳过公式和难读内容，这个选区没有可朗读的正文。');return;}
     setError('');setLocked(structuredClone(readingTarget));audio.current?.setRate(rate);audio.current?.setVolume(volume);
     try{await classroom.current?.start(readingTarget,mode,lessonUnit);}catch(error){setError((error as Error).message);}

@@ -54,7 +54,7 @@ test('仅六种本地参考音色可选，选择保存不发声，偏好重开�
     await settings(page); const voice = page.getByRole('combobox', { name: 'CosyVoice 中文音色', exact: true });
     expect(await voice.locator('option').evaluateAll(items => items.map(item => (item as HTMLOptionElement).value))).toEqual([...COSY_TTS_VOICE_IDS]);
     expect([...COSY_TTS_VOICE_IDS]).toEqual(['local_longanyang','local_longanhuan_v3','local_longfei_v3','local_longxiaochun_v3','local_longxiaoxia_v3','local_longanyun_v3']);
-    expect(await page.getByRole('combobox', { name: '朗读方式', exact: true }).locator('option').evaluateAll(items => items.map(item => (item as HTMLOptionElement).value))).toEqual(['none','cosy']);
+    expect(await page.getByRole('combobox', { name: '朗读方式', exact: true }).locator('option').evaluateAll(items => items.map(item => (item as HTMLOptionElement).value))).toEqual(['none','cosy','doubao']);
     await expect(page.locator('.desktop-cosy-fields')).toContainText('不等同于官方云端原版');
     await expect(page.locator('.cosy-audition-card')).toContainText('本机生成');
     await expect(page.locator('.cosy-audition-card')).toContainText('二零二六年');
