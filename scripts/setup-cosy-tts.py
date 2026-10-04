@@ -6,6 +6,8 @@ import concurrent.futures
 import hashlib
 import json
 import shutil
+import subprocess
+import sys
 import time
 import urllib.request
 import zipfile
@@ -126,6 +128,7 @@ def main() -> None:
                 'sourceArchives': [code, matcha], 'files': verified,
                 'weightsVerified': True, 'inferenceVerified': False}
     (RUNTIME / 'install-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+    subprocess.run([sys.executable, str(ROOT / 'scripts' / 'setup-cosy-voices.py')], check=True)
     print('All selected model files verified; inference is not yet verified.', flush=True)
 
 

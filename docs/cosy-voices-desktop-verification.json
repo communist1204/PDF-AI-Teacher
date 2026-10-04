@@ -1,0 +1,200 @@
+{
+  "date": "2026-10-03T17:46:14.225Z",
+  "kind": "real-packaged-desktop-six-local-GPU-auditions",
+  "cases": [
+    {
+      "voice": "cosy_default",
+      "clickToPlayingMs": 11322,
+      "midAudioWaits": [],
+      "events": [
+        {
+          "type": "waiting",
+          "index": 0,
+          "at": 1791049496720,
+          "position": 0
+        },
+        {
+          "type": "playing",
+          "index": 0,
+          "at": 1791049496760,
+          "position": 0
+        },
+        {
+          "type": "pause",
+          "index": 0,
+          "at": 1791049507052,
+          "position": 10.248
+        },
+        {
+          "type": "ended",
+          "index": 0,
+          "at": 1791049507052,
+          "position": 10.248
+        }
+      ]
+    },
+    {
+      "voice": "cosy_female_1",
+      "clickToPlayingMs": 1127,
+      "midAudioWaits": [],
+      "events": [
+        {
+          "type": "waiting",
+          "index": 1,
+          "at": 1791049508671,
+          "position": 0
+        },
+        {
+          "type": "playing",
+          "index": 1,
+          "at": 1791049508678,
+          "position": 0
+        },
+        {
+          "type": "pause",
+          "index": 1,
+          "at": 1791049520692,
+          "position": 11.976
+        },
+        {
+          "type": "ended",
+          "index": 1,
+          "at": 1791049520692,
+          "position": 11.976
+        }
+      ]
+    },
+    {
+      "voice": "cosy_female_2",
+      "clickToPlayingMs": 1358,
+      "midAudioWaits": [],
+      "events": [
+        {
+          "type": "waiting",
+          "index": 2,
+          "at": 1791049522405,
+          "position": 0
+        },
+        {
+          "type": "playing",
+          "index": 2,
+          "at": 1791049522413,
+          "position": 0
+        },
+        {
+          "type": "pause",
+          "index": 2,
+          "at": 1791049535302,
+          "position": 12.864
+        },
+        {
+          "type": "ended",
+          "index": 2,
+          "at": 1791049535303,
+          "position": 12.864
+        }
+      ]
+    },
+    {
+      "voice": "cosy_male_1",
+      "clickToPlayingMs": 1069,
+      "midAudioWaits": [],
+      "events": [
+        {
+          "type": "waiting",
+          "index": 3,
+          "at": 1791049536613,
+          "position": 0
+        },
+        {
+          "type": "playing",
+          "index": 3,
+          "at": 1791049536621,
+          "position": 0
+        },
+        {
+          "type": "pause",
+          "index": 3,
+          "at": 1791049547953,
+          "position": 11.304
+        },
+        {
+          "type": "ended",
+          "index": 3,
+          "at": 1791049547953,
+          "position": 11.304
+        }
+      ]
+    },
+    {
+      "voice": "cosy_male_2",
+      "clickToPlayingMs": 1270,
+      "midAudioWaits": [],
+      "events": [
+        {
+          "type": "waiting",
+          "index": 4,
+          "at": 1791049549307,
+          "position": 0
+        },
+        {
+          "type": "playing",
+          "index": 4,
+          "at": 1791049549315,
+          "position": 0
+        },
+        {
+          "type": "pause",
+          "index": 4,
+          "at": 1791049560283,
+          "position": 10.944
+        },
+        {
+          "type": "ended",
+          "index": 4,
+          "at": 1791049560283,
+          "position": 10.944
+        }
+      ]
+    },
+    {
+      "voice": "cosy_male_3",
+      "clickToPlayingMs": 1199,
+      "midAudioWaits": [],
+      "events": [
+        {
+          "type": "waiting",
+          "index": 5,
+          "at": 1791049561681,
+          "position": 0
+        },
+        {
+          "type": "playing",
+          "index": 5,
+          "at": 1791049561689,
+          "position": 0
+        },
+        {
+          "type": "pause",
+          "index": 5,
+          "at": 1791049572383,
+          "position": 10.656
+        },
+        {
+          "type": "ended",
+          "index": 5,
+          "at": 1791049572383,
+          "position": 10.656
+        }
+      ]
+    }
+  ],
+  "persistedAfterRelaunch": true,
+  "appliedVoice": "cosy_male_3",
+  "maximumSimultaneousAudio": 1,
+  "selectionStopsAudio": true,
+  "closeStopsAudio": true,
+  "errors": [],
+  "cloudRequests": false,
+  "humanListening": "未测；这里检查真实 GPU 合成与播放器事件，不评价自然度"
+}

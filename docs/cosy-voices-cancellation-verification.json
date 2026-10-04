@@ -1,0 +1,34 @@
+{
+  "cases": [],
+  "humanListening": "not-tested",
+  "ready": {
+    "type": "ready",
+    "sampleRate": 24000,
+    "device": "cuda",
+    "deviceName": "NVIDIA GeForce RTX 5080",
+    "referenceEncoderDevice": "cpu",
+    "model": "Fun-CosyVoice3-0.5B-2512",
+    "loadMs": 9410
+  },
+  "coldReadyMs": 9468,
+  "cancelBeforeFirstTokenMs": 1,
+  "afterCancel": {
+    "voice": "cosy_default",
+    "referenceLoadMs": 0,
+    "firstPcmMs": 1176,
+    "firstMp3Ms": 1183,
+    "totalMs": 2056,
+    "audioSeconds": 4.0,
+    "gpuAllocatedMiB": 3313
+  },
+  "cancelDuringGenerationMs": 113,
+  "afterMidCancel": {
+    "voice": "cosy_default",
+    "referenceLoadMs": 0,
+    "firstPcmMs": 839,
+    "firstMp3Ms": 844,
+    "totalMs": 2044,
+    "audioSeconds": 4.6,
+    "gpuAllocatedMiB": 3313
+  }
+}

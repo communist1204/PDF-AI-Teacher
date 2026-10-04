@@ -579,3 +579,13 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 |未测|真人音质、长教材多音字/语义发音、与OpenAI/豆包盲听、20分钟真人学习；没有测试真实云服务。固定示例音色不表示声音商用权已核实。|
 
 当前A06/A07/A18音频的本机实测与自动化部分通过，真人听感仍待用户。运行与复现见[CosyVoice说明](cosyvoice-setup.md)。首次加载后约1–2秒首块是本机小样本结果；高倍速、GPU竞争或其他文本可能等待更久，不承诺全场景不卡顿。
+# 2026-10-04：六音色接入与官方音色库试听
+
+- 已执行：`npm run typecheck`、`npm run lint`、`npm test`（935项／38文件）、`npm run test:e2e`（108项完整Edge）、`npm run desktop:package`均通过。构建仍提示较大的前端chunk，不影响构建成功。`py -3.11 scripts/test-cosy-voices.py` 7项通过，覆盖参考缺失、损坏、未知ID、路径越界、重复条目、manifest恢复；安装脚本重复执行后全部哈希通过。
+- 真实本地GPU：`py -3.11 scripts/verify-cosy-voices.py` 对6个声音用同一169字段落合成，首MP3 1.04–1.34秒（不含9.9秒模型加载），声音31–36秒、生成11.6–13.9秒。回切已用音色参考编码0ms，未加载第二个模型。数据在[六音色GPU记录](cosy-voices-verification.json)，原音频在被Git忽略的`cosy-tts-runtime/verification/voices/`。哈希不同不是人耳能区分声线或好听的证明。
+- 真实取消：`py -3.11 scripts/verify-cosy-runtime.py --cancel-only`通过，首token前取消1ms、中途取消113ms，同进程随后成功发声，见[取消记录](cosy-voices-cancellation-verification.json)。
+- 真实打包桌面：`node scripts/verify-desktop-cosy-voices.mjs` 用独立本地测试配置，对6个音色逐个真实GPU合成并通过HTMLAudio/MSE播完；首个冷启动11.32秒，后5个点击到播放1.07–1.36秒，独立复测均无中途waiting。切换/关窗停播、单一音源、保存后重启恢复新音色通过，见[桌面记录](cosy-voices-desktop-verification.json)及[实际界面截图](screenshots/cosy-six-voices-desktop.png)，截图已查看。
+- 保留失败：第一次桌面测试与8个Edge测试worker同时运行，默认音色在1.13秒和3.16秒播放位置出现waiting，见[并行负载失败记录](cosy-voices-desktop-stress-verification.json)。结束其他测试后同脚本独立重跑通过；不承诺任何系统负载下都不卡。未删除断言或替换为mock。
+- 模拟与真实边界：108项E2E包含真实PDF、真实MSE媒体管线，但云模型/音频fixture仍是模拟；没有新调用ChatGPT、OpenAI或豆包。六音色新增预览的问答并行、晚到声音拒绝和原文续读由自动测试验证。计划补做的新增音色完整PDF两句GPU播放测试被用户新指令中断，未执行，不计通过；此前默认声音的真实PDF播放记录仍保留。
+- 用户主观结果：随后明确反馈当前六个声音不够好听，声音质量未获认可。未做“优于豆包/OpenAI”的结论，没有真人盲听或长篇教材发音正确率评测。转向用户先选音色。
+- 新试听入口核验：公开[CosyVoice官方音色库](https://help.aliyun.com/zh/model-studio/cosyvoice-voice-list)不登录即可显示216个audio元素（含不同模型，不代表216个唯一音色）。独立Edge测试实际播放「龙三叔」样音，音频长19.52秒且currentTime前进，未填Key/提交PDF/请求合成；[研究demo新地址](https://qwenaudio.github.io/cosyvoice3/)也可访问。内置浏览器/Windows助手启动失败（kernel退出），改为默认浏览器打开公开链接，并用项目Playwright独立浏览器验证，未操作用户登录资料。

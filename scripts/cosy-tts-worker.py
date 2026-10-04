@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -22,6 +23,36 @@ JOBS: queue.Queue = queue.Queue(maxsize=4)
 CANCEL: dict[str, threading.Event] = {}
 CANCEL_LOCK = threading.Lock()
 CURRENT = threading.Event()
+VOICE_IDS = frozenset(('cosy_default', 'cosy_female_1', 'cosy_female_2',
+                       'cosy_male_1', 'cosy_male_2', 'cosy_male_3'))
+
+
+class VoiceReferenceError(Exception):
+    """An optional reference is missing or invalid; the GPU model remains usable."""
+
+
+def load_voice_reference(runtime: Path, voice: str) -> tuple[str, Path]:
+    if voice not in VOICE_IDS or voice == 'cosy_default':
+        raise VoiceReferenceError('Unknown additional voice')
+    try:
+        folder = runtime / 'voices'
+        manifest = json.loads((folder / 'manifest.json').read_text(encoding='utf-8'))
+        matching = [item for item in manifest['voices'] if item['id'] == voice]
+        if len(matching) != 1:
+            raise ValueError('Voice missing or duplicate')
+        item = matching[0]
+        path = (folder / item['file']).resolve()
+        path.relative_to(folder.resolve())
+        if path.name != voice + '.wav' or path.stat().st_size > 2 * 1024 * 1024:
+            raise ValueError('Invalid reference file')
+        if hashlib.sha256(path.read_bytes()).hexdigest() != item['sha256']:
+            raise ValueError('Invalid reference checksum')
+        text = item['text']
+        if not isinstance(text, str) or not 1 <= len(text) <= 500:
+            raise ValueError('Invalid reference transcript')
+        return 'You are a helpful assistant.<|endofprompt|>' + text, path
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise VoiceReferenceError('Reference unavailable') from exc
 
 
 def emit(event: dict) -> None:
@@ -50,7 +81,8 @@ def receive() -> None:
                         event.set()
             elif msg.get('type') == 'speak':
                 text = msg.get('text')
-                if not isinstance(text, str) or not text.strip() or len(text) > 4000 or msg.get('voice', 'cosy_default') != 'cosy_default':
+                voice = msg.get('voice', 'cosy_default')
+                if not isinstance(text, str) or not text.strip() or len(text) > 4000 or not isinstance(voice, str) or voice not in VOICE_IDS:
                     error(job_id, 'invalid_request', '朗读参数无效。')
                     continue
                 with CANCEL_LOCK:
@@ -59,7 +91,7 @@ def receive() -> None:
                     event = threading.Event()
                     CANCEL[job_id] = event
                 try:
-                    JOBS.put_nowait((job_id, text, event))
+                    JOBS.put_nowait((job_id, text, voice, event))
                 except queue.Full:
                     with CANCEL_LOCK:
                         CANCEL.pop(job_id, None)
@@ -111,6 +143,7 @@ def main() -> None:
             prompt = repo / 'asset' / 'zero_shot_prompt.wav'
             cosy.add_zero_shot_spk('You are a helpful assistant.<|endofprompt|>希望你以后能够做的比我还好呦。',
                                    str(prompt), 'cosy_default')
+            loaded_voices = {'cosy_default'}
             encoder = imageio_ffmpeg.get_ffmpeg_exe()
         # Wrap the token iterator only to honor cancellation; full upstream cleanup still runs.
         original_inference = cosy.model.llm.inference
@@ -160,7 +193,7 @@ def main() -> None:
     threading.Thread(target=receive, daemon=True).start()
     while not STOP.is_set():
         try:
-            job_id, text, cancelled = JOBS.get(timeout=0.2)
+            job_id, text, voice, cancelled = JOBS.get(timeout=0.2)
         except queue.Empty:
             continue
         CURRENT = cancelled
@@ -169,12 +202,23 @@ def main() -> None:
         total_samples = 0
         first_pcm_ms = None
         first_mp3_ms = None
+        reference_load_ms = 0
         started = time.perf_counter()
         encoder_failed = threading.Event()
         fatal = False
         llm_errors.clear()
         try:
             if cancelled.is_set():
+                error(job_id, 'cancelled', '朗读已取消。')
+                continue
+            if voice not in loaded_voices:
+                prompt_text, prompt_path = load_voice_reference(runtime, voice)
+                reference_started = time.perf_counter()
+                with contextlib.redirect_stdout(sys.stderr), torch.inference_mode():
+                    cosy.add_zero_shot_spk(prompt_text, str(prompt_path), voice)
+                loaded_voices.add(voice)
+                reference_load_ms = round((time.perf_counter() - reference_started) * 1000)
+            if cancelled.is_set() or STOP.is_set():
                 error(job_id, 'cancelled', '朗读已取消。')
                 continue
             process = subprocess.Popen([
@@ -203,7 +247,7 @@ def main() -> None:
             # Upstream grows this instance field during a stream; restore its original first-hop budget.
             cosy.model.token_hop_len = initial_hop
             with contextlib.redirect_stdout(sys.stderr), torch.inference_mode():
-                for output in cosy.inference_zero_shot(text, '', '', zero_shot_spk_id='cosy_default',
+                for output in cosy.inference_zero_shot(text, '', '', zero_shot_spk_id=voice,
                                                        stream=True, speed=1.0, text_frontend=False):
                     if cancelled.is_set() or STOP.is_set() or llm_errors:
                         continue
@@ -233,11 +277,14 @@ def main() -> None:
                 error(job_id, 'empty_audio', '本地模型没有生成可播放声音。')
             else:
                 emit({'type': 'done', 'id': job_id, 'metrics': {
+                    'voice': voice, 'referenceLoadMs': reference_load_ms,
                     'firstPcmMs': first_pcm_ms, 'firstMp3Ms': first_mp3_ms,
                     'totalMs': round((time.perf_counter()-started)*1000),
                     'audioSeconds': total_samples / cosy.sample_rate,
                     'gpuAllocatedMiB': round(torch.cuda.memory_allocated()/1024**2),
                 }})
+        except VoiceReferenceError:
+            error(job_id, 'voice_unavailable', '所选音色参考文件缺失或损坏，请运行项目的 setup-cosy-voices.py 修复后重试。')
         except Exception as exc:
             fatal = True
             sys.stderr.write('CosyVoice synthesis failed: ' + type(exc).__name__ + '\n')
