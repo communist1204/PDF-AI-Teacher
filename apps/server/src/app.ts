@@ -291,7 +291,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     const cosyVoice = request.cosyVoice ?? config.cosyTtsVoice ?? DEFAULT_COSY_TTS_VOICE;
     checkFresh(lane, request);
     setEnvelope(res, request);
-    if (speechEngine === 'none') throw new HttpError(503, 'speech_not_configured', '朗读已关闭。请在设置中选择本机 CosyVoice 3 和本地参考音色；不会自动请求云语音。');
+    if (speechEngine === 'none') throw new HttpError(503, 'speech_not_configured', '朗读已关闭。请在设置中选择本机 CosyVoice 3 或豆包语音；配置后仅在主动朗读时生成声音。');
     if (!usingCosyTts && !usingDoubaoTts && config.demoMode) throw new HttpError(409, 'demo_tts', '演示模式未调用 OpenAI TTS。请在本机完成相应接口配置后再朗读。');
     if (usingCosyTts && !cosyProvider?.ready()) throw new HttpError(503, 'cosy_not_installed', 'CosyVoice 3 本地环境未安装完整，请完成本项目语音安装后重试；没有切换到云语音。');
     if (usingDoubaoTts && !doubaoReady) throw new HttpError(503, 'doubao_not_configured', '豆包语音尚未配置。请在声音设置中填写本机豆包 API Key，并先到官方控制台确认试用额度；没有改用其他服务。');
