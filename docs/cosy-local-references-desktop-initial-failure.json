@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-04",
+  "kind": "real-packaged-desktop-local-reference-initial-buffer-failure",
+  "voice": "local_longanyang",
+  "command": "node scripts/verify-desktop-cosy-voices.mjs",
+  "assertion": "midAudioWaits must be empty",
+  "actual": [{ "type": "waiting", "position": 0.788164, "index": 0 }],
+  "notes": "First local-reference desktop run ended at this assertion. No other GPU task was running. Earlier source-encoding/model data are not evidence of smooth playback. Failure retained; initial stream buffering is being corrected.",
+  "humanListening": "not-tested"
+}

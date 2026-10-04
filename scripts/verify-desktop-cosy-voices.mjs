@@ -3,7 +3,7 @@ import { _electron as electron, expect } from '@playwright/test';
 import { resolve } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 
-const voices = ['cosy_default','cosy_female_1','cosy_female_2','cosy_male_1','cosy_male_2','cosy_male_3'];
+const voices = ['local_longanyang','local_longanhuan_v3','local_longfei_v3','local_longxiaochun_v3','local_longxiaoxia_v3','local_longanyun_v3'];
 const env = { ...process.env, PDF_TEACHER_DATA_DIR: resolve('test-results', `cosy-voices-desktop-${Date.now()}`), PDF_TEACHER_TEST_MODE: '1' };
 delete env.ELECTRON_RUN_AS_NODE;
 const options = { executablePath: resolve('release/PDF AI Teacher-win32-x64/PDF AI Teacher.exe'), args: [], env, timeout: 45000 };
@@ -51,33 +51,34 @@ try {
     await expect(page.locator('.cosy-audition-status')).toContainText('试听结束',{timeout:60000});
     const after=await probe(page); const events=after.events.filter(item=>item.index===before.count);
     const waits=events.filter(item=>item.type==='waiting'&&item.position>0.1);
-    expect(waits).toEqual([]); expect(after.maximum).toBe(1);
     cases.push({voice,clickToPlayingMs:events.find(item=>item.type==='playing').at-clicked,midAudioWaits:waits,events});
+    await writeFile('test-results/cosy-reference-playback-checkpoint.json',JSON.stringify({cases,maximum:after.maximum},null,2)+'\n');
+    expect(waits).toEqual([]); expect(after.maximum).toBe(1);
     console.log(JSON.stringify(cases.at(-1)));
   }
   // Explicit switching and closing stop audible output, even for a cached audition.
-  await select.selectOption('cosy_female_1'); await page.getByRole('button',{name:'试听这个音色',exact:true}).click();
+  await select.selectOption('local_longanhuan_v3'); await page.getByRole('button',{name:'试听这个音色',exact:true}).click();
   await expect.poll(async()=>(await probe(page)).time).toBeGreaterThan(0.1);
-  await select.selectOption('cosy_male_3'); expect((await probe(page)).active).toBe(0);
+  await select.selectOption('local_longanyun_v3'); expect((await probe(page)).active).toBe(0);
   await page.getByRole('button',{name:'试听这个音色',exact:true}).click();
   await expect.poll(async()=>(await probe(page)).time).toBeGreaterThan(0.1);
   await page.getByRole('button',{name:'关闭设置',exact:true}).click(); expect((await probe(page)).active).toBe(0);
-  await openSettings(page); await select.selectOption('cosy_male_3');
+  await openSettings(page); await select.selectOption('local_longanyun_v3');
   await page.getByRole('button',{name:'保存设置',exact:true}).click();
-  expect((await page.evaluate(()=>window.desktopTeacher.getSettings())).cosyTtsVoice).toBe('cosy_male_3');
+  expect((await page.evaluate(()=>window.desktopTeacher.getSettings())).cosyTtsVoice).toBe('local_longanyun_v3');
   await app.close(); app=undefined;
   page=await launch(); await openSettings(page);
-  await expect(page.getByRole('combobox',{name:'CosyVoice 中文音色',exact:true})).toHaveValue('cosy_male_3');
+  await expect(page.getByRole('combobox',{name:'CosyVoice 中文音色',exact:true})).toHaveValue('local_longanyun_v3');
   const config=await page.evaluate(()=>fetch('/api/config').then(response=>response.json()));
-  expect(config.speech.voice).toBe('cosy_male_3');
+  expect(config.speech.voice).toBe('local_longanyun_v3');
   await page.setViewportSize({width:1280,height:800});
   await page.locator('.cosy-audition-card').scrollIntoViewIfNeeded();
   await mkdir('docs/screenshots',{recursive:true});
-  await page.screenshot({path:'docs/screenshots/cosy-six-voices-desktop.png',fullPage:true});
+  await page.screenshot({path:'docs/screenshots/cosy-local-references-desktop.png',fullPage:true});
   expect(errors).toEqual([]); expect(requests.every(item=>item.lane==='speech')).toBe(true);
-  const result={date:new Date().toISOString(),kind:'real-packaged-desktop-six-local-GPU-auditions',cases,
+  const result={date:new Date().toISOString(),kind:'real-packaged-desktop-six-user-selected-local-GPU-reference-auditions',cases,
     persistedAfterRelaunch:true,appliedVoice:config.speech.voice,maximumSimultaneousAudio:1,selectionStopsAudio:true,
     closeStopsAudio:true,errors,cloudRequests:false,humanListening:'未测；这里检查真实 GPU 合成与播放器事件，不评价自然度'};
-  await writeFile('docs/cosy-voices-desktop-verification.json',JSON.stringify(result,null,2)+'\n');
+  await writeFile('docs/cosy-local-references-desktop-verification.json',JSON.stringify(result,null,2)+'\n');
   console.log('All six real GPU auditions played to completion; selection and persistence verified.');
 } finally { await app?.close(); }

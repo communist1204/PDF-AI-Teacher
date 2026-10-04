@@ -65,7 +65,7 @@ def main():
             print(json.dumps({'ready': ready, 'coldReadyMs': results['coldReadyMs']}), flush=True)
             for case_id, text in ([] if args.cancel_only else CASES):
                 begin = time.perf_counter()
-                send({'type': 'speak', 'id': case_id, 'text': text, 'voice': 'cosy_default'})
+                send({'type': 'speak', 'id': case_id, 'text': text, 'voice': 'local_longanyang'})
                 chunks, times = [], []
                 while True:
                     when, event = next_event()

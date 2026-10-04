@@ -6,7 +6,7 @@ const LOCAL_REFERENCE_DESCRIPTION = '本机 CosyVoice 3 0.5B 根据官方公开�
 export const COSY_TTS_VOICES: ReadonlyArray<{ id: CosyVoiceId; label: string; description: string }> = [
   { id: 'local_longanyang', label: '龙安洋·本地参考', description: LOCAL_REFERENCE_DESCRIPTION },
   { id: 'local_longanhuan_v3', label: '龙安欢·本地参考', description: LOCAL_REFERENCE_DESCRIPTION },
-  { id: 'local_longfei_v3', label: '龙飞·本地参考', description: LOCAL_REFERENCE_DESCRIPTION },
+  { id: 'local_longfei_v3', label: '龙飞·本地参考', description: LOCAL_REFERENCE_DESCRIPTION + ' 长段测试提示可能漏词，请先试听核对。' },
   { id: 'local_longxiaochun_v3', label: '龙小淳·本地参考', description: LOCAL_REFERENCE_DESCRIPTION },
   { id: 'local_longxiaoxia_v3', label: '龙小夏·本地参考', description: LOCAL_REFERENCE_DESCRIPTION },
   { id: 'local_longanyun_v3', label: '龙安昀·本地参考', description: LOCAL_REFERENCE_DESCRIPTION },

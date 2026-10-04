@@ -23,17 +23,18 @@ JOBS: queue.Queue = queue.Queue(maxsize=4)
 CANCEL: dict[str, threading.Event] = {}
 CANCEL_LOCK = threading.Lock()
 CURRENT = threading.Event()
-VOICE_IDS = frozenset(('cosy_default', 'cosy_female_1', 'cosy_female_2',
-                       'cosy_male_1', 'cosy_male_2', 'cosy_male_3'))
+DEFAULT_VOICE = 'local_longanyang'
+VOICE_IDS = frozenset((DEFAULT_VOICE, 'local_longanhuan_v3', 'local_longfei_v3',
+                       'local_longxiaochun_v3', 'local_longxiaoxia_v3', 'local_longanyun_v3'))
 
 
 class VoiceReferenceError(Exception):
     """An optional reference is missing or invalid; the GPU model remains usable."""
 
 
-def load_voice_reference(runtime: Path, voice: str) -> tuple[str, Path]:
-    if voice not in VOICE_IDS or voice == 'cosy_default':
-        raise VoiceReferenceError('Unknown additional voice')
+def load_voice_reference(runtime: Path, voice: str) -> Path:
+    if voice not in VOICE_IDS:
+        raise VoiceReferenceError('Unknown local reference voice')
     try:
         folder = runtime / 'voices'
         manifest = json.loads((folder / 'manifest.json').read_text(encoding='utf-8'))
@@ -47,10 +48,9 @@ def load_voice_reference(runtime: Path, voice: str) -> tuple[str, Path]:
             raise ValueError('Invalid reference file')
         if hashlib.sha256(path.read_bytes()).hexdigest() != item['sha256']:
             raise ValueError('Invalid reference checksum')
-        text = item['text']
-        if not isinstance(text, str) or not 1 <= len(text) <= 500:
-            raise ValueError('Invalid reference transcript')
-        return 'You are a helpful assistant.<|endofprompt|>' + text, path
+        if item.get('mode') != 'cross_lingual':
+            raise ValueError('Unsupported reference mode')
+        return path
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise VoiceReferenceError('Reference unavailable') from exc
 
@@ -81,7 +81,7 @@ def receive() -> None:
                         event.set()
             elif msg.get('type') == 'speak':
                 text = msg.get('text')
-                voice = msg.get('voice', 'cosy_default')
+                voice = msg.get('voice', DEFAULT_VOICE)
                 if not isinstance(text, str) or not text.strip() or len(text) > 4000 or not isinstance(voice, str) or voice not in VOICE_IDS:
                     error(job_id, 'invalid_request', '朗读参数无效。')
                     continue
@@ -140,10 +140,9 @@ def main() -> None:
             cosy = AutoModel(model_dir=str(model_path), load_trt=False, load_vllm=False, fp16=True)
             if str(cosy.model.device) != 'cuda':
                 raise RuntimeError('GPU required')
-            prompt = repo / 'asset' / 'zero_shot_prompt.wav'
-            cosy.add_zero_shot_spk('You are a helpful assistant.<|endofprompt|>希望你以后能够做的比我还好呦。',
-                                   str(prompt), 'cosy_default')
-            loaded_voices = {'cosy_default'}
+            # Each selected reference is encoded lazily. No legacy demonstration
+            # voice is loaded or used as a fallback.
+            loaded_voices = set()
             encoder = imageio_ffmpeg.get_ffmpeg_exe()
         # Wrap the token iterator only to honor cancellation; full upstream cleanup still runs.
         original_inference = cosy.model.llm.inference
@@ -212,10 +211,11 @@ def main() -> None:
                 error(job_id, 'cancelled', '朗读已取消。')
                 continue
             if voice not in loaded_voices:
-                prompt_text, prompt_path = load_voice_reference(runtime, voice)
+                prompt_path = load_voice_reference(runtime, voice)
                 reference_started = time.perf_counter()
                 with contextlib.redirect_stdout(sys.stderr), torch.inference_mode():
-                    cosy.add_zero_shot_spk(prompt_text, str(prompt_path), voice)
+                    # This cache contains acoustic features, not a guessed transcript.
+                    cosy.add_zero_shot_spk('', str(prompt_path), voice)
                 loaded_voices.add(voice)
                 reference_load_ms = round((time.perf_counter() - reference_started) * 1000)
             if cancelled.is_set() or STOP.is_set():
@@ -247,8 +247,9 @@ def main() -> None:
             # Upstream grows this instance field during a stream; restore its original first-hop budget.
             cosy.model.token_hop_len = initial_hop
             with contextlib.redirect_stdout(sys.stderr), torch.inference_mode():
-                for output in cosy.inference_zero_shot(text, '', '', zero_shot_spk_id=voice,
-                                                       stream=True, speed=1.0, text_frontend=False):
+                for output in cosy.inference_cross_lingual('You are a helpful assistant.<|endofprompt|>' + text,
+                                                           '', zero_shot_spk_id=voice,
+                                                           stream=True, speed=1.0, text_frontend=False):
                     if cancelled.is_set() or STOP.is_set() or llm_errors:
                         continue
                     if encoder_failed.is_set():

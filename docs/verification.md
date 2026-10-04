@@ -579,7 +579,7 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 |未测|真人音质、长教材多音字/语义发音、与OpenAI/豆包盲听、20分钟真人学习；没有测试真实云服务。固定示例音色不表示声音商用权已核实。|
 
 当前A06/A07/A18音频的本机实测与自动化部分通过，真人听感仍待用户。运行与复现见[CosyVoice说明](cosyvoice-setup.md)。首次加载后约1–2秒首块是本机小样本结果；高倍速、GPU竞争或其他文本可能等待更久，不承诺全场景不卡顿。
-# 2026-10-04：六音色接入与官方音色库试听
+## 2026-10-04：六音色接入与官方音色库试听（上一版，用户已淘汰）
 
 - 已执行：`npm run typecheck`、`npm run lint`、`npm test`（935项／38文件）、`npm run test:e2e`（108项完整Edge）、`npm run desktop:package`均通过。构建仍提示较大的前端chunk，不影响构建成功。`py -3.11 scripts/test-cosy-voices.py` 7项通过，覆盖参考缺失、损坏、未知ID、路径越界、重复条目、manifest恢复；安装脚本重复执行后全部哈希通过。
 - 真实本地GPU：`py -3.11 scripts/verify-cosy-voices.py` 对6个声音用同一169字段落合成，首MP3 1.04–1.34秒（不含9.9秒模型加载），声音31–36秒、生成11.6–13.9秒。回切已用音色参考编码0ms，未加载第二个模型。数据在[六音色GPU记录](cosy-voices-verification.json)，原音频在被Git忽略的`cosy-tts-runtime/verification/voices/`。哈希不同不是人耳能区分声线或好听的证明。
@@ -589,3 +589,20 @@ A14/A15 保持未测；A16/A17 的“通过”严格限于表中本地证据。�
 - 模拟与真实边界：108项E2E包含真实PDF、真实MSE媒体管线，但云模型/音频fixture仍是模拟；没有新调用ChatGPT、OpenAI或豆包。六音色新增预览的问答并行、晚到声音拒绝和原文续读由自动测试验证。计划补做的新增音色完整PDF两句GPU播放测试被用户新指令中断，未执行，不计通过；此前默认声音的真实PDF播放记录仍保留。
 - 用户主观结果：随后明确反馈当前六个声音不够好听，声音质量未获认可。未做“优于豆包/OpenAI”的结论，没有真人盲听或长篇教材发音正确率评测。转向用户先选音色。
 - 新试听入口核验：公开[CosyVoice官方音色库](https://help.aliyun.com/zh/model-studio/cosyvoice-voice-list)不登录即可显示216个audio元素（含不同模型，不代表216个唯一音色）。独立Edge测试实际播放「龙三叔」样音，音频长19.52秒且currentTime前进，未填Key/提交PDF/请求合成；[研究demo新地址](https://qwenaudio.github.io/cosyvoice3/)也可访问。内置浏览器/Windows助手启动失败（kernel退出），改为默认浏览器打开公开链接，并用项目Playwright独立浏览器验证，未操作用户登录资料。
+
+## 2026-10-04：用户所选六种声音的本机参考版
+
+- 范围：只保留六个 local_long* 参考音色与关闭朗读；云参数本身不是下载后的本地音色。参考文件为用户从官方公开目录选定的六份试听，完整解码并校验。未调用云 TTS、使用真实 Key、改动科研环境或训练进程。
+- 安装复现：六份源/解码文件 SHA-256 全部通过。将本项目明确的 local_longfei_v3.wav 临时移到同目录备份后，实际重新下载和解码，结果与原文件逐字节一致，再清理备份；安装器再次幂等执行成功。符号链接目标拒绝，旧安装器五份 AISHELL WAV 在新文件验证成功后移除。
+- Python：8项参考校验测试通过，覆盖六个新ID、坏文件/清单/路径、旧ID拒绝；worker与安装/验证脚本 py_compile 通过。
+- 六声音真实GPU：同一169字段落、RTX5080、0.5B模型，首次ready19.048秒。首MP3为2.397/1.658/1.412/1.662/1.422/1.465秒，音频28.08–33.72秒，RTF0.382–0.466；回切首个声音参考编码0ms，短句首MP3 0.870秒。完整数据：[真实参考合成](cosy-local-references-verification.json)。不是官方网站样音回放。
+- 真实取消：首次token前1ms、中途111ms完成取消，同一模型随后生成成功，见[参考版取消数据](cosy-local-references-cancellation-verification.json)。
+- 生成内容粗检：本机Whisper small转写六段新生成音频，没有英文系统提示或原参考整段串入。龙飞完整转写和17–29秒局部转写都缺少“权重小的部分影响更少”，记为疑似漏读，界面明确提示先试听；不能将ASR结果当作真人语音正确率或好听的证据。[原始转写记录](cosy-local-references-asr-check.json)。
+- 首次真实桌面失败：默认参考音色在播放位置0.788秒发生waiting；该次测试已停止，保存[失败记录](cosy-local-references-desktop-initial-failure.json)。说明RTF小于1不等于首块接续无卡顿，需补起播缓冲。
+- 自动化初轮：typecheck/lint通过；unit 943通过、4项仍断言旧“配置在线朗读”提示而失败，按当前“启用本机朗读”更新后947/947通过。完整Edge108项初轮107通过，唯一retired-speech-ui旧下拉选项断言失败；改为用户要求的none/cosy后相关8/8通过。未删除测试或放松无声音回退约束。
+- 构建：本轮初版 build/desktop:package 成功；保留已有Vite大chunk提示。后续起播缓冲修复、最终打包与真实桌面复验结果补充如下。
+- 最终缓冲修复：本机MSE在开播前等待2秒可播放储备（按倍速折算），短句EOF即放行，暂停/停止撤销待播放请求。最终lint、包含typecheck的build、desktop:package及952项unit全部通过。新增及相关18项unit、11项Edge/MSE浏览器回归在独立worktree通过；这些浏览器检查是分批执行，没有声称最终109项在同一次全量执行。
+- 修复后真实六音色桌面：独立无Key档案、真实打包EXE与本机GPU，对同一约130字段落逐个播放至结束。首次含模型加载11.934秒，其余2.106–2.453秒开播；六次均无中途waiting。换声音/关设置即停、单音源、保存重启恢复龙安昀本地参考通过，零页面错误。[最终桌面证据](cosy-local-references-desktop-verification.json)，[实际界面](screenshots/cosy-local-references-desktop.png)已目视检查。首次失败仍保留，不承诺所有负载下都不卡。
+- 真实PDF播放复验：`node scripts/verify-desktop-cosy.mjs`通过，使用隔离档案、自制PDF选区及明确校对的两句正文，龙安洋本地参考实际GPU生成。冷点击到开播11.898秒、HTTP未结束先播放；两句21.504秒/6.048秒无中途waiting，句间交接15ms，0.25/3×原位变速、暂停续播、前后句与停止15ms通过，零页面错误。见[读书链路数据](cosy-local-reference-reading-verification.json)，[实际PDF界面](screenshots/cosy-local-reference-reading.png)已查看。
+- 最终交付：已更新原EXE，并启动正常用户档案窗口，进程3100响应且有可见窗口，见[启动记录](cosy-local-references-running.json)。测试使用隔离档案，没有用测试Key/书籍/语速覆盖用户偏好。最终源码diff检查通过。
+- 未完成验收：真人音色偏好、与云端原版相似程度、长教材漏读/错读和20分钟真人连续试听；龙飞疑似漏词保留为已知限制。没有测试或请求任何真实云TTS，未承诺比豆包/OpenAI更好。

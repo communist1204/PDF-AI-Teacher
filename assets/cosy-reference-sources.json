@@ -1,0 +1,12 @@
+{
+  "sourcePage": "https://help.aliyun.com/zh/model-studio/cosyvoice-voice-list",
+  "purpose": "User-selected public samples for local reference-voice experiments; not official offline cloud voices or a commercial voice license.",
+  "voices": [
+    {"id":"local_longanyang","parameter":"longanyang","label":"龙安洋","url":"https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20251117/khzqvb/%E9%BE%99%E5%AE%89%E6%B4%8B.mp3"},
+    {"id":"local_longanhuan_v3","parameter":"longanhuan_v3","label":"龙安欢","url":"https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20251117/lolnxw/%E9%BE%99%E5%AE%89%E6%AC%A2.mp3"},
+    {"id":"local_longfei_v3","parameter":"longfei_v3","label":"龙飞","url":"https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260105/noojqr/%E9%BE%99%E9%A3%9E.mp3"},
+    {"id":"local_longxiaochun_v3","parameter":"longxiaochun_v3","label":"龙小淳","url":"https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260105/flmrpr/%E9%BE%99%E5%B0%8F%E6%B7%B3.mp3"},
+    {"id":"local_longxiaoxia_v3","parameter":"longxiaoxia_v3","label":"龙小夏","url":"https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260105/bncrea/%E9%BE%99%E5%B0%8F%E5%A4%8F.mp3"},
+    {"id":"local_longanyun_v3","parameter":"longanyun_v3","label":"龙安昀","url":"https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20251117/jsbqod/%E9%BE%99%E5%AE%89%E6%98%80.mp3"}
+  ]
+}

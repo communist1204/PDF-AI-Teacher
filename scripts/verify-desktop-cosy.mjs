@@ -85,16 +85,17 @@ try {
   expect((await observe(page)).active).toBe(0);
   const stopMs = Date.now() - stopped;
   await mkdir('docs/screenshots', { recursive: true });
-  await page.screenshot({ path: 'docs/screenshots/cosy-real-desktop.png', fullPage: true });
+  await page.screenshot({ path: 'docs/screenshots/cosy-local-reference-reading.png', fullPage: true });
   await page.getByRole('button', { name: '设置与用量', exact: true }).click();
   await expect(page.getByTestId('cosy-speech-status')).toContainText('模型已加载');
   await page.getByTestId('cosy-speech-status').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: 'docs/screenshots/cosy-real-settings.png', fullPage: true });
+  await page.screenshot({ path: 'docs/screenshots/cosy-local-reference-reading-settings.png', fullPage: true });
   expect(errors).toEqual([]);
-  const result = { date: new Date().toISOString(), kind: 'real-packaged-Electron-local-GPU', coldClickToPlayingMs: firstPlaying - clicked,
+  const result = { date: new Date().toISOString(), kind: 'real-packaged-Electron-local-GPU-reference-reading', voice: 'local_longanyang', coldClickToPlayingMs: firstPlaying - clicked,
     playingBeforeFirstRequestDone, firstPlayingAt: firstPlaying, requestFinishedAt: finished, midAudioWaits, events: continuous.events,
     sentenceCount: 2, rateChangesPreserveAudio: true, pauseResume: true, previousSentence: true, stopMs, pageErrors: errors,
     cloudRequests: false, humanListening: '未测；这里只验证真实合成、播放事件与调度' };
-  await writeFile('docs/cosy-desktop-verification.json', JSON.stringify(result, null, 2) + '\n');
+  await writeFile('docs/cosy-local-reference-reading-verification.json', JSON.stringify(result, null, 2) + '\n');
+  expect(midAudioWaits).toEqual([]);
   console.log(JSON.stringify(result, null, 2));
 } finally { await app?.close(); }

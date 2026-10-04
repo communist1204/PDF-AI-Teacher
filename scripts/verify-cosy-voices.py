@@ -13,7 +13,7 @@ import time
 
 ROOT = Path(__file__).resolve().parent.parent
 RUNTIME = ROOT / 'cosy-tts-runtime'
-OUT = RUNTIME / 'verification' / 'voices'
+OUT = RUNTIME / 'verification' / 'local-references'
 TEXT = ('学习一个新概念时，不必一口气记住所有细节。先想清楚它要解决什么问题，再看每一步用了哪些已知信息。'
         '比如，注意力机制允许模型根据当前的问题，从不同位置选择有用的内容。这里的选择不是把其他内容完全删除，'
         '而是给它们分配不同的权重。权重大的部分影响更多，权重小的部分影响更少。现在继续往下读，保持同一个声音，'
@@ -23,12 +23,12 @@ TEXT = ('学习一个新概念时，不必一口气记住所有细节。先想�
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     manifest = json.loads((ROOT / 'assets' / 'cosy-voices.json').read_text(encoding='utf-8'))
-    voices = ['cosy_default'] + [item['id'] for item in manifest['voices']]
+    voices = [item['id'] for item in manifest['voices']]
     env = {key: value for key, value in os.environ.items()
            if key.lower() in ('path', 'systemroot', 'windir', 'temp', 'tmp', 'comspec', 'pathext', 'userprofile')}
     env.update(PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
     started = time.perf_counter()
-    result = {'kind': 'real-local-GPU-six-voices', 'date': time.strftime('%Y-%m-%d'),
+    result = {'kind': 'real-local-GPU-six-user-selected-acoustic-references', 'date': time.strftime('%Y-%m-%d'),
               'text': TEXT, 'characters': len(TEXT), 'cases': [], 'cloudRequests': False,
               'humanListening': 'Not tested; files are available for user audition.'}
     with (OUT / 'worker-stderr.log').open('w', encoding='utf-8') as diagnostic:
@@ -83,7 +83,7 @@ def main() -> None:
                 result['cases'].append(record)
                 print(json.dumps({k: v for k, v in record.items() if k != 'chunkTimesMs'}), flush=True)
             # Re-select an already encoded voice without reloading the model or reference.
-            send({'type': 'speak', 'id': 'warm-switch-back', 'voice': 'cosy_female_1',
+            send({'type': 'speak', 'id': 'warm-switch-back', 'voice': voices[0],
                   'text': '切换回刚才的音色，继续朗读下一段内容。'})
             while True:
                 _, event = next_event()
@@ -95,7 +95,7 @@ def main() -> None:
                 assert event['type'] == 'audio', event
             assert len({case['sha256'] for case in result['cases']}) == len(voices)
             # Distinct hashes alone are not a perceptual speaker-distinctness test.
-            (ROOT / 'docs' / 'cosy-voices-verification.json').write_text(
+            (ROOT / 'docs' / 'cosy-local-references-verification.json').write_text(
                 json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
             print('All six voices synthesized; warm reference reuse verified.', flush=True)
         finally:
