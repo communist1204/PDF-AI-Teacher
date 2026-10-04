@@ -53,7 +53,7 @@ async function setup(page: Page, text = '这是一句测试正文。') {
   }, `http://127.0.0.1:${address.port}/stream`);
   await page.route('**/api/config', async route => {
     const response = await route.fetch(); const config = await response.json();
-    await route.fulfill({ json: { ...config, speech: { engine: 'cosy', ready: true, status: 'ready', streaming: true, device: 'cuda', voice: 'cosy_default', style: '合成测试数据', instructionsSupported: false } } });
+    await route.fulfill({ json: { ...config, speech: { engine: 'cosy', ready: true, status: 'ready', streaming: true, device: 'cuda', voice: 'local_longanyang', style: '合成测试数据', instructionsSupported: false } } });
   });
   await page.goto('/'); await page.getByRole('button', { name: /示例/ }).click();
   await expect(page.locator('main')).toHaveAttribute('aria-busy', 'false');
@@ -152,7 +152,7 @@ test('Cosy 设置无需 Key 或加密，保存不发声；运行状态如实更�
     Object.defineProperty(window, 'desktopTeacher', { value: bridge });
   });
   let status = 'idle'; let requests = 0;
-  await page.route('**/api/config', async route => { const response = await route.fetch(); const config = await response.json(); await route.fulfill({ json: { ...config, speech: { engine: 'cosy', ready: true, status, voice: 'cosy_default', style: '固定音色', instructionsSupported: false } } }); });
+  await page.route('**/api/config', async route => { const response = await route.fetch(); const config = await response.json(); await route.fulfill({ json: { ...config, speech: { engine: 'cosy', ready: true, status, voice: 'local_longanyang', style: '固定音色', instructionsSupported: false } } }); });
   await page.route('**/api/tts', route => { requests++; return route.abort(); });
   await page.goto('/'); await page.getByRole('button', { name: '声音设置', exact: true }).click();
   await page.getByRole('combobox', { name: '朗读方式', exact: true }).selectOption('cosy');

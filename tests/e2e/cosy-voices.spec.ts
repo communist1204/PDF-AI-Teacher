@@ -31,12 +31,12 @@ async function setup(page: Page, engine = 'cosy') {
     const p: Probe = { audio: [], maximum: 0, saved: [] }; Object.defineProperty(window, '__voiceProbe', { value: p });
     const OriginalAudio = window.Audio;
     window.Audio = class extends OriginalAudio { constructor(src?: string) { super(src); p.audio.push(this); this.addEventListener('playing', () => { p.maximum = Math.max(p.maximum, p.audio.filter(item => !item.paused).length); }); } };
-    const defaults: DesktopSettings = { mode: 'demo', chatModel: 'unchanged-chat', visionModel: 'unchanged-vision', reasoningEffort: 'high', ttsEngine: engine as DesktopSettings['ttsEngine'], cosyTtsVoice: 'cosy_default', ttsModel: 'unchanged-cloud-model', ttsVoice: 'marin', ttsInstructions: '保留在线偏好', hasApiKey: false, encryptionAvailable: true, auth: { status: 'signed_out', accounts: [] }, models: [], restartRequired: false };
+    const defaults: DesktopSettings = { mode: 'demo', chatModel: 'unchanged-chat', visionModel: 'unchanged-vision', reasoningEffort: 'high', ttsEngine: engine as DesktopSettings['ttsEngine'], cosyTtsVoice: 'local_longanyang', ttsModel: 'unchanged-cloud-model', ttsVoice: 'marin', ttsInstructions: '保留在线偏好', hasApiKey: false, encryptionAvailable: true, auth: { status: 'signed_out', accounts: [] }, models: [], restartRequired: false };
     const settings: DesktopSettings = JSON.parse(localStorage.getItem('test-only-cosy-settings') ?? 'null') ?? defaults;
     const bridge: DesktopTeacherBridge = { getSettings: async () => structuredClone(settings), saveSettings: async input => { p.saved.push(input); Object.assign(settings, input, { restartRequired: true }); localStorage.setItem('test-only-cosy-settings', JSON.stringify(settings)); return structuredClone(settings); }, restart: async () => {}, createShortcut: async () => ({ path: '' }), openAccountPage: async () => {}, login: async () => structuredClone(settings), cancelLogin: async () => {}, logout: async () => structuredClone(settings), selectAccount: async () => structuredClone(settings) };
     Object.defineProperty(window, 'desktopTeacher', { value: bridge });
   }, { url: `http://127.0.0.1:${address.port}/tts`, engine });
-  await page.route('**/api/config', async route => { const response = await route.fetch(); const config = await response.json(); await route.fulfill({ json: { ...config, speech: { engine, ready: true, voice: 'cosy_default', style: '测试配置', instructionsSupported: false, status: 'ready' } } }); });
+  await page.route('**/api/config', async route => { const response = await route.fetch(); const config = await response.json(); await route.fulfill({ json: { ...config, speech: { engine, ready: true, voice: 'local_longanyang', style: '测试配置', instructionsSupported: false, status: 'ready' } } }); });
   await page.goto('/');
   return { requests, get closed() { return closed; }, async dispose() { for (const item of pending) item.destroy(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
 }
@@ -48,18 +48,24 @@ async function selectProse(page: Page) {
   await page.getByRole('textbox', { name: '确认后的朗读文本', exact: true }).fill('保留这句原文的阅读位置。'); await page.getByRole('button', { name: '使用校对文本', exact: true }).click();
 }
 
-test('六音色可选，选择保存不发声，偏好重开仍在且不改变解题与在线声音设置', async ({ page }) => {
+test('仅六种本地参考音色可选，选择保存不发声，偏好重开仍在且不改变专业解题设置', async ({ page }) => {
   const h = await setup(page);
   try {
     await settings(page); const voice = page.getByRole('combobox', { name: 'CosyVoice 中文音色', exact: true });
     expect(await voice.locator('option').evaluateAll(items => items.map(item => (item as HTMLOptionElement).value))).toEqual([...COSY_TTS_VOICE_IDS]);
-    for (const value of COSY_TTS_VOICE_IDS) await voice.selectOption(value);
+    expect([...COSY_TTS_VOICE_IDS]).toEqual(['local_longanyang','local_longanhuan_v3','local_longfei_v3','local_longxiaochun_v3','local_longxiaoxia_v3','local_longanyun_v3']);
+    expect(await page.getByRole('combobox', { name: '朗读方式', exact: true }).locator('option').evaluateAll(items => items.map(item => (item as HTMLOptionElement).value))).toEqual(['none','cosy']);
+    await expect(page.locator('.desktop-cosy-fields')).toContainText('不等同于官方云端原版');
+    await expect(page.locator('.cosy-audition-card')).toContainText('本机生成');
+    await expect(page.locator('.cosy-audition-card')).toContainText('二零二六年');
+    await expect(page.locator('.desktop-cosy-fields input')).toHaveCount(0);
+    for (const value of COSY_TTS_VOICE_IDS) { await voice.selectOption(value); await expect(page.locator('.cosy-reference-id')).toContainText(value.replace('local_', '')); }
     expect(h.requests).toHaveLength(0); expect((await probe(page)).count).toBe(0);
     await page.getByRole('button', { name: '保存设置', exact: true }).click();
-    expect((await probe(page)).saved).toMatchObject([{ cosyTtsVoice: 'cosy_male_3', mode: 'demo', chatModel: 'unchanged-chat', visionModel: 'unchanged-vision', ttsVoice: 'marin', ttsInstructions: '保留在线偏好' }]);
-    await page.reload(); await settings(page); await expect(voice).toHaveValue('cosy_male_3'); expect(h.requests).toHaveLength(0);
+    expect((await probe(page)).saved).toMatchObject([{ cosyTtsVoice: 'local_longanyun_v3', mode: 'demo', chatModel: 'unchanged-chat', visionModel: 'unchanged-vision', ttsVoice: 'marin', ttsInstructions: '保留在线偏好' }]);
+    await page.reload(); await settings(page); await expect(voice).toHaveValue('local_longanyun_v3'); expect(h.requests).toHaveLength(0);
     await page.setViewportSize({ width: 1280, height: 720 }); await page.locator('.cosy-audition-card').scrollIntoViewIfNeeded();
-    await page.screenshot({ path: 'test-results/cosy-voices-settings-720.png', fullPage: true });
+    await page.screenshot({ path: 'test-results/local-reference-settings-720.png', fullPage: true });
     await expect(page.getByRole('button', { name: '试听这个音色', exact: true })).toBeInViewport({ ratio: 1 });
   } finally { await h.dispose(); }
 });
@@ -68,7 +74,7 @@ test('未应用本机引擎时禁止试听，不误用在线TTS或自动生成',
   const h = await setup(page, 'doubao');
   try {
     await settings(page); await page.getByRole('combobox', { name: '朗读方式', exact: true }).selectOption('cosy');
-    await page.getByRole('combobox', { name: 'CosyVoice 中文音色', exact: true }).selectOption('cosy_female_2');
+    await page.getByRole('combobox', { name: 'CosyVoice 中文音色', exact: true }).selectOption('local_longfei_v3');
     await expect(page.getByRole('button', { name: '试听这个音色', exact: true })).toBeDisabled();
     await expect(page.locator('.cosy-audition-card')).toContainText('不会调用在线声音');
     await page.getByRole('button', { name: '保存设置', exact: true }).click();
@@ -81,13 +87,13 @@ test('同文音色试听使用真实MSE；换音色和关闭即停，晚到内�
   try {
     await selectProse(page); await page.getByRole('button', { name: '朗读所选', exact: true }).click(); await expect.poll(async () => (await probe(page)).time).toBeGreaterThan(0.1);
     await settings(page); const voice = page.getByRole('combobox', { name: 'CosyVoice 中文音色', exact: true });
-    await voice.selectOption('cosy_female_1'); expect(h.requests).toHaveLength(1);
+    await voice.selectOption('local_longanhuan_v3'); expect(h.requests).toHaveLength(1);
     await page.getByRole('button', { name: '试听这个音色', exact: true }).click(); await expect.poll(async () => (await probe(page)).count).toBe(2); await expect.poll(async () => (await probe(page)).time).toBeGreaterThan(0.1);
-    expect(h.requests[1]).toEqual({ text: COSY_AUDITION_TEXT, cosyVoice: 'cosy_female_1', lane: 'speech' });
+    expect(h.requests[1]).toEqual({ text: COSY_AUDITION_TEXT, cosyVoice: 'local_longanhuan_v3', lane: 'speech' });
     await expect(page.locator('.cosy-audition-status')).toContainText('正在试听');
-    await voice.selectOption('cosy_male_2'); await expect.poll(async () => (await probe(page)).active).toBe(0); expect(h.requests).toHaveLength(2);
+    await voice.selectOption('local_longxiaoxia_v3'); await expect.poll(async () => (await probe(page)).active).toBe(0); expect(h.requests).toHaveLength(2);
     await page.getByRole('button', { name: '试听这个音色', exact: true }).click(); await expect.poll(async () => (await probe(page)).count).toBe(3); await expect.poll(async () => (await probe(page)).time).toBeGreaterThan(0.1);
-    expect(h.requests[2].cosyVoice).toBe('cosy_male_2');
+    expect(h.requests[2].cosyVoice).toBe('local_longxiaoxia_v3');
     await page.getByRole('button', { name: '关闭设置', exact: true }).click(); await expect.poll(async () => (await probe(page)).active).toBe(0); await expect.poll(() => h.closed).toBe(3);
     await expect(page.getByRole('button', { name: '继续朗读', exact: true })).toBeEnabled(); await page.getByRole('button', { name: '继续朗读', exact: true }).click();
     await expect.poll(async () => (await probe(page)).count).toBe(4); await expect.poll(async () => (await probe(page)).time).toBeGreaterThan(0.1);

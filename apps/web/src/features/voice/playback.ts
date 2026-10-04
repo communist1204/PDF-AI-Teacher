@@ -69,6 +69,6 @@ export const browserPlaybackAdapter: PlaybackAdapter = {
         setVolume(volume) { audio.volume = volume; },
       };
     }
-    throw new Error('系统语音已移除，请在声音设置中配置在线朗读。');
+    throw new Error('系统语音已移除，请在声音设置中启用本机朗读。');
   },
 };

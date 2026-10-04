@@ -11,15 +11,15 @@ describe('local foreground stream transport', () => {
   it('sends the explicit audition voice in both streamed and buffered requests', async () => {
     const fetch = vi.fn(async () => new Response('test', { headers: { ...headers, 'x-audio-streaming': '0' } })); vi.stubGlobal('fetch', fetch);
     const cosy = apiClient({ csrfToken: 'local-token', speech: { engine: 'cosy' } } as AppConfig, 'speech');
-    await cosy.speechStream('试听', envelope, 1, new AbortController().signal, 'cosy_female_1');
-    await cosy.speech('试听', envelope, 1, new AbortController().signal, 'cosy_male_2');
-    expect(fetch.mock.calls.map(call => JSON.parse((call as unknown as [string, RequestInit])[1].body as string).cosyVoice)).toEqual(['cosy_female_1', 'cosy_male_2']);
+    await cosy.speechStream('试听', envelope, 1, new AbortController().signal, 'local_longanhuan_v3');
+    await cosy.speech('试听', envelope, 1, new AbortController().signal, 'local_longxiaoxia_v3');
+    expect(fetch.mock.calls.map(call => JSON.parse((call as unknown as [string, RequestInit])[1].body as string).cosyVoice)).toEqual(['local_longanhuan_v3', 'local_longxiaoxia_v3']);
   });
 
   it.each(['openai', 'doubao', 'none'])('refuses a Cosy override on the %s engine without a network request', async engine => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
     const other = apiClient({ csrfToken: 'local-token', speech: { engine } } as AppConfig, 'speech');
-    await expect(other.speechStream('试听', envelope, 1, new AbortController().signal, 'cosy_male_1')).rejects.toThrow('先应用 CosyVoice 3');
+    await expect(other.speechStream('试听', envelope, 1, new AbortController().signal, 'local_longxiaochun_v3')).rejects.toThrow('先应用 CosyVoice 3');
     expect(fetch).not.toHaveBeenCalled();
   });
 

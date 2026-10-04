@@ -4,7 +4,7 @@ import type { ExternalOutputLease } from './AudioCoordinator';
 import { browserPlaybackAdapter, type PlaybackAdapter, type PlaybackHandle } from './playback';
 import type { SpeechStream } from './streamPlayback';
 
-export const COSY_AUDITION_TEXT = '你好，我们一起慢慢读懂这本书。遇到重要的概念，先停一停，再想一想。理解原理，比记住答案更重要。';
+export const COSY_AUDITION_TEXT = '二零二六年，我们一起学习神经网络。注意力机制会根据当前的问题，为不同的信息分配权重。重要的内容得到更多关注，但这并不意味着其他信息完全没有作用。阅读理论时，先弄清楚每个概念的含义，再把前后的推导连起来。遇到暂时不懂的地方，可以停一停，换一个简单的例子，慢慢理解。';
 export type CosyAuditionState = { status: 'idle' | 'loading' | 'playing' | 'finished' | 'error'; voice?: CosyVoiceId; message?: string };
 type Options = {
   /** Must check the applied engine before changing any session or output state. */
