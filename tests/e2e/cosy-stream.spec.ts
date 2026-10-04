@@ -3,19 +3,19 @@ import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import type { DesktopSettings, DesktopTeacherBridge } from '../../packages/shared/desktop';
 
-type Probe = { elements: HTMLAudioElement[]; ended: number; maximum: number };
+type Probe = { elements: HTMLAudioElement[]; ended: number; maximum: number; waitingAfterStart: number };
 async function probe(page: Page) {
   return page.evaluate(() => {
     const value = (window as unknown as { __cosyAudio: Probe }).__cosyAudio;
     const audio = value.elements.at(-1);
-    return { count: value.elements.length, ended: value.ended, maximum: value.maximum, active: value.elements.filter(item => !item.paused).length, rate: audio?.playbackRate, time: audio?.currentTime ?? 0, paused: audio?.paused, pitch: audio?.preservesPitch, duration: audio?.duration };
+    return { count: value.elements.length, ended: value.ended, maximum: value.maximum, active: value.elements.filter(item => !item.paused).length, rate: audio?.playbackRate, time: audio?.currentTime ?? 0, paused: audio?.paused, pitch: audio?.preservesPitch, duration: audio?.duration, buffered: audio?.buffered.length ? audio.buffered.end(audio.buffered.length - 1) : 0, waitingAfterStart: value.waitingAfterStart };
   });
 }
 
 /** Loopback HTTP really streams an explicitly synthetic MP3; no model is called. */
-async function setup(page: Page, text = '这是一句测试正文。') {
+async function setup(page: Page, text = '这是一句测试正文。', firstFraction = 0.5) {
   const mp3 = await readFile('tests/fixtures/cosy-stream.mp3');
-  const pending: ServerResponse[] = [];
+  const pending: Array<{ response: ServerResponse; offset: number }> = [];
   const calls: Array<{ text: string; stream: boolean }> = [];
   let closed = 0; let finished = 0;
   const server = createServer(async (request, response) => {
@@ -32,21 +32,23 @@ async function setup(page: Page, text = '这是一句测试正文。') {
     if (!stream) { response.end(mp3); return; }
     response.on('close', () => { closed++; });
     response.on('finish', () => { finished++; });
-    response.write(mp3.subarray(0, Math.floor(mp3.length / 2)));
-    pending.push(response);
+    const offset = Math.floor(mp3.length * firstFraction);
+    response.write(mp3.subarray(0, offset));
+    pending.push({ response, offset });
   });
   await new Promise<void>(resolve => { server.listen(0, '127.0.0.1', resolve); });
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing fixture port');
   await page.addInitScript(url => {
     const nativeFetch = window.fetch;
     window.fetch = (input, init) => nativeFetch(typeof input === 'string' && input === '/api/tts' ? url : input, init);
-    const state: Probe = { elements: [], ended: 0, maximum: 0 };
+    const state: Probe = { elements: [], ended: 0, maximum: 0, waitingAfterStart: 0 };
     Object.defineProperty(window, '__cosyAudio', { value: state });
     const NativeAudio = window.Audio;
     window.Audio = class extends NativeAudio {
       constructor(src?: string) {
         super(src); state.elements.push(this);
         this.addEventListener('ended', () => { state.ended++; });
+        this.addEventListener('waiting', () => { if (!this.paused && this.currentTime > 0.1) state.waitingAfterStart++; });
         this.addEventListener('playing', () => { state.maximum = Math.max(state.maximum, state.elements.filter(item => !item.paused).length); });
       }
     };
@@ -64,9 +66,10 @@ async function setup(page: Page, text = '这是一句测试正文。') {
   await page.getByRole('button', { name: '使用校对文本', exact: true }).click();
   return {
     calls, get finished() { return finished; }, get closed() { return closed; },
-    finish() { const response = pending.shift(); response?.end(mp3.subarray(Math.floor(mp3.length / 2))); },
-    fail() { pending.shift()?.destroy(new Error('Deliberate fixture disconnect')); },
-    async dispose() { for (const response of pending) response.destroy(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); },
+    bufferTo(fraction: number) { const item = pending[0]; if (!item) throw new Error('No active stream'); const next = Math.floor(mp3.length * fraction); item.response.write(mp3.subarray(item.offset, next)); item.offset = next; },
+    finish() { const item = pending.shift(); item?.response.end(mp3.subarray(item.offset)); },
+    fail() { pending.shift()?.response.destroy(new Error('Deliberate fixture disconnect')); },
+    async dispose() { for (const item of pending) item.response.destroy(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); },
   };
 }
 
@@ -92,6 +95,29 @@ test('Cosy 真 MSE 在 HTTP 尾段到达前开播，原位变速暂停续读，�
     expect(await probe(page)).toMatchObject({ count: 1, ended: 1, maximum: 1, active: 0 });
     expect(stream.calls).toHaveLength(1);
     await page.screenshot({ path: 'test-results/cosy-stream-complete.png', fullPage: true });
+  } finally { await stream.dispose(); }
+});
+
+test('不足一秒的首块先缓冲，积累两秒后在EOF前开播，暂停准备不会迟到自启', async ({ page }) => {
+  const stream = await setup(page, '首块很短时先准备连续的声音。', 0.03);
+  try {
+    await page.getByRole('button', { name: '朗读所选', exact: true }).click();
+    await expect.poll(async () => (await probe(page)).buffered).toBeGreaterThan(0.3);
+    expect(await probe(page)).toMatchObject({ active: 0, time: 0, waitingAfterStart: 0 });
+    expect((await probe(page)).buffered).toBeLessThan(1);
+    await expect(page.locator('.audio-source strong')).toContainText('准备');
+    await page.getByRole('button', { name: '暂停朗读', exact: true }).click();
+    stream.bufferTo(0.18);
+    await expect.poll(async () => (await probe(page)).buffered).toBeGreaterThan(2);
+    expect(await probe(page)).toMatchObject({ active: 0, time: 0, waitingAfterStart: 0 });
+    await expect(page.locator('.audio-source strong')).toContainText('已暂停');
+    await page.getByRole('button', { name: '继续朗读', exact: true }).click();
+    await expect.poll(async () => (await probe(page)).time).toBeGreaterThan(0.2);
+    expect(stream.finished).toBe(0); expect((await probe(page)).active).toBe(1);
+    stream.finish(); await expect.poll(() => stream.finished).toBe(1);
+    await expect.poll(async () => (await probe(page)).time).toBeGreaterThan(1.2);
+    expect((await probe(page)).waitingAfterStart).toBe(0);
+    await page.getByRole('button', { name: '停止', exact: true }).click(); expect((await probe(page)).active).toBe(0);
   } finally { await stream.dispose(); }
 });
 

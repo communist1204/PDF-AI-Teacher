@@ -8,6 +8,9 @@ export function supportsStreamingPlayback(): boolean {
 const MAX_AUDIO_BYTES = 32 * 1024 * 1024;
 const APPEND_BYTES = 256 * 1024;
 const BUFFER_AHEAD_SECONDS = 60;
+// CosyVoice's first model chunk can be shorter than one second. Keep a small
+// audible reserve before the first play, instead of playing that chunk dry.
+const STARTUP_BUFFER_SECONDS = 2;
 const abortError = () => new DOMException('朗读已取消', 'AbortError');
 
 /** A single media element owns playback; the fetch reader feeds it before EOF. */
@@ -21,16 +24,30 @@ export function createStreamPlayback(input: PlaybackInput, stream: SpeechStream)
   const lifetime = new AbortController();
   let released = false;
   let complete = false;
+  let started = false;
+  let playAttempt = 0;
+  let pendingStart: { resolve: () => void; reject: (cause: Error) => void } | undefined;
   let source: SourceBuffer | undefined;
   audio.volume = input.volume;
   audio.preservesPitch = true;
   audio.playbackRate = input.rate / (input.generatedRate ?? 1);
-  audio.onplaying = input.onStarted;
+  audio.onplaying = () => { if (!released) { started = true; input.onStarted(); } };
   audio.onwaiting = () => { if (!released && !audio.paused) input.onBuffering?.(); };
+
+  const startupReady = () => complete || (!!source?.buffered.length && source.buffered.end(source.buffered.length - 1) - Math.max(audio.currentTime, source.buffered.start(0)) >= STARTUP_BUFFER_SECONDS * audio.playbackRate);
+  const checkStartup = () => {
+    if (!pendingStart || (!started && !startupReady())) return;
+    const pending = pendingStart; pendingStart = undefined; pending.resolve();
+  };
+  const cancelPendingPlay = () => {
+    ++playAttempt;
+    const pending = pendingStart; pendingStart = undefined; pending?.reject(abortError());
+  };
 
   const release = () => {
     if (released) return;
     released = true;
+    cancelPendingPlay();
     lifetime.abort();
     input.signal.removeEventListener('abort', release);
     void reader.cancel().catch(() => {});
@@ -87,6 +104,7 @@ export function createStreamPlayback(input: PlaybackInput, stream: SpeechStream)
         if (released) return;
         const buffer = source;
         await wait(buffer, 'updateend', () => buffer.appendBuffer(chunk.value.slice(offset, offset + APPEND_BYTES)));
+        checkStartup();
       }
     }
     if (released) return;
@@ -95,15 +113,26 @@ export function createStreamPlayback(input: PlaybackInput, stream: SpeechStream)
     if (media.readyState !== 'open') throw new Error('声音连接提前关闭');
     complete = true;
     media.endOfStream();
+    checkStartup(); // A short, complete utterance does not need two seconds.
     input.onStreamComplete?.();
   };
   void pump().catch(error => fail(error instanceof Error ? `流式朗读中断：${error.message}。请重试这句。` : '流式朗读中断，请重试这句。'));
   return {
-    async play() { if (!released) await audio.play(); },
-    pause() { audio.pause(); },
+    async play() {
+      if (released) return;
+      cancelPendingPlay();
+      const attempt = playAttempt;
+      while (!started && !startupReady()) {
+        await new Promise<void>((resolve, reject) => { pendingStart = { resolve, reject }; });
+        if (released || attempt !== playAttempt) throw abortError();
+      }
+      if (released || attempt !== playAttempt) throw abortError();
+      await audio.play();
+    },
+    pause() { cancelPendingPlay(); audio.pause(); },
     stop: release,
     dispose: release,
-    setRate(rate) { if (!released) audio.playbackRate = rate / (input.generatedRate ?? 1); },
+    setRate(rate) { if (!released) { audio.playbackRate = rate / (input.generatedRate ?? 1); checkStartup(); } },
     setVolume(volume) { audio.volume = volume; },
   };
 }
