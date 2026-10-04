@@ -1,4 +1,4 @@
-﻿import {describe,it,expect} from 'vitest';
+import {describe,it,expect} from 'vitest';
 import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {SettingsVault,defaultPreferences,SaveSettingsSchema,serverConfigFor} from '../../apps/desktop/settings';
@@ -73,11 +73,11 @@ describe('Doubao independent credential and preference migration',()=>{
   const vault=new SettingsVault(file,cipher);await vault.load();const hostId=vault.get().hostId;
   const pending=[vault.update({apiKey:'fake-openai-private'}),vault.update({doubaoApiKey:'fake-doubao-private'}),vault.update({preferences:{...defaultPreferences,ttsEngine:'doubao',doubaoTtsVoice:'zh_male_taocheng_uranus_bigtts'}})];await vault.flush();await Promise.all(pending);
   const bytes=await readFile(file);expect(bytes.includes(Buffer.from('fake-openai-private'))).toBe(false);expect(bytes.includes(Buffer.from('fake-doubao-private'))).toBe(false);
-  await vault.update({doubaoApiKey:''});const restored=new SettingsVault(file,cipher);await restored.load();expect(restored.get()).toMatchObject({hostId,apiKey:'fake-openai-private',doubaoApiKey:'',preferences:{ttsEngine:'doubao',doubaoTtsVoice:'zh_male_taocheng_uranus_bigtts'}});
+  await vault.update({doubaoApiKey:''});const restored=new SettingsVault(file,cipher);await restored.load();expect(restored.get()).toMatchObject({hostId,apiKey:'fake-openai-private',doubaoApiKey:'',preferences:{ttsEngine:'cosy',doubaoTtsVoice:'zh_male_taocheng_uranus_bigtts'}});
   await restored.update({doubaoApiKey:'fake-doubao-replacement'});await restored.update({apiKey:''});const final=new SettingsVault(file,cipher);await final.load();expect(final.get()).toMatchObject({apiKey:'',doubaoApiKey:'fake-doubao-replacement'});
  }));
  it('validates independent key flags, three voices and style without accepting unknown fields',()=>{
-  for(const doubaoTtsVoice of ['zh_female_xiaohe_uranus_bigtts','zh_female_vv_uranus_bigtts','zh_male_taocheng_uranus_bigtts'])expect(SaveSettingsSchema.safeParse({...defaultPreferences,ttsEngine:'doubao',doubaoTtsVoice,doubaoApiKey:'fake-doubao',clearDoubaoApiKey:true}).success).toBe(true);
+  for(const doubaoTtsVoice of ['zh_female_xiaohe_uranus_bigtts','zh_female_vv_uranus_bigtts','zh_male_taocheng_uranus_bigtts'])expect(SaveSettingsSchema.safeParse({...defaultPreferences,ttsEngine:'cosy',doubaoTtsVoice,doubaoApiKey:'fake-doubao',clearDoubaoApiKey:true}).success).toBe(true);
   for(const extra of [{doubaoApiKey:'x'.repeat(501)},{doubaoTtsVoice:'unknown'},{doubaoTtsInstructions:'x'.repeat(1001)},{doubaoToken:'not-supported'}])expect(SaveSettingsSchema.safeParse({...defaultPreferences,...extra}).success).toBe(false);
   const value=SaveSettingsSchema.parse({...defaultPreferences,clearDoubaoApiKey:true});expect(value).not.toHaveProperty('clearApiKey');expect(value).not.toHaveProperty('apiKey');
  });
@@ -93,8 +93,8 @@ describe('Doubao independent credential and preference migration',()=>{
 
 
 describe('active speech settings only',()=>{
- it.each(['local','qwen','system'])('rejects selecting retired %s from the current UI',ttsEngine=>{expect(SaveSettingsSchema.safeParse({...defaultPreferences,ttsEngine}).success).toBe(false);});
- it.each(['none','doubao','openai'])('allows explicit %s without selecting a fallback',ttsEngine=>{expect(SaveSettingsSchema.parse({...defaultPreferences,ttsEngine}).ttsEngine).toBe(ttsEngine);});
+ it.each(['local','qwen','system','doubao','openai'])('rejects selecting retired %s from the current UI',ttsEngine=>{expect(SaveSettingsSchema.safeParse({...defaultPreferences,ttsEngine}).success).toBe(false);});
+ it.each(['none','cosy'])('allows explicit %s without selecting a fallback',ttsEngine=>{expect(SaveSettingsSchema.parse({...defaultPreferences,ttsEngine}).ttsEngine).toBe(ttsEngine);});
  it('defaults to silence even when old keys remain available',()=>{expect(defaultPreferences.ttsEngine).toBe('none');expect(serverConfigFor({...defaultPreferences},'fake-openai',4319,'fake-doubao').ttsEngine).toBe('none');});
 });
 
@@ -117,12 +117,47 @@ describe('CosyVoice independent voice settings',()=>{
   const old=JSON.parse(cipher.decrypt(await readFile(file)));delete old.preferences.cosyTtsVoice;
   const oldBytes=cipher.encrypt(JSON.stringify(old));await writeFile(file,oldBytes);
   const migrated=new SettingsVault(file,cipher);await migrated.load();
-  expect(migrated.get().preferences.cosyTtsVoice).toBe('cosy_default');expect(await readFile(file)).toEqual(oldBytes);
-  const preferences=SaveSettingsSchema.parse({...migrated.get().preferences,cosyTtsVoice:'cosy_female_2'});
+  expect(migrated.get().preferences.cosyTtsVoice).toBe('local_longanyang');expect(await readFile(file)).toEqual(oldBytes);
+  const preferences=SaveSettingsSchema.parse({...migrated.get().preferences,cosyTtsVoice:'local_longfei_v3'});
   await migrated.update({preferences});
   const restored=new SettingsVault(file,cipher);await restored.load();
-  expect(restored.get()).toMatchObject({hostId:old.hostId,apiKey:'fake-openai-existing',doubaoApiKey:'fake-doubao-existing',auth:{testOnly:true},preferences:{ttsEngine:'cosy',cosyTtsVoice:'cosy_female_2',mode:'chatgpt',chatModel:'expert-model',ttsVoice:defaultPreferences.ttsVoice,doubaoTtsVoice:defaultPreferences.doubaoTtsVoice}});
+  expect(restored.get()).toMatchObject({hostId:old.hostId,apiKey:'fake-openai-existing',doubaoApiKey:'fake-doubao-existing',auth:{testOnly:true},preferences:{ttsEngine:'cosy',cosyTtsVoice:'local_longfei_v3',mode:'chatgpt',chatModel:'expert-model',ttsVoice:defaultPreferences.ttsVoice,doubaoTtsVoice:defaultPreferences.doubaoTtsVoice}});
   const bytes=await readFile(file);expect(bytes.includes(Buffer.from('fake-openai-existing'))).toBe(false);expect(bytes.includes(Buffer.from('fake-doubao-existing'))).toBe(false);
-  expect(serverConfigFor(restored.get().preferences,'',4319)).toMatchObject({cosyTtsVoice:'cosy_female_2',ttsEngine:'cosy',apiKey:'',doubaoApiKey:''});
+  expect(serverConfigFor(restored.get().preferences,'',4319)).toMatchObject({cosyTtsVoice:'local_longfei_v3',ttsEngine:'cosy',apiKey:'',doubaoApiKey:''});
+ }));
+});
+
+describe('selected local references replace earlier reading choices',()=>{
+ const retiredVoices=['cosy_default','cosy_female_1','cosy_female_2','cosy_male_1','cosy_male_2','cosy_male_3'];
+ it.each(retiredVoices)('migrates retired %s to the requested default without overwriting the original file',async cosyTtsVoice=>temporary(async file=>{
+  const initial=new SettingsVault(file,cipher);await initial.load();
+  await initial.update({apiKey:'fake-openai-stays-private',doubaoApiKey:'fake-doubao-stays-private',auth:{testOnlyAccount:'retained'},preferences:{...defaultPreferences,ttsEngine:'cosy',mode:'chatgpt',chatModel:'expert-text',visionModel:'expert-vision',reasoningEffort:'max'}});
+  const original=JSON.parse(cipher.decrypt(await readFile(file)));original.preferences.cosyTtsVoice=cosyTtsVoice;
+  const originalBytes=cipher.encrypt(JSON.stringify(original));await writeFile(file,originalBytes);
+  const restored=new SettingsVault(file,cipher);await restored.load();
+  expect(restored.get()).toEqual({...original,preferences:{...original.preferences,cosyTtsVoice:'local_longanyang'}});
+  expect(await readFile(file)).toEqual(originalBytes);
+  expect(SaveSettingsSchema.safeParse({...defaultPreferences,cosyTtsVoice}).success).toBe(false);
+ }));
+ it.each(['doubao','openai'] as const)('migrates the earlier %s engine to local references without deleting either key, cloud preferences or expert account',async ttsEngine=>temporary(async file=>{
+  const vault=new SettingsVault(file,cipher);await vault.load();
+  await vault.update({apiKey:'fake-openai-retained',doubaoApiKey:'fake-doubao-retained',auth:{testOnlyAccount:'preserved'},preferences:{...defaultPreferences,ttsEngine,mode:'chatgpt',chatModel:'expert-text',visionModel:'expert-vision',reasoningEffort:'xhigh',ttsVoice:'cedar',doubaoTtsVoice:'zh_female_vv_uranus_bigtts'}});
+  const old=JSON.parse(cipher.decrypt(await readFile(file)));old.preferences.cosyTtsVoice='cosy_male_3';await writeFile(file,cipher.encrypt(JSON.stringify(old)));
+  const migrated=new SettingsVault(file,cipher);await migrated.load();
+  expect(migrated.get()).toEqual({...old,preferences:{...old.preferences,ttsEngine:'cosy',cosyTtsVoice:'local_longanyang'}});
+  await migrated.update({preferences:SaveSettingsSchema.parse(migrated.get().preferences)});
+  const restored=new SettingsVault(file,cipher);await restored.load();expect(restored.get()).toEqual(migrated.get());
+  expect(serverConfigFor(restored.get().preferences,'',4319)).toMatchObject({ttsEngine:'cosy',cosyTtsVoice:'local_longanyang',apiKey:'',doubaoApiKey:''});
+ }));
+ it('preserves disabled speech and an already-selected new local reference',async()=>temporary(async file=>{
+  const vault=new SettingsVault(file,cipher);await vault.load();
+  await vault.update({preferences:{...defaultPreferences,ttsEngine:'none',cosyTtsVoice:'local_longanyun_v3'}});
+  const restored=new SettingsVault(file,cipher);await restored.load();expect(restored.get().preferences).toMatchObject({ttsEngine:'none',cosyTtsVoice:'local_longanyun_v3'});
+ }));
+ it('does not disguise unknown or cloud-only voice IDs as the default reference',async()=>temporary(async file=>{
+  const vault=new SettingsVault(file,cipher);await vault.load();await vault.update({preferences:{...defaultPreferences,ttsEngine:'cosy'}});
+  const value=JSON.parse(cipher.decrypt(await readFile(file)));value.preferences.cosyTtsVoice='longanyang';
+  const original=cipher.encrypt(JSON.stringify(value));await writeFile(file,original);
+  const restored=new SettingsVault(file,cipher);await expect(restored.load()).rejects.toThrow('未被覆盖');expect(await readFile(file)).toEqual(original);
  }));
 });

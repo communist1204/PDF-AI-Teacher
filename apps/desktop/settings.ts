@@ -10,7 +10,7 @@ import type { DesktopPreferences } from '../../packages/shared/desktop';
 
 export const PreferenceSchema = z.object({
   mode: z.enum(['demo','chatgpt','api']),
-  ttsEngine:z.enum(['none','cosy','doubao','openai']).default('none'),
+  ttsEngine:z.enum(['none','cosy']).default('none'),
   cosyTtsVoice:z.enum(COSY_TTS_VOICE_IDS).default(DEFAULT_COSY_TTS_VOICE),
   doubaoTtsVoice:z.string().refine(value=>DOUBAO_TTS_VOICES.some(voice=>voice.id===value)).default(DEFAULT_DOUBAO_TTS_VOICE),
   doubaoTtsInstructions:z.string().trim().max(1000).refine(value=>!value.includes("\0")).default(DEFAULT_DOUBAO_TTS_INSTRUCTIONS),
@@ -39,6 +39,10 @@ export class SettingsVault {
       if(raw.preferences && typeof raw.preferences === 'object') {
         const legacy = raw.preferences;
         if(legacy.ttsEngine === undefined || ['local','qwen','system'].includes(legacy.ttsEngine)) legacy.ttsEngine = 'none';
+        // The owner explicitly replaced previous cloud/readout choices with local references.
+        // Keep existing account credentials and model preferences; only change speech selection.
+        if(['doubao','openai'].includes(legacy.ttsEngine)) legacy.ttsEngine = 'cosy';
+        if(['cosy_default','cosy_female_1','cosy_female_2','cosy_male_1','cosy_male_2','cosy_male_3'].includes(legacy.cosyTtsVoice)) legacy.cosyTtsVoice = DEFAULT_COSY_TTS_VOICE;
         for(const field of ['qwenTtsDevice','qwenTtsVoice','qwenTtsInstructions','localTtsVoice']) delete legacy[field];
       }
       const parsed=z.object({version:z.literal(1),hostId:z.string().regex(/^urn:uuid:[a-f0-9-]{36}$/),port:z.number().int().min(1024).max(65535),preferences:PreferenceSchema,apiKey:z.string().max(500),doubaoApiKey:z.string().max(500).default(''),auth:z.unknown().nullable()}).strict().parse(raw);

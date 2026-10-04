@@ -33,7 +33,7 @@ describe('project-owned CosyVoice worker (mock process, no GPU/network)', () => 
     const h = worker(); expect(h.provider.status()).toBe('idle'); expect(h.spawnMock).not.toHaveBeenCalled();
     const onAudio = vi.fn(); const pending = h.provider.speak('第一句。', 3, new AbortController().signal, onAudio);
     expect(h.provider.status()).toBe('loading'); h.ready(); await tick();
-    expect(h.provider.status()).toBe('ready'); expect(h.current()).toMatchObject({ type: 'speak', text: '第一句。', voice: 'cosy_default' });
+    expect(h.provider.status()).toBe('ready'); expect(h.current()).toMatchObject({ type: 'speak', text: '第一句。', voice: 'local_longanyang' });
     let completed = false; void pending.then(() => { completed = true; });
     h.audio(h.current().id, 'one'); await tick(); expect(onAudio).toHaveBeenCalledWith(Buffer.from('one')); expect(completed).toBe(false);
     h.audio(h.current().id, 'two'); h.emit({ type: 'done', id: h.current().id, metrics: { firstPcmMs: 200, totalMs: 600, audioSeconds: 2 } });
@@ -61,7 +61,7 @@ describe('project-owned CosyVoice worker (mock process, no GPU/network)', () => 
     expect(h.spawnMock).not.toHaveBeenCalled(); expect(h.frames).toHaveLength(0);
   });
   it('reports a missing reference without switching voice or discarding the warm model', async () => {
-    const h = worker(); const pending = h.provider.speak('测试。', 1, new AbortController().signal, undefined, 'cosy_female_1');
+    const h = worker(); const pending = h.provider.speak('测试。', 1, new AbortController().signal, undefined, 'local_longanhuan_v3');
     const rejected = expect(pending).rejects.toMatchObject({ code: 'cosy_voice_unavailable' });
     h.ready(); await tick(); h.emit({ type: 'error', id: h.current().id, code: 'voice_unavailable' }); await rejected;
     expect(h.child.kill).not.toHaveBeenCalled(); expect(h.frames).toHaveLength(1); expect(h.provider.status()).toBe('ready');

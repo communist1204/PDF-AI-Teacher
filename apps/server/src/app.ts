@@ -182,7 +182,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
       instructionsSupported: config.ttsInstructionsSupported,
     }, maxRequests: config.maxRequests };
     if(usingDoubaoTts) body.speech={engine:'doubao',ready:doubaoReady,voice:config.doubaoTtsVoice??'',style:'豆包中文朗读；额度与权限需在官方控制台确认',instructionsSupported:true};
-    if (usingCosyTts) body.speech = { engine: 'cosy', ready: !!cosyProvider?.ready(), status: cosyProvider?.status() ?? 'missing', streaming: true, device: 'cuda', voice: config.cosyTtsVoice ?? DEFAULT_COSY_TTS_VOICE, style: '本地 CosyVoice 3 · 可选参考音色 · 首次使用加载模型', instructionsSupported: false };
+    if (usingCosyTts) body.speech = { engine: 'cosy', ready: !!cosyProvider?.ready(), status: cosyProvider?.status() ?? 'missing', streaming: true, device: 'cuda', voice: config.cosyTtsVoice ?? DEFAULT_COSY_TTS_VOICE, style: '本机 CosyVoice 3 0.5B · 公开样音近似生成，并非云端原版', instructionsSupported: false };
     if (speechEngine === 'none') body.speech = { engine: 'none', ready: false, voice: '', style: '朗读已关闭，请选择并配置可用语音', instructionsSupported: false };
     res.json({ ...body, speechSession: { generationId: Math.max(session.speech.generation, session.speech.cancelledThrough), contextRevision: session.speech.revision } });
   });
@@ -291,7 +291,7 @@ export function createApp(options: { config?: ServerConfig; provider?: TeachingP
     const cosyVoice = request.cosyVoice ?? config.cosyTtsVoice ?? DEFAULT_COSY_TTS_VOICE;
     checkFresh(lane, request);
     setEnvelope(res, request);
-    if (speechEngine === 'none') throw new HttpError(503, 'speech_not_configured', '朗读未配置。Qwen、Kokoro 和系统声音已移除，请在设置中选择并配置可用语音；未自动切换服务。');
+    if (speechEngine === 'none') throw new HttpError(503, 'speech_not_configured', '朗读已关闭。请在设置中选择本机 CosyVoice 3 和本地参考音色；不会自动请求云语音。');
     if (!usingCosyTts && !usingDoubaoTts && config.demoMode) throw new HttpError(409, 'demo_tts', '演示模式未调用 OpenAI TTS。请在本机完成相应接口配置后再朗读。');
     if (usingCosyTts && !cosyProvider?.ready()) throw new HttpError(503, 'cosy_not_installed', 'CosyVoice 3 本地环境未安装完整，请完成本项目语音安装后重试；没有切换到云语音。');
     if (usingDoubaoTts && !doubaoReady) throw new HttpError(503, 'doubao_not_configured', '豆包语音尚未配置。请在声音设置中填写本机豆包 API Key，并先到官方控制台确认试用额度；没有改用其他服务。');
