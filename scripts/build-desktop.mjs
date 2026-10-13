@@ -6,6 +6,8 @@ if(dirname(stage)!==root||!stage.endsWith('desktop-build'))throw Error('Unsafe b
 await rm(stage,{recursive:true,force:true});await mkdir(stage,{recursive:true});
 await build({entryPoints:['apps/desktop/main.ts'],outfile:resolve(stage,'main.cjs'),bundle:true,platform:'node',target:'node24',format:'cjs',external:['electron','bufferutil','utf-8-validate'],logLevel:'info'});
 await build({entryPoints:['apps/desktop/preload.ts'],outfile:resolve(stage,'preload.cjs'),bundle:true,platform:'node',format:'cjs',external:['electron'],logLevel:'info'});
+await build({entryPoints:['apps/desktop/capture-preload.ts'],outfile:resolve(stage,'capture-preload.cjs'),bundle:true,platform:'node',format:'cjs',external:['electron'],logLevel:'info'});
+for(const file of ['capture.html','capture.css','capture.js','windows-ocr.ps1'])await cp(resolve(root,'apps/desktop',file),resolve(stage,file));
 await cp(resolve(root,'dist'),resolve(stage,'dist'),{recursive:true});await cp(resolve(root,'assets'),resolve(stage,'assets'),{recursive:true});
 await cp(resolve(root,'scripts/cosy-tts-worker.py'),resolve(stage,'cosy-tts-worker.py'));
 const pkg=JSON.parse(await readFile('package.json','utf8'));

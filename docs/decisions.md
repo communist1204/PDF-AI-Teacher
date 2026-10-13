@@ -1,5 +1,13 @@
 # 设计取舍与接口核验
 
+## 2026-10-13：主动截图与识字留在本机，云朗读范围待确认
+
+- 用户要求主动框选其他软件屏幕，扩展原 PDF 范围，不是持续监控。使用按钮触发的一次性 Electron desktopCapturer，显示静态框选浮层，Esc/右键或两分钟超时结束；不后台轮询、不占用全局 PrintScreen、不录屏。每次在一个屏幕框选，未实现跨屏拖动拼接。
+- 依照 [Electron DesktopCapturerSource](https://www.electronjs.org/docs/latest/api/structures/desktop-capturer-source)，以 display_id 配对显示器，按实际 thumbnail 像素转换选区，不把请求 thumbnailSize 当实际尺寸。浮层启用 sandbox/contextIsolation，CSP 禁止联网，IPC 只接受对应浮层主框架；主应用仅获取裁剪图，一次性 ID 执行识别，不接受任意文件路径。
+- 使用 [Windows.Media.Ocr.OcrEngine](https://learn.microsoft.com/en-us/uwp/api/windows.media.ocr.ocrengine) 本机 API；此机已安装 zh-Hans-CN/en-US。优先中文，回退用户语言；无语言时报错，不自动调用云模型。隐藏的项目 PowerShell 子进程通过 stdin 内存流读取 PNG，无图片命令行/临时文件。识别限时 20 秒，取消仅停止该子进程。没有修改系统 PowerShell 策略或安装系统语言包。
+- 自动审批拒绝“任意屏幕 OCR 文字接入当前语音服务”代码，指出可能有敏感信息且旧许可仅含 PDF→火山引擎。已发出专门授权问题，尚未答复。当前仅完成本机功能，没有恢复被拒绝路径，UI 明示未连接播放。
+- 截图不冒充 PDF target，不写书籍记录，关闭面板后丢弃。允许核对 OCR 文字，不为猜词/公式/排版额外调用模型。后续声音应借用统一输出权、保留 PDF 锚点、处理迟到识别；本阶段未实现。
+
 ## 2026-10-04：豆包恢复为独立可选语音引擎
 
 - 用户限定六个声音指 CosyVoice 本机音色；不再把这个要求解释为删除其他服务入口。桌面允许 none/cosy/doubao，已存豆包不会强制改为本机，当前本机或关闭也不擅自改为豆包。OpenAI 朗读入口和已淘汰的 Qwen/Kokoro/系统声音未恢复。

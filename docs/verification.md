@@ -1,5 +1,16 @@
 # M0/M1/M2/M3 验收记录
 
+## 2026-10-13：真实桌面截图与本机 OCR，朗读未完成
+
+- 完整读取项目约定与需求并补读终端截断段，Git 初始干净。Node 24.19.0、npm 11.17.0、Git 2.50.1.windows.1；无新增依赖、无全局环境/科研进程改动。日期按客户端会话记录，JSON 为 UTC。
+- `npm run typecheck`、`npm run lint`、`npm test -- --reporter=dot` 通过：39 文件 / 961 项。新增 DPI 裁剪、边界取整、非法/微小/越界选区和中文空格整理测试。初次 lint 指出重复 globals、有意的控制字符清理正则，移除前者并局部注明后通过。
+- `npx playwright test tests/e2e/screen-capture.spec.ts` 4/4 通过：无 PDF 入口、StrictMode 仅截图一次、编辑与非持久化、取消丢弃迟到结果、失败重截、浏览器版隐藏入口；0 次 TTS/ask/reading-assist 请求。此组桥接为模拟，与实际 OCR 分开记录。
+- `npx tsx scripts/verify-windows-ocr.ts` 实际调用 Windows OCR，原创中英文图片 391ms；[结果](windows-ocr-verification.json)。`npm run desktop:package` 通过（含 typecheck/Vite/Electron），PowerShell 脚本从 asar 解包。已有 bundle 大小/HMR 弃用提示保留。
+- `node scripts/verify-desktop-screen-capture.mjs --packaged` 通过真实原生框选和按钮→预览：缩放 1.5，选区 1534×389，OCR 287ms，中文匹配，英文 `us` 被误分为 `u s`，不掩盖误差；旧 ID 拒绝、Esc 取消及主窗口恢复通过。[结果](screen-capture-verification.json)、[实际面板](screenshots/screen-capture-desktop-panel.png)、[实际裁剪](screenshots/screen-capture-ocr-fixture.png) 已查看。测试只保存原创测试文本截图，产品不持久化图片。
+- 首次原生测试被运行中的旧软件占用 4319 阻塞，只正常关闭本项目主窗口后重试。Esc 即刻销毁浮层导致 Playwright keyboard 返回 target-closed；测试只允许该关闭错误并继续断言 IPC 返回 null、主窗口恢复。未忽略其他错误。
+- `node scripts/verify-desktop.mjs --packaged` 通过 PDF 选区、演示公式板书、笔记恢复、单实例、回环保护、桌面加密；0 页面错误。Computer Use skill 已读取并尝试初始化，但 helper 报 sandbox/helper_unknown_error；使用项目 Playwright/Electron 实际交互验收。
+- 未完成：截图文字接入当前 TTS（自动审批要求补充外发授权）、截图朗读暂停/续读/倍速/唯一输出权验证。未测：真实云 TTS、真人听感、多显示器真机、跨屏拖动、多栏/低清/公式正确性。没有读取真实 Key 或消耗额度，不把当前本机识字阶段记作截图朗读已通过。
+
 ## 2026-10-04：豆包入口恢复与本机新 Key 配置
 
 - 修改前完整读取项目约定与需求；根仓库起始 HEAD 3278ec6，工作区干净。Node 24.19.0、npm 11.17.0、Git 2.50.1.windows.1。后端使用独立 worktree，最小改动 cherry-pick 为 8b809fb。只操作本项目，不改 Conda/CUDA、代理或训练进程。

@@ -43,6 +43,7 @@ export interface DesktopSettings extends DesktopPreferences {
 }
 
 export interface DesktopTeacherBridge {
+  screenReading?: import('./screenReading').ScreenReadingBridge;
   getSettings(): Promise<DesktopSettings>;
   saveSettings(input: DesktopPreferences & { apiKey?: string; clearApiKey?: boolean; doubaoApiKey?: string; clearDoubaoApiKey?: boolean }): Promise<DesktopSettings>;
   login(accountId?: string): Promise<DesktopSettings>;

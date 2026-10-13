@@ -10,6 +10,7 @@ import {SettingsVault,SaveSettingsSchema,serverConfigFor} from './settings';
 import {ChatGptAuthManager,type AuthStore} from './auth';
 import {createDesktopFetch} from './network';
 import type {DesktopSettings} from '../../packages/shared/desktop';
+import { ScreenCaptureService } from './screenCapture';
 
 app.setName('PDF AI Teacher');
 app.setAppUserModelId('local.pdf-ai-teacher.desktop');
@@ -33,6 +34,7 @@ let restarting=false;
 let shuttingDown=false;
 let restartRequired=false;
 let models:Array<{id:string;name:string}>=[];
+let screenCapture:ScreenCaptureService|undefined;
 const accountUrls={
  'api-keys':'https://platform.openai.com/api-keys',
  billing:'https://platform.openai.com/settings/organization/billing/overview',
@@ -68,7 +70,7 @@ async function makeShortcut(){
  return {path};
 }
 async function shutdown(){
- if(shuttingDown)return;shuttingDown=true;auth?.dispose();
+ if(shuttingDown)return;shuttingDown=true;screenCapture?.dispose();auth?.dispose();
  await Promise.race([(async()=>{await Promise.resolve(localApp?.locals.dispose?.()).catch(()=>{});await auth?.flush().catch(()=>{});await vault?.flush();})(),new Promise(resolve=>setTimeout(resolve,2500))]);
  if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}
  app.exit(0);
@@ -112,6 +114,10 @@ async function start(){
   void dialog.showMessageBox(mainWindow!,{type:'question',buttons:['取消','允许麦克风'],defaultId:0,cancelId:0,title:'使用麦克风',message:'允许本软件使用麦克风吗？',detail:'打字提问和朗读不需要麦克风。仅在你主动开启语音功能时使用。'}).then(result=>{microphoneApproved=result.response===1;callback(microphoneApproved);}).catch(()=>callback(false));
  });
  handle('desktop:settings',publicSettings);
+ screenCapture=new ScreenCaptureService(()=>mainWindow,app.getAppPath());
+ handle('desktop:screen-capture',()=>screenCapture!.capture());
+ handle('desktop:screen-recognize',id=>screenCapture!.recognize(id));
+ handle('desktop:screen-cancel',()=>screenCapture!.cancel());
  handle('desktop:save',async input=>{
   const parsed=SaveSettingsSchema.safeParse(input);if(!parsed.success)throw Error('配置格式不正确，请检查模型名称与推理强度。');
   const {apiKey,clearApiKey,doubaoApiKey,clearDoubaoApiKey,...preferences}=parsed.data;
@@ -128,7 +134,7 @@ async function start(){
  handle('desktop:shortcut',makeShortcut);
  handle('desktop:restart',async()=>{if(restarting)return;restarting=true;await mainWindow?.webContents.executeJavaScript("window.dispatchEvent(new Event('pagehide'))");app.relaunch();setTimeout(()=>app.quit(),300);});
  mainWindow.once('ready-to-show',()=>mainWindow?.show());
- mainWindow.on('closed',()=>{mainWindow=null;});
+ mainWindow.on('closed',()=>{screenCapture?.dispose();mainWindow=null;});
  await mainWindow.loadURL(origin+'/');
  if(auth.snapshot().status==='signed_in')void refreshModels();
 }
