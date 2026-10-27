@@ -1,4 +1,4 @@
-import { _electron as electron } from '@playwright/test';
+import { _electron as electron, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -46,13 +46,24 @@ try {
     fixture.show(); fixture.focus();
     return fixture.id;
   });
-  const overlayEvent = application.waitForEvent('window');
-  // Invoke the real button without foregrounding the toolbar over the fixture.
-  await page.getByRole('button', { name: '截图朗读', exact: true }).evaluate(button => button.click());
-  const overlay = await overlayEvent;
-  await overlay.waitForURL('**/capture.html');
-  await overlay.locator('#screen').waitFor();
-  await overlay.waitForFunction(() => document.querySelector('#screen').complete && document.querySelector('#screen').naturalWidth > 0);
+  async function captureFixture() {
+    const began = Date.now();
+    await page.getByRole('button', { name: '截图朗读', exact: true }).evaluate(button => button.click());
+    await expect.poll(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(w => w.webContents.getURL().endsWith('/capture.html') && w.isVisible()).length), { timeout: 15000 }).toBeGreaterThan(0);
+    const overlay = application.windows().find(p => p.url().endsWith('/capture.html'));
+    assert.ok(overlay);
+    await overlay.waitForFunction(() => document.body.dataset.ready === 'true' && document.querySelector('#screen').complete && document.querySelector('#screen').naturalWidth > 0);
+    evidence.captureReadyMs ??= []; evidence.captureReadyMs.push(Date.now() - began);
+    return overlay;
+  }
+  await expect.poll(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(w => w.webContents.getURL().endsWith('/capture.html')).length)).toBeGreaterThan(0);
+  const poolIds = await application.evaluate(({ BrowserWindow }) => {
+    globalThis.captureShowChecks = [];
+    const windows = BrowserWindow.getAllWindows().filter(w => w.webContents.getURL().endsWith('/capture.html'));
+    for (const w of windows) w.on('show', () => { void w.webContents.executeJavaScript("({ready:document.body.dataset.ready,decoded:document.querySelector('#screen').complete&&document.querySelector('#screen').naturalWidth>0})").then(value => globalThis.captureShowChecks.push(value)); });
+    return windows.map(w => w.id);
+  });
+  const overlay = await captureFixture();
   await overlay.screenshot({ path: resolve(root, 'test-results/capture-overlay.png') });
   await overlay.mouse.move(60, 60); await overlay.mouse.down(); await overlay.mouse.move(1000, 570, { steps: 15 }); await overlay.mouse.up();
   await page.getByRole('heading', { name: '声音与设置', exact: true }).waitFor({ timeout: 30000 });
@@ -60,22 +71,38 @@ try {
   await page.waitForFunction(() => document.querySelector('#recognized-text')?.value.includes('2026'), undefined, { timeout: 30000 });
   const text = await page.locator('#recognized-text').inputValue();
   assert.match(text, /2026/); assert.match(text, /测试文字|测试.*文字/);
-  evidence.checks.push('Real multi-window screen crop -> local Windows OCR recognized authored Chinese text and year');
+  evidence.checks.push('Real screen crop -> local Windows OCR recognized authored Chinese text and year');
   evidence.ocrText = text;
   await page.screenshot({ path: resolve(root, 'docs/screenshots/recognized-text.png') });
-  await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.destroy(), fixtureId);
+  await application.evaluate(async ({ BrowserWindow }, id) => {
+    const fixture = BrowserWindow.fromId(id);
+    await fixture.webContents.executeJavaScript("document.body.innerHTML='<h1>第二次截图验收</h1><p>2031年，这是更新后的测试文字。</p><p>旧截图不会再次出现。</p>'");
+    fixture.show(); fixture.focus();
+  }, fixtureId);
+  const repeated = await captureFixture();
+  await repeated.mouse.move(60, 60); await repeated.mouse.down(); await repeated.mouse.move(1000, 570, { steps: 8 }); await repeated.mouse.up();
+  await page.getByRole('heading', { name: '声音与设置', exact: true }).waitFor({ timeout: 30000 });
+  await page.getByRole('button', { name: '查看识别文字', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('#recognized-text')?.value.includes('2031'), undefined, { timeout: 30000 });
+  assert.ok(!(await page.locator('#recognized-text').inputValue()).includes('2026'));
+  const currentPool = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(w => w.webContents.getURL().endsWith('/capture.html')).map(w => w.id));
+  assert.deepEqual(currentPool, poolIds);
   await page.getByRole('button', { name: '收起面板', exact: true }).click();
-  const cancelledOverlayEvent = application.waitForEvent('window');
-  await page.getByRole('button', { name: '截图朗读', exact: true }).click();
-  const cancelledOverlay = await cancelledOverlayEvent;
-  await cancelledOverlay.waitForURL('**/capture.html');
-  await cancelledOverlay.keyboard.press('Escape').catch(error => { if (!cancelledOverlay.isClosed()) throw error; });
+  const cancelledOverlay = await captureFixture();
+  await cancelledOverlay.keyboard.press('Escape');
   await page.getByText('已取消截图', { exact: true }).waitFor();
-  evidence.checks.push('Escape cancels native capture and restores toolbar');
+  await cancelledOverlay.waitForFunction(() => !document.querySelector('#screen').hasAttribute('src'));
+  const showChecks = await application.evaluate(() => globalThis.captureShowChecks);
+  assert.ok(showChecks.length >= 3); assert.ok(showChecks.every(value => value.ready === 'true' && value.decoded));
+  assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(w => w.webContents.getURL().endsWith('/capture.html') && w.isVisible()).length), 0);
+  evidence.checks.push('Warm blank overlays reused for fresh captures; every show had decoded image; Esc hides overlays and clears image');
+  await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.destroy(), fixtureId);
   // Exercise the real HTMLAudio element with generated silence, never a cloud request.
   await application.evaluate(({ ipcMain }) => {
     ipcMain.removeHandler('reader:begin-speech'); ipcMain.handle('reader:begin-speech', () => {});
+    globalThis.verificationSpeechCalls = 0;
     ipcMain.removeHandler('reader:speak'); ipcMain.handle('reader:speak', (_event, request) => {
+      globalThis.verificationSpeechCalls++;
       const wave = Buffer.alloc(44 + 24000 * 2 * 12);
       wave.write('RIFF', 0); wave.writeUInt32LE(wave.length - 8, 4); wave.write('WAVEfmt ', 8);
       wave.writeUInt32LE(16, 16); wave.writeUInt16LE(1, 20); wave.writeUInt16LE(1, 22);
@@ -95,7 +122,7 @@ try {
     window.HTMLMediaElement.prototype.play = function () { window.verificationAudio = this; return original.call(this); };
   });
   await page.getByRole('button', { name: '查看识别文字', exact: true }).click();
-  await page.getByLabel('识别文字', { exact: true }).fill('这是一段仅用于验证播放控制的测试文字。');
+  await page.getByLabel('识别文字', { exact: true }).fill('第一段用来确认我们可以回到刚才听过的内容，现在请认真听这句话，稍后可以点击按钮重听。第二段提供一段足够长的测试内容，以确认前进回退时播放器使用已经准备好的音频，文字不需要重新截图识别。');
   await page.getByRole('button', { name: '朗读这段文字', exact: true }).click();
   await page.waitForFunction(() => window.verificationAudio?.currentTime > 0.15);
   await page.getByRole('button', { name: '暂停', exact: true }).click();
@@ -105,6 +132,18 @@ try {
   assert.equal(afterRate.paused, true); assert.equal(afterRate.rate, 3); assert.ok(Math.abs(afterRate.time - pausedAt) < 0.06);
   await page.getByRole('button', { name: '继续', exact: true }).click();
   await page.waitForFunction(time => window.verificationAudio.currentTime > time + 0.1, pausedAt);
+  const requests = await application.evaluate(() => globalThis.verificationSpeechCalls);
+  await page.getByRole('button', { name: '下一段', exact: true }).click();
+  await expect(page.locator('.segment-position')).toHaveText('2 / 2 段');
+  await page.waitForFunction(() => window.verificationAudio.currentTime > 0.1);
+  await page.getByRole('button', { name: '上一段', exact: true }).click();
+  await expect(page.locator('.segment-position')).toHaveText('1 / 2 段');
+  await page.getByRole('button', { name: '重听本段', exact: true }).click();
+  await page.waitForFunction(() => window.verificationAudio.currentTime > 0.1);
+  assert.equal(await application.evaluate(() => globalThis.verificationSpeechCalls), requests);
+  await page.getByRole('button', { name: '收起面板', exact: true }).click();
+  await page.screenshot({ path: resolve(root, 'docs/screenshots/replay-toolbar.png') });
+  evidence.checks.push('Real HTMLAudio previous/next/replay preserve rate and reuse existing audio with no new synthesis');
   await page.getByRole('button', { name: '停止朗读', exact: true }).click();
   assert.equal(await page.evaluate(() => window.verificationAudio.paused), true);
   await page.evaluate(async () => { const settings = await window.reader.getSettings(); await window.reader.saveSettings({ preferences: { ...settings.preferences, allowCloud: false, rate: 1.5 }, clearApiKey: true }); });

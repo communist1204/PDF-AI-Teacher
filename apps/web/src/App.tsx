@@ -1,6 +1,6 @@
 import brandIcon from '../../../assets/qingread.svg';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, Pause, Play, Settings, Square, AlignLeft, Minus, X, ChevronLeft } from 'lucide-react';
+import { Camera, Pause, Play, Settings, Square, AlignLeft, Minus, X, ChevronLeft, SkipBack, SkipForward, RotateCcw } from 'lucide-react';
 import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_VOICES } from '../../../packages/shared/doubaoSpeech';
 import { speechConfigured } from '../../../packages/shared/reader';
 import type { ReaderPanel, ReaderPreferences, ReaderSettings, SaveReaderSettings } from '../../../packages/shared/reader';
@@ -113,6 +113,7 @@ export function App() {
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   });
 
+  const navigable = work === 'idle' && !savingSettings && audio.total > 0 && !['idle', 'error'].includes(audio.phase);
   const busy = savingSettings || work !== 'idle' || ['preparing', 'playing', 'paused'].includes(audio.phase);
   const audioStatus = audio.phase === 'preparing' ? '正在准备声音…' : audio.phase === 'playing' ? `正在朗读 · ${audio.index + 1}/${audio.total}` : audio.phase === 'paused' ? `已暂停 · ${audio.index + 1}/${audio.total}` : audio.phase === 'done' ? '朗读完成' : '';
   const status = !bridge ? '界面预览 · 请打开桌面软件截图朗读' : error || (audio.phase === 'error' ? messageOf(new Error(audio.message)) : '') || (savingSettings ? '正在保存声音设置…' : work === 'capturing' ? '拖动框选 · Esc 取消' : work === 'recognizing' ? '正在本机识别文字…' : audioStatus || notice || (speechConfigured(settings.preferences, settings.hasApiKey) ? '框选想听的内容，松开后开始朗读' : '先设置声音，也可以直接截图识字'));
@@ -124,7 +125,13 @@ export function App() {
       <label className="rate-control"><span className="sr-only">朗读速度</span><select aria-label="朗读速度" value={settings.preferences.rate} disabled={!bridge || !loaded || savingSettings} onChange={event => void changeRate(Number(event.target.value))}>{rates.map(rate => <option key={rate} value={rate}>{rate.toFixed(rate % 1 ? 2 : 1).replace(/0$/, rate % 1 ? '' : '0')}×</option>)}{!rates.includes(settings.preferences.rate) && <option value={settings.preferences.rate}>{settings.preferences.rate}×</option>}</select></label>
       <button className={`icon-button ${panel === 'settings' ? 'selected' : ''}`} aria-label="声音设置" title="声音设置" onClick={() => void showPanel(panel === 'settings' ? null : 'settings')}><Settings size={19}/></button>
     </div>
-    <div className="statusbar"><span className={`status-dot ${busy ? 'active' : ''} ${error || audio.phase === 'error' ? 'danger' : ''}`}/><span className="status-text" role={error || audio.phase === 'error' ? 'alert' : 'status'} title={status}>{status}</span><button className="tiny-button" aria-label="停止朗读" title="停止 · Esc" disabled={!busy} onClick={() => void stop()}><Square size={11}/></button><button className="tiny-button" aria-label="查看识别文字" title="查看识别文字" onClick={() => void showPanel(panel === 'text' ? null : 'text')}><AlignLeft size={14}/></button></div>
+    <nav className="playback-navigation" aria-label="回听控制">
+      <button disabled={!navigable || audio.index === 0} onClick={() => void player?.previous()} title="回到上一段，使用已准备的声音"><SkipBack size={14}/>上一段</button>
+      <button disabled={!navigable} onClick={() => void player?.replay()} title="从当前段开头重听"><RotateCcw size={14}/>重听本段</button>
+      <button disabled={!navigable || audio.index + 1 >= audio.total} onClick={() => void player?.next()} title="前进到下一段"><SkipForward size={14}/>下一段</button>
+      <span className="segment-position">{audio.total ? `${audio.index + 1} / ${audio.total} 段` : '截图后可回听'}</span>
+    </nav>
+    <div className="statusbar"><span className={`status-dot ${busy ? 'active' : ''} ${error || audio.phase === 'error' ? 'danger' : ''}`}/><span className="status-text" role={error || audio.phase === 'error' ? 'alert' : 'status'} title={status}>{status}</span><button className="tiny-button" aria-label="停止朗读" title="停止 · Esc" disabled={!busy && !audio.total} onClick={() => void stop()}><Square size={11}/></button><button className="tiny-button" aria-label="查看识别文字" title="查看识别文字" onClick={() => void showPanel(panel === 'text' ? null : 'text')}><AlignLeft size={14}/></button></div>
     {panel && <section key={panel} className="panel">
       <div className="panel-heading"><button className="back-button" aria-label="收起面板" onClick={() => void showPanel(null)}><ChevronLeft size={17}/></button><h1>{panel === 'settings' ? '声音与设置' : '这次读什么'}</h1><span>{panel === 'settings' ? '按你的习惯来' : `${prepared.text.length} 字`}</span></div>
       {panel === 'settings' ? <SettingsPanel key={`${loaded}-${settings.migrated}`} settings={settings} enabled={!!bridge && loaded && !savingSettings} save={value => save({ ...value, preferences: { ...value.preferences, rate: settingsRef.current.preferences.rate } })} openHelp={provider => bridge?.openHelp(provider) ?? Promise.resolve()} operationToken={() => auditionIntent.current} audition={async (token, provider) => { if (token !== auditionIntent.current || provider !== settingsRef.current.preferences.provider) return false; const own = ++sequence.current; setError(''); await readText('这是轻读的声音试听。2026年，我们把屏幕上的文字，变成自然的朗读。你可以随时暂停，也可以调整语速，接着往下听。', own); return own === sequence.current; }} onSaved={() => { setNotice('设置已保存，下次朗读使用新声音'); setError(''); }} /> : <div className="text-panel">

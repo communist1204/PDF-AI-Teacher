@@ -147,3 +147,24 @@ test('switching directly from Doubao to Bing can save and audition on the first 
   expect(await page.evaluate(() => (window as unknown as { readerTest: { settings: { preferences: { provider: string } }; calls: { speak: number } } }).readerTest)).toMatchObject({ settings: { preferences: { provider: 'bing' } }, calls: { speak: expect.any(Number) } });
   expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBeGreaterThan(0);
 });
+
+test('segment controls replay cached audio after completion without another capture or synthesis', async ({ page }) => {
+  await mockDesktop(page); await page.goto('/');
+  await page.getByRole('button', { name: '查看识别文字' }).click();
+  await page.getByLabel('识别文字', { exact: true }).fill('第一段用来确认我们可以回到刚才听过的内容，现在请认真听这句话，稍后可以点击按钮重听。第二段提供一段足够长的测试内容，以确认前进回退时播放器使用已经准备好的音频，文字不需要重新截图识别。');
+  await page.getByRole('button', { name: '朗读这段文字', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('正在朗读');
+  await expect(page.getByRole('button', { name: '上一段', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '下一段', exact: true }).click();
+  await expect(page.locator('.segment-position')).toHaveText('2 / 2 段');
+  const calls = await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak);
+  await page.evaluate(() => (window as unknown as { readerTestAudio: HTMLAudioElement }).readerTestAudio.dispatchEvent(new Event('ended')));
+  await expect(page.getByRole('status')).toHaveText('朗读完成');
+  await page.getByRole('button', { name: '重听本段', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('正在朗读');
+  await page.getByRole('button', { name: '上一段', exact: true }).click();
+  await expect(page.locator('.segment-position')).toHaveText('1 / 2 段');
+  expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBe(calls);
+  await page.getByRole('button', { name: '停止朗读', exact: true }).click();
+  await expect(page.getByRole('button', { name: '重听本段', exact: true })).toBeDisabled();
+});

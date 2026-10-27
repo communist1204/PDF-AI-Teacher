@@ -19,3 +19,10 @@
 15. 微软和豆包分别授权；旧设置缺少新字段时仍为doubao且allowBingCloud=false。MP3使用正确MIME并沿用单播放器，调速无需重新生成。
 16. Electron Session.fetch的manual地区跳转会取消；参照https://www.electronjs.org/docs/latest/api/client-request 和 https://www.electronjs.org/docs/latest/api/net/核验。GET逐跳域名/路径守卫、POST禁止重定向，使用当前本机实际cn.bing.com入口。失败不会转向收费声音。
 17. 设置保存互斥，试听绑定独立用户意图；停止/新任务使旧试听失效，保存自身取消不会误杀新试听。原PRD验收标准保持不变。
+
+## 0.4.0 回听和截图展示
+- 使用“段”作为导航单位，与已有 TTS 合成块一致。没有准确句级时间戳时不伪称逐句定位，不为导航把所有句子拆成独立云请求。
+- 完成的音频 URL 保留到本次朗读结束后的主动停止/替换；128 MiB 总量约束。暂停后的导航属于用户明确播放操作，从目标段开头播放。position 与 playAttempt 分别阻挡迟到段落和旧 play Promise，generation/epoch 继续保护跨任务响应。请求仍最多同时 2 个，只预取当前位置后 2 段。
+- 截图黑屏原因：旧窗口深色底、40% 黑遮罩、loadFile 结束不代表异步截图已经解码。采用隐藏空窗口预热/复用、带 frameId 的图片完成信号，decode 后两帧绘制再展示；固定隐藏等待由 180ms 改成 60ms，经真实桌面 OCR 验证。
+- 预热不捕获屏幕。选区完成或取消时隐藏窗口并清掉原图、NativeImage 和拖选状态；保留的仅是空窗口。显示器窗口并行加载并等待全部 settle，避免部分失败导致重试向未就绪页面发图。
+- 依据 Electron 官方窗口展示与捕获文档：https://www.electronjs.org/docs/latest/api/browser-window 、https://www.electronjs.org/docs/latest/api/desktop-capturer 。快捷键不再先显示再隐藏主工具条，裁剪复用 PNG 编码结果。

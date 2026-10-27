@@ -14,3 +14,5 @@ Key 在桌面设置填写并由 Windows 加密，不发到聊天、不提交 Git
 
 
 0.3.0已增加Bing翻译朗读（晓晓），来源见docs/edge-translation-research.md。独立微软许可默认关闭；豆包配置保留。真实网络验收显式运行node scripts/verify-bing.mjs --live，仅发送自制短句；普通单测/e2e不调用云语音。
+
+0.4.0 新增上一段/重听本段/下一段，读完可用内存音频回听。截图窗口仅预热空界面，主动捕获并解码完成后显示；验收见 docs/verification.md。

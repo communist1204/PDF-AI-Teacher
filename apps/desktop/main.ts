@@ -32,12 +32,12 @@ function handle(channel: string, action: (...args: unknown[]) => unknown): void 
 function resize(expanded: boolean): void {
   if (!window) return;
   const bounds = window.getBounds(), area = screen.getDisplayMatching(bounds).workArea;
-  const width = Math.min(560, area.width), height = Math.min(expanded ? 650 : 138, area.height);
+  const width = Math.min(560, area.width), height = Math.min(expanded ? 686 : 174, area.height);
   window.setBounds({ width, height, x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)), y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - height)) });
 }
 function requestCapture(): void {
   if (!window || window.isDestroyed()) return;
-  window.restore(); window.show(); window.webContents.send('reader:capture-requested');
+  window.webContents.send('reader:capture-requested');
 }
 async function start(): Promise<void> {
   vault = new SettingsVault(join(app.getPath('userData'), 'private-settings.bin'), {
@@ -47,7 +47,7 @@ async function start(): Promise<void> {
   await vault.load(process.env.SCREEN_READER_DATA_DIR ? undefined : join(app.getPath('appData'), 'PDF-AI-Teacher', 'private-settings.bin'));
   const preferences = vault.privateSettings().preferences;
   const area = screen.getPrimaryDisplay().workArea, saved = vault.privateSettings().position;
-  window = new BrowserWindow({ title: '截图朗读', width: 560, height: 138, x: saved?.x ?? area.x + Math.max(0, area.width - 590), y: saved?.y ?? area.y + 70, frame: false, resizable: false, maximizable: false, show: false, alwaysOnTop: preferences.alwaysOnTop, backgroundColor: '#f3f9ff', icon: join(__dirname, 'assets/qingread.ico'), webPreferences: { preload: join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, devTools: !app.isPackaged, partition: 'persist:reader-ui' } });
+  window = new BrowserWindow({ title: '截图朗读', width: 560, height: 174, x: saved?.x ?? area.x + Math.max(0, area.width - 590), y: saved?.y ?? area.y + 70, frame: false, resizable: false, maximizable: false, show: false, alwaysOnTop: preferences.alwaysOnTop, backgroundColor: '#f3f9ff', icon: join(__dirname, 'assets/qingread.ico'), webPreferences: { preload: join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, devTools: !app.isPackaged, partition: 'persist:reader-ui' } });
   resize(false);
   const contents = window.webContents;
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -93,6 +93,7 @@ async function start(): Promise<void> {
   window.on('closed', () => { window = null; capture.dispose(); speech.cancel(); });
   await window.loadFile(html);
   window.show();
+  void capture.warmup().catch(() => {});
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
