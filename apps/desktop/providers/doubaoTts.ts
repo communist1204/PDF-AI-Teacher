@@ -190,3 +190,4 @@ export class DoubaoTtsProvider {
     for (const controller of this.active) controller.abort(cancelled());
   }
 }
+

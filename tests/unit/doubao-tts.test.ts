@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DOUBAO_TTS_VOICES, DoubaoTtsProvider, type DoubaoTtsOptions } from '../../apps/server/src/doubaoTts';
+import { DOUBAO_TTS_VOICES, DoubaoTtsProvider, type DoubaoTtsOptions } from '../../apps/desktop/providers/doubaoTts';
 
 const pcm = Buffer.from([0, 0, 120, 0, 240, 0, 120, 0]);
 const end = { code: 20000000, usage: { text_words: 7 } };
