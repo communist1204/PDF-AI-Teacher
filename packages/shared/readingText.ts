@@ -1,9 +1,24 @@
-export interface ReadingText { text: string; skipped: number; chunks: string[] }
+/** Only standalone or sentence-final source badges; keep domain discussions and variables. */
+export function removeSourceBadges(source: string): { text: string; removed: number } {
+  let removed = 0;
+  const domain = '(?:[a-z0-9](?:[a-z0-9-]{0,62})\\.)+(?:org|com|net|edu|gov|cn|io|ai|co|uk|de|jp|dev|app)(?:/[^\\s\\u3400-\\u9fff，。！？；：、]*)?';
+  const badge = '(?:[📌↗🔗>›»×✕]+\\s*)?';
+  const standalone = new RegExp('^\\s*' + badge + domain + '\\s*$', 'iu');
+  const trailing = new RegExp('((?:[。！？]\\s*)|(?:[.!?]\\s+))' + badge + domain + '[ \\t]*$', 'iu');
+  const text = source.split('\n').map(line => {
+    if (standalone.test(line)) { removed++; return ''; }
+    return line.replace(trailing, (_match, punctuation: string) => { removed++; return punctuation; });
+  }).join('\n');
+  return { text, removed };
+}
+
+export interface ReadingText { text: string; skipped: number; filteredSources: number; chunks: string[] }
 
 /** Conservative local cleanup, not semantic recognition. Original OCR stays available in the UI. */
 export function prepareReadingText(source: string, skipFormulas = true): ReadingText {
   let skipped = 0;
-  let text = source.normalize('NFC').replace(/\r\n?/g, '\n');
+  const filtered = removeSourceBadges(source.normalize('NFC').replace(/\r\n?/g, '\n'));
+  let text = filtered.text;
   // Strip controls, not text that merely resembles an instruction.
   // eslint-disable-next-line no-control-regex
   text = text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
@@ -21,7 +36,7 @@ export function prepareReadingText(source: string, skipFormulas = true): Reading
       return line;
     }).join('\n');
   }
-  text = text.replace(/https?:\/\/[^\s]+/g, '').replace(/^[ \t]*[-*#]+[ \t]+/gm, '')
+  text = text.replace(/https?:\/\/[^\s\u3400-\u9fff，。！？；：、<>]+/g, '').replace(/^[ \t]*[-*#]+[ \t]+/gm, '')
     .replace(/(?<=\p{Script=Han})[ \t]+(?=\p{Script=Han})/gu, '')
     .replace(/[ \t]+([，。！？；：、])/g, '$1');
   const paragraphs = text.split(/\n\s*\n/).map(part => part.trim().replace(/[ \t]*\n[ \t]*/g, '\n')
@@ -31,7 +46,7 @@ export function prepareReadingText(source: string, skipFormulas = true): Reading
   text = paragraphs.map(p => /[。！？.!?:：;；]$/.test(p) ? p : `${p}。`).join('\n');
   const digits = '零一二三四五六七八九';
   text = text.replace(/(?<!\d)([12]\d{3})(?=\s*年)/g, year => [...year].map(n => digits[Number(n)]).join(''));
-  return { text, skipped, chunks: splitReadingChunks(text) };
+  return { text, skipped, filteredSources: filtered.removed, chunks: splitReadingChunks(text) };
 }
 
 /** Small first natural sentence, then paragraphs around 220 characters, with a hard service limit. */

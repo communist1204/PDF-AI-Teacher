@@ -74,3 +74,22 @@ it('reads the previous preference format without granting permission to a new re
   await vault.save({ preferences: { ...defaultPreferences, provider: 'bing', allowBingCloud: true } });
   expect(vault.privateSettings().apiKey).toBe('retained-doubao-key');
 });
+
+it('stores vision keys separately and old settings never grant image permission', async () => {
+  const { vault, path } = await setup();
+  const old = { ...defaultPreferences } as Partial<typeof defaultPreferences>;
+  delete old.recognitionMode; delete old.allowVisionCloud;
+  await writeFile(path, cipher.encrypt(JSON.stringify({ version: 1, preferences: old, apiKey: 'old-speech-only', migrated: false, position: null })));
+  await vault.load();
+  expect(vault.publicSettings(true)).toMatchObject({ hasVisionKey: false, preferences: { recognitionMode: 'local', allowVisionCloud: false } });
+  await vault.save({ preferences: { ...defaultPreferences, recognitionMode: 'smart', allowVisionCloud: true }, visionApiKey: 'mock-private-vision' });
+  expect(vault.privateSettings()).toMatchObject({ apiKey: 'old-speech-only', visionApiKey: 'mock-private-vision' });
+  expect(JSON.stringify(vault.publicSettings(true))).not.toContain('mock-private-vision');
+  expect((await readFile(path)).toString()).not.toContain('mock-private-vision');
+  const reopened = new SettingsVault(path, cipher); await reopened.load();
+  expect(reopened.publicSettings(true).hasVisionKey).toBe(true);
+  await reopened.save({ preferences: defaultPreferences, visionApiKey: '' });
+  expect(reopened.publicSettings(true).hasVisionKey).toBe(true);
+  await reopened.save({ preferences: defaultPreferences, clearVisionApiKey: true });
+  expect(reopened.privateSettings()).toMatchObject({ apiKey: 'old-speech-only', visionApiKey: '' });
+});

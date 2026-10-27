@@ -6,6 +6,8 @@ import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_V
 import type { ReaderPreferences, ReaderSettings } from '../../packages/shared/reader';
 
 export const PreferencesSchema = z.object({
+  recognitionMode: z.enum(['local', 'smart']).default('local'),
+  allowVisionCloud: z.boolean().default(false),
   provider: z.enum(['doubao', 'bing']).default('doubao'),
   allowBingCloud: z.boolean().default(false),
   voice: z.string().refine(value => DOUBAO_TTS_VOICES.some(voice => voice.id === value)),
@@ -17,13 +19,17 @@ export const SaveSettingsSchema = z.object({
   preferences: PreferencesSchema,
   apiKey: z.string().trim().max(500).refine(value => value === '' || /^[\x21-\x7e]+$/.test(value)).optional(),
   clearApiKey: z.boolean().optional(),
+  visionApiKey: z.string().trim().max(500).refine(value => value === '' || /^[\x21-\x7e]+$/.test(value)).optional(),
+  clearVisionApiKey: z.boolean().optional(),
 }).strict();
 const PositionSchema = z.object({ x: z.number().int().min(-100000).max(100000), y: z.number().int().min(-100000).max(100000) }).strict();
 const PrivateSettingsSchema = z.object({
   version: z.literal(1), preferences: PreferencesSchema,
+  visionApiKey: z.string().max(500).default(''),
   apiKey: z.string().max(500), migrated: z.boolean(), position: PositionSchema.nullable(),
 }).strict();
 export const defaultPreferences: ReaderPreferences = {
+  recognitionMode: 'local', allowVisionCloud: false,
   provider: 'doubao', allowBingCloud: false,
   voice: DEFAULT_DOUBAO_TTS_VOICE, instructions: DEFAULT_DOUBAO_TTS_INSTRUCTIONS,
   rate: 1, alwaysOnTop: true, allowCloud: false, skipFormulas: true,
@@ -33,13 +39,13 @@ type PrivateSettings = z.infer<typeof PrivateSettingsSchema>;
 
 /** Credentials remain inside the desktop process and encrypted on disk. */
 export class SettingsVault {
-  private value: PrivateSettings = { version: 1, preferences: { ...defaultPreferences }, apiKey: '', migrated: false, position: null };
+  private value: PrivateSettings = { version: 1, preferences: { ...defaultPreferences }, apiKey: '', visionApiKey: '', migrated: false, position: null };
   private queue: Promise<void> = Promise.resolve();
   private damaged = false;
   constructor(private readonly path: string, private readonly cipher: Cipher) {}
   privateSettings(): PrivateSettings { return structuredClone(this.value); }
   publicSettings(shortcutAvailable: boolean): ReaderSettings {
-    return { preferences: { ...this.value.preferences }, hasApiKey: Boolean(this.value.apiKey), encryptionAvailable: this.cipher.available(), migrated: this.value.migrated, shortcutAvailable };
+    return { preferences: { ...this.value.preferences }, hasApiKey: Boolean(this.value.apiKey), hasVisionKey: Boolean(this.value.visionApiKey), encryptionAvailable: this.cipher.available(), migrated: this.value.migrated, shortcutAvailable };
   }
   async load(legacyPath?: string): Promise<void> {
     let bytes: Buffer;
@@ -87,8 +93,8 @@ export class SettingsVault {
   async save(input: unknown): Promise<void> {
     const parsed = SaveSettingsSchema.safeParse(input);
     if (!parsed.success) throw Error('设置内容无效，请检查音色、语速和 API Key。');
-    const { preferences, apiKey, clearApiKey } = parsed.data;
-    await this.update(current => ({ ...current, preferences, apiKey: clearApiKey ? '' : apiKey || current.apiKey }));
+    const { preferences, apiKey, clearApiKey, visionApiKey, clearVisionApiKey } = parsed.data;
+    await this.update(current => ({ ...current, preferences, apiKey: clearApiKey ? '' : apiKey || current.apiKey, visionApiKey: clearVisionApiKey ? '' : visionApiKey || current.visionApiKey }));
   }
   savePosition(position: { x: number; y: number }): Promise<void> {
     const parsed = PositionSchema.safeParse(position);

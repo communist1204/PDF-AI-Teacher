@@ -26,3 +26,12 @@
 - 截图黑屏原因：旧窗口深色底、40% 黑遮罩、loadFile 结束不代表异步截图已经解码。采用隐藏空窗口预热/复用、带 frameId 的图片完成信号，decode 后两帧绘制再展示；固定隐藏等待由 180ms 改成 60ms，经真实桌面 OCR 验证。
 - 预热不捕获屏幕。选区完成或取消时隐藏窗口并清掉原图、NativeImage 和拖选状态；保留的仅是空窗口。显示器窗口并行加载并等待全部 settle，避免部分失败导致重试向未就绪页面发图。
 - 依据 Electron 官方窗口展示与捕获文档：https://www.electronjs.org/docs/latest/api/browser-window 、https://www.electronjs.org/docs/latest/api/desktop-capturer 。快捷键不再先显示再隐藏主工具条，裁剪复用 PNG 编码结果。
+
+## 0.5.0 图片先整理、语音后播放
+- Windows OCR 只输出行文本并丢失空间关系；本轮按用户新要求增加可选视觉适配器，原第一版边界与既有验收标准不改。
+- 固定使用 OpenAI Responses API https://api.openai.com/v1/responses，gpt-5.4-mini，reasoning.effort=none，PNG input_image/detail=high，text.format=json_schema/strict，store=false，max_output_tokens=6000。不启用工具、不传聊天历史、不基于错误 OCR 进行猜测。store=false 不代表服务端零保留承诺。
+- 官方文档已实际查阅：https://developers.openai.com/api/docs/models/gpt-5.4-mini （支持图片输入、结构化输出及 none）；https://developers.openai.com/api/docs/guides/images-vision ；https://developers.openai.com/api/docs/guides/structured-outputs 。模型账户权限及真实速度仍待测。
+- 截图先分类为 prose/table/image/formula；表格以数组保留对应关系，本地限制行列数并拒绝长度错位，按行渲染朗读稿。模型报告模糊字形时要求人工核对，禁止以完整成功名义读半份或错误结构。
+- 图片中的文字是数据，不改变任务，不执行生成内容。截图只使用主进程保存的本次 crop ID；新增独立图片许可与主进程 Key，不复用语音许可，不读取 ChatGPT/Edge 登录。切换模式、撤销图片许可、更换 Key、停止和新截图均取消旧识图。
+- 请求 45 秒超时、响应 1 MiB 限制；拒绝重定向，错误脱敏，不自动重试、不偷偷退回本机 OCR。免费本机路径仍可单独使用。
+- 域名过滤采用保守规则：仅独占一行或句末来源标记。ASCII 句末必须有空白，避免误把 www.arxiv.org 中的点当句号；不一律删除字母或无空格中文后文。

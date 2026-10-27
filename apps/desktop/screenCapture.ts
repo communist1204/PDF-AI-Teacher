@@ -138,7 +138,7 @@ export class ScreenCaptureService {
       if (!this.disposed && parent && !parent.isDestroyed()) { parent.show(); parent.focus(); }
     }
   }
-  async recognize(id: unknown): Promise<ScreenRecognition> {
+  async recognize(id: unknown, recognizer?: (png: Buffer, signal: AbortSignal) => Promise<Omit<ScreenRecognition, 'id' | 'elapsedMs'>>): Promise<ScreenRecognition> {
     if (typeof id !== 'string' || !this.selection || id !== this.selection.id) throw Error('截图已过期，请重新截图。');
     if (this.recognition) throw Error('文字正在识别，请稍等或取消。');
     const selection = this.selection; this.selection = null;
@@ -146,7 +146,7 @@ export class ScreenCaptureService {
     const started = Date.now();
     try {
       const scriptDirectory = this.directory.endsWith('.asar') ? this.directory + '.unpacked' : this.directory;
-      const result = await recognizeWindowsImage(selection.png, join(scriptDirectory, 'windows-ocr.ps1'), controller.signal);
+      const result = recognizer ? await recognizer(selection.png, controller.signal) : { ...await recognizeWindowsImage(selection.png, join(scriptDirectory, 'windows-ocr.ps1'), controller.signal), method: 'local' as const };
       controller.signal.throwIfAborted();
       return { id, ...result, elapsedMs: Date.now() - started };
     } finally { if (this.recognition === controller) this.recognition = null; }

@@ -5,6 +5,7 @@ import { SettingsVault } from './settings';
 import { ScreenCaptureService } from './screenCapture';
 import { SpeechSession } from './speechSession';
 import { createDesktopFetch, createBingFetch } from './network';
+import { recognizeWithOpenAI } from './providers/openaiVision';
 import { BingTtsProvider } from './providers/bingTts';
 import { speechConfigured } from '../../packages/shared/reader';
 
@@ -65,15 +66,22 @@ async function start(): Promise<void> {
   capture = new ScreenCaptureService(() => window, __dirname);
   handle('reader:settings', () => vault.publicSettings(shortcutAvailable));
   handle('reader:save-settings', async value => {
-    const previousProvider = vault.privateSettings().preferences.provider;
+    const previous = vault.privateSettings();
+    const previousProvider = previous.preferences.provider;
     await vault.save(value);
     const current = vault.privateSettings();
     window?.setAlwaysOnTop(current.preferences.alwaysOnTop);
+    if (previous.preferences.recognitionMode !== current.preferences.recognitionMode || (previous.preferences.allowVisionCloud && !current.preferences.allowVisionCloud) || previous.visionApiKey !== current.visionApiKey) capture.cancel();
     if (previousProvider !== current.preferences.provider || !speechConfigured(current.preferences, Boolean(current.apiKey))) speech.cancel();
     return vault.publicSettings(shortcutAvailable);
   });
   handle('reader:capture', () => { speech.cancel(); return capture.capture(); });
-  handle('reader:recognize', id => capture.recognize(id));
+  handle('reader:recognize', id => {
+    const settings = vault.privateSettings();
+    if (settings.preferences.recognitionMode === 'local') return capture.recognize(id);
+    if (!settings.preferences.allowVisionCloud || !settings.visionApiKey) throw Error('智能看图尚未配置：请填写 OpenAI API Key，并单独允许发送框选图片。');
+    return capture.recognize(id, (png, signal) => recognizeWithOpenAI(png, { apiKey: settings.visionApiKey, allowed: settings.preferences.allowVisionCloud, skipFormulas: settings.preferences.skipFormulas, fetchImpl: createDesktopFetch(network) }, signal));
+  });
   handle('reader:begin-speech', id => { const settings = vault.privateSettings(); speech.begin(id, settings.preferences, settings.apiKey); });
   handle('reader:speak', request => speech.speak(request));
   handle('reader:cancel', () => { capture.cancel(); speech.cancel(); });
@@ -82,8 +90,8 @@ async function start(): Promise<void> {
   handle('reader:quit', () => app.quit());
   handle('reader:help', provider => {
     const selected = provider ?? vault.privateSettings().preferences.provider;
-    if (selected !== 'bing' && selected !== 'doubao') throw Error('未知声音来源。');
-    return shell.openExternal(selected === 'bing' ? 'https://www.bing.com/translator' : 'https://console.volcengine.com/speech/service');
+    if (selected !== 'bing' && selected !== 'doubao' && selected !== 'openai') throw Error('未知声音来源。');
+    return shell.openExternal(selected === 'openai' ? 'https://platform.openai.com/api-keys' : selected === 'bing' ? 'https://www.bing.com/translator' : 'https://console.volcengine.com/speech/service');
   });
   shortcutAvailable = globalShortcut.register('CommandOrControl+Shift+R', requestCapture);
   window.on('move', () => {

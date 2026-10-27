@@ -20,6 +20,7 @@ try {
   await page.waitForFunction(() => window.reader !== undefined);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const settings = await page.evaluate(() => window.reader.getSettings());
+  assert.equal(settings.hasVisionKey, false); assert.equal(settings.preferences.allowVisionCloud, false);
   assert.equal(settings.hasApiKey, false); assert.equal(settings.preferences.allowCloud, false);
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
   evidence.checks.push('Isolated profile; no real key; cloud off; renderer has no Node access');
@@ -31,6 +32,11 @@ try {
   assert.equal(await page.getByLabel('允许将我主动截图', { exact: false }).isChecked(), false);
   await page.getByRole('button', { name: '保存并试听这段声音' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: resolve(root, 'docs/screenshots/bing-settings.png') });
+  await page.getByLabel('识别方式').selectOption('smart');
+  await page.getByLabel('OpenAI 看图 API Key', { exact: true }).scrollIntoViewIfNeeded();
+  assert.equal(await page.getByLabel('允许将我主动框选的图片', { exact: false }).isChecked(), false);
+  await page.screenshot({ path: resolve(root, 'docs/screenshots/vision-settings.png') });
+  await page.getByLabel('识别方式').selectOption('local');
   await page.getByLabel('朗读来源').selectOption('doubao');
   await page.getByRole('button', { name: '收起面板', exact: true }).click();
   await page.getByLabel('朗读速度', { exact: true }).selectOption('1.5');

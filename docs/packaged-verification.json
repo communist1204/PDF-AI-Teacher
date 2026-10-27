@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-10-27T10:51:35.279Z",
+  "capturedAt": "2026-10-27T11:22:43.108Z",
   "packaged": true,
   "realCloudCalls": false,
   "humanListening": false,
@@ -13,9 +13,9 @@
     "Encrypted settings survive restart; no credential inherited by test profile"
   ],
   "captureReadyMs": [
-    645,
-    591,
-    575
+    631,
+    578,
+    573
   ],
   "ocrText": "截图朗读验收\n这是我们自己编写的测试文字。\n2026 年， 我们学习新的知识。\n读到这里， 可以暂停， 然后继续。\nScreen reader verification.",
   "status": "passed"

@@ -1,6 +1,8 @@
 import type { ScreenCapture, ScreenRecognition } from './screenReading';
 
 export interface ReaderPreferences {
+  recognitionMode: 'local' | 'smart';
+  allowVisionCloud: boolean;
   provider: 'doubao' | 'bing';
   allowBingCloud: boolean;
   voice: string;
@@ -13,6 +15,7 @@ export interface ReaderPreferences {
 export interface ReaderSettings {
   preferences: ReaderPreferences;
   hasApiKey: boolean;
+  hasVisionKey: boolean;
   encryptionAvailable: boolean;
   migrated: boolean;
   shortcutAvailable: boolean;
@@ -21,6 +24,8 @@ export interface SaveReaderSettings {
   preferences: ReaderPreferences;
   apiKey?: string;
   clearApiKey?: boolean;
+  visionApiKey?: string;
+  clearVisionApiKey?: boolean;
 }
 export interface SpeechRequest { generationId: string; chunkId: number; text: string }
 export interface SpeechResult { generationId: string; chunkId: number; audio: Uint8Array; mimeType?: 'audio/wav' | 'audio/mpeg' }
@@ -36,7 +41,7 @@ export interface ReaderBridge {
   setPanel(panel: ReaderPanel): Promise<void>;
   minimize(): Promise<void>;
   quit(): Promise<void>;
-  openHelp(provider?: 'doubao' | 'bing'): Promise<void>;
+  openHelp(provider?: 'doubao' | 'bing' | 'openai'): Promise<void>;
   onCaptureRequested(callback: () => void): () => void;
 }
 declare global { interface Window { reader?: ReaderBridge } }

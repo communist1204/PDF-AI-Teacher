@@ -8,3 +8,5 @@
 .settings-actions{display:flex;gap:8px}.settings-actions .primary{padding:10px 12px}
 
 .playback-navigation{height:36px;display:flex;align-items:center;gap:6px;padding:5px 16px 0}.playback-navigation button{height:28px;padding:0 10px;border-radius:7px;color:#326487;background:#eaf5ff;font-size:12px}.playback-navigation button:not(:disabled):hover{background:#d3ebfd}.segment-position{margin-left:auto;font-size:11px;color:#628199;white-space:nowrap}
+
+.recognition-settings{margin-top:22px;padding-top:8px;border-top:1px solid #d8e9f7}.recognition-settings h2{font-size:15px;font-weight:600}.recognition-settings .link-button{margin-top:12px}

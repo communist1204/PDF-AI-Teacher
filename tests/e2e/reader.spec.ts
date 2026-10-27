@@ -3,8 +3,8 @@ import { expect, test, type Page } from '@playwright/test';
 async function mockDesktop(page: Page, options = { hasKey: true, delayedOcr: false }) {
   await page.addInitScript(({ hasKey, delayedOcr }) => {
     const calls = { speak: 0, cancelled: 0, saves: 0, playing: false };
-    const preferences = { provider: 'doubao' as 'doubao' | 'bing', allowBingCloud: false, voice: 'zh_female_xiaohe_uranus_bigtts', instructions: '温和自然地读。', rate: 1, alwaysOnTop: true, allowCloud: true, skipFormulas: true };
-    const settings = { preferences, hasApiKey: hasKey, encryptionAvailable: true, migrated: false, shortcutAvailable: true };
+    const preferences = { recognitionMode: 'local' as 'local' | 'smart', allowVisionCloud: false, provider: 'doubao' as 'doubao' | 'bing', allowBingCloud: false, voice: 'zh_female_xiaohe_uranus_bigtts', instructions: '温和自然地读。', rate: 1, alwaysOnTop: true, allowCloud: true, skipFormulas: true };
+    const settings = { preferences, hasApiKey: hasKey, hasVisionKey: false, encryptionAvailable: true, migrated: false, shortcutAvailable: true };
     // Structurally valid silent WAV. Playback is mocked; malformed bytes would trigger a real decode error.
     const wave = new Uint8Array(48044), header = new DataView(wave.buffer);
     const tag = (offset: number, text: string) => [...text].forEach((value, i) => wave[offset + i] = value.charCodeAt(0));
@@ -18,7 +18,7 @@ async function mockDesktop(page: Page, options = { hasKey: true, delayedOcr: fal
     HTMLMediaElement.prototype.load = function () {};
     window.reader = {
       getSettings: async () => settings,
-      saveSettings: async value => { calls.saves++; settings.preferences = value.preferences; if (value.apiKey) settings.hasApiKey = true; if (value.clearApiKey) settings.hasApiKey = false; return settings; },
+      saveSettings: async value => { calls.saves++; settings.preferences = value.preferences; if (value.apiKey) settings.hasApiKey = true; if (value.clearApiKey) settings.hasApiKey = false; if (value.visionApiKey) settings.hasVisionKey = true; if (value.clearVisionApiKey) settings.hasVisionKey = false; return settings; },
       capture: async () => ({ id: 'capture-1', imageDataUrl: '', width: 100, height: 100 }),
       recognize: async id => {
         if (delayedOcr) await new Promise<void>(resolve => Object.assign(window, { finishTestOcr: resolve }));
@@ -167,4 +167,39 @@ test('segment controls replay cached audio after completion without another capt
   expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBe(calls);
   await page.getByRole('button', { name: '停止朗读', exact: true }).click();
   await expect(page.getByRole('button', { name: '重听本段', exact: true })).toBeDisabled();
+});
+
+test('smart reading requires its own key and image consent before capture', async ({ page }) => {
+  await mockDesktop(page); await page.goto('/');
+  await page.getByRole('button', { name: '声音设置', exact: true }).click();
+  await page.getByLabel('识别方式').selectOption('smart');
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await page.getByRole('button', { name: '收起面板', exact: true }).click();
+  await page.getByRole('button', { name: '截图朗读', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '声音与设置' })).toBeVisible();
+  await expect(page.getByRole('status').first()).toContainText('智能看图需要');
+  await expect(page.getByLabel('允许将我主动框选的图片', { exact: false })).not.toBeChecked();
+  expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBe(0);
+});
+
+test('uncertain smart plan opens review and does not automatically read; stopping rejects late smart output', async ({ page }) => {
+  await mockDesktop(page); await page.goto('/');
+  await page.getByRole('button', { name: '声音设置', exact: true }).click();
+  await page.getByLabel('识别方式').selectOption('smart');
+  await page.getByLabel('OpenAI 看图 API Key', { exact: true }).fill('mock-vision-key');
+  await page.getByLabel('允许将我主动框选的图片', { exact: false }).check();
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await expect(page.getByLabel('OpenAI 看图 API Key', { exact: true })).toHaveValue('');
+  await page.evaluate(() => { window.reader!.recognize = async id => ({ id, text: '第1行，阶段：潜在动作量化；学习任务：此处文字不清。', language: 'zh-Hans', elapsedMs: 12, method: 'openai', reviewRequired: true, plan: { blocks: [], warnings: ['学习任务列有文字不清。'], omitted: ['source_badges'] } }); });
+  await page.getByRole('button', { name: '截图朗读', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '这次读什么' })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('学习任务列有文字不清');
+  expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBe(0);
+  await page.evaluate(() => { window.reader!.recognize = async id => { await new Promise<void>(resolve => Object.assign(window, { finishVision: resolve })); return { id, text: '不能迟到开声。', method: 'openai', language: 'zh-Hans', elapsedMs: 99 }; }; });
+  await page.getByRole('button', { name: '截图朗读', exact: true }).click();
+  await expect(page.getByRole('status').first()).toContainText('GPT 正在');
+  await page.getByRole('button', { name: '停止朗读', exact: true }).click();
+  await page.evaluate(() => (window as unknown as { finishVision(): void }).finishVision());
+  await expect(page.getByRole('status').first()).toContainText('已停止');
+  expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBe(0);
 });

@@ -16,3 +16,5 @@ Key 在桌面设置填写并由 Windows 加密，不发到聊天、不提交 Git
 0.3.0已增加Bing翻译朗读（晓晓），来源见docs/edge-translation-research.md。独立微软许可默认关闭；豆包配置保留。真实网络验收显式运行node scripts/verify-bing.mjs --live，仅发送自制短句；普通单测/e2e不调用云语音。
 
 0.4.0 新增上一段/重听本段/下一段，读完可用内存音频回听。截图窗口仅预热空界面，主动捕获并解码完成后显示；验收见 docs/verification.md。
+
+0.5.0 增加可选 GPT 智能看图（gpt-5.4-mini/Responses/none），图片许可默认关闭，OpenAI Key 只在本机设置里填写。看图与语音费用分别计算，保存设置不发起看图请求。没有真实付费 API 验收授权时只运行本地与模拟测试。

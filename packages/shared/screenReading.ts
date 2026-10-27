@@ -1,5 +1,6 @@
+import type { ReadingPlan } from './readingPlan';
 export type ScreenCapture = { id: string; imageDataUrl: string; width: number; height: number };
-export type ScreenRecognition = { id: string; text: string; language: string; elapsedMs: number };
+export type ScreenRecognition = { id: string; text: string; language: string; elapsedMs: number; method?: 'local' | 'openai'; plan?: ReadingPlan; reviewRequired?: boolean };
 export type ScreenReadingBridge = {
   capture(): Promise<ScreenCapture | null>;
   recognize(id: string): Promise<ScreenRecognition>;

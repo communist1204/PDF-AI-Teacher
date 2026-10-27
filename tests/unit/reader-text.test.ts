@@ -45,3 +45,23 @@ describe('local reader cleanup', () => {
     expect(chunks[0]).toContain('3.14.'); expect(chunks[0].length).toBeLessThan(100);
   });
 });
+
+it('filters source badges without erasing domain discussions, variables, emails or prose after URLs', () => {
+  const source = '注意图中输出符号的变化：z 是潜在动作，a 是机器人动作。 arxiv.org\nexample.com\n📌 arxiv.org';
+  const result = prepareReadingText(source);
+  expect(result.filteredSources).toBe(3); expect(result.text).not.toMatch(/arxiv|example/);
+  expect(result.text).toContain('z 是潜在动作'); expect(result.text).toContain('a 是机器人动作');
+  const kept = prepareReadingText('论文发布在 arxiv.org 上。user@arxiv.org 是邮箱。a.b 和 x.y 是属性。torch.nn 有用，3.14 是数值。', false).text;
+  expect(kept).toContain('arxiv.org 上'); expect(kept).toContain('user@arxiv.org'); expect(kept).toContain('a.b'); expect(kept).toContain('torch.nn'); expect(kept).toContain('3.14');
+  expect(prepareReadingText('前文。https://arxiv.org/abs/1234.5678。下面继续。').text).toContain('下面继续。');
+});
+
+it('does not mistake dots inside body domains for sentence endings', () => {
+  expect(prepareReadingText('资料在 www.arxiv.org').text).toContain('www.arxiv.org');
+  expect(prepareReadingText('请访问 docs.example.com').text).toContain('docs.example.com');
+});
+
+it('filters the greater-than icon produced by real Windows OCR on the supplied source badge', () => {
+  const result = prepareReadingText('注意图中输出符号的变化：前两个阶段围绕 z：潜在动作，最后阶段输出 a：机器人动作。\n> arxiv.org');
+  expect(result.filteredSources).toBe(1); expect(result.text).not.toContain('arxiv'); expect(result.text).toContain('z：潜在动作'); expect(result.text).toContain('a：机器人动作');
+});
