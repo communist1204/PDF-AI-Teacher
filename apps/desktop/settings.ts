@@ -6,7 +6,8 @@ import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_V
 import type { ReaderPreferences, ReaderSettings } from '../../packages/shared/reader';
 
 export const PreferencesSchema = z.object({
-  recognitionMode: z.enum(['local', 'smart']).default('local'),
+  recognitionMode: z.enum(['local', 'smart', 'chatgpt']).default('chatgpt'),
+  chatgptModel: z.string().max(160).regex(/^[A-Za-z0-9._:-]*$/).default(''),
   allowVisionCloud: z.boolean().default(false),
   provider: z.enum(['doubao', 'bing']).default('doubao'),
   allowBingCloud: z.boolean().default(false),
@@ -29,7 +30,7 @@ const PrivateSettingsSchema = z.object({
   apiKey: z.string().max(500), migrated: z.boolean(), position: PositionSchema.nullable(),
 }).strict();
 export const defaultPreferences: ReaderPreferences = {
-  recognitionMode: 'local', allowVisionCloud: false,
+  recognitionMode: 'chatgpt', chatgptModel: '', allowVisionCloud: false,
   provider: 'doubao', allowBingCloud: false,
   voice: DEFAULT_DOUBAO_TTS_VOICE, instructions: DEFAULT_DOUBAO_TTS_INSTRUCTIONS,
   rate: 1, alwaysOnTop: true, allowCloud: false, skipFormulas: true,
@@ -57,7 +58,14 @@ export class SettingsVault {
     }
     try {
       if (!this.cipher.available()) throw Error('unavailable');
-      this.value = PrivateSettingsSchema.parse(JSON.parse(this.cipher.decrypt(bytes)));
+      const raw = JSON.parse(this.cipher.decrypt(bytes));
+      this.value = PrivateSettingsSchema.parse(raw);
+      // This release changes the default workflow, never grants image permission.
+      // Once saved, an explicit local/API choice survives subsequent launches.
+      if (raw.preferences?.chatgptModel === undefined) {
+        this.value.preferences.recognitionMode = 'chatgpt';
+        this.value.preferences.allowVisionCloud = false;
+      }
     } catch { this.damaged = true; throw Error('本机设置无法解密或已损坏，请使用原 Windows 账户打开。原文件未被覆盖。'); }
   }
   private async migrate(legacyPath: string): Promise<void> {

@@ -10,3 +10,5 @@
 .playback-navigation{height:36px;display:flex;align-items:center;gap:6px;padding:5px 16px 0}.playback-navigation button{height:28px;padding:0 10px;border-radius:7px;color:#326487;background:#eaf5ff;font-size:12px}.playback-navigation button:not(:disabled):hover{background:#d3ebfd}.segment-position{margin-left:auto;font-size:11px;color:#628199;white-space:nowrap}
 
 .recognition-settings{margin-top:22px;padding-top:8px;border-top:1px solid #d8e9f7}.recognition-settings h2{font-size:15px;font-weight:600}.recognition-settings .link-button{margin-top:12px}
+
+.settings-panel .recognition-settings{margin-top:0;padding-top:0;padding-bottom:22px;margin-bottom:22px;border-top:0;border-bottom:1px solid #d8e9f7}.chatgpt-account{padding:12px;border:1px solid #d5e7f6;border-radius:9px;background:#f6fbff;margin-top:12px}.account-title{font-weight:600;margin:0}.account-status{font-size:12px;line-height:1.7;color:#2b6e9d}.account-actions{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.account-actions .link-button{margin:0}.save-recognition{margin-top:12px}

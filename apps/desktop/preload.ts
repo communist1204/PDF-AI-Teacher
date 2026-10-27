@@ -3,6 +3,12 @@ import type { ReaderBridge } from '../../packages/shared/reader';
 
 const bridge: ReaderBridge = {
   getSettings: () => ipcRenderer.invoke('reader:settings'),
+  getChatGPTState: () => ipcRenderer.invoke('reader:chatgpt-state'),
+  loginChatGPT: profileId => ipcRenderer.invoke('reader:chatgpt-login', profileId),
+  cancelChatGPTLogin: () => ipcRenderer.invoke('reader:chatgpt-cancel-login'),
+  selectChatGPTProfile: id => ipcRenderer.invoke('reader:chatgpt-select', id),
+  logoutChatGPT: () => ipcRenderer.invoke('reader:chatgpt-logout'),
+  refreshChatGPTModels: () => ipcRenderer.invoke('reader:chatgpt-models'),
   saveSettings: value => ipcRenderer.invoke('reader:save-settings', value),
   capture: () => ipcRenderer.invoke('reader:capture'),
   recognize: id => ipcRenderer.invoke('reader:recognize', id),

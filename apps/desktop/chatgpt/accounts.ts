@@ -94,7 +94,7 @@ export class ChatGPTAccountService {
       if (this.vault.activeProfileId && !this.vault.profiles.some(p => p.id === this.vault.activeProfileId)) throw fail('invalid');
       if (new Set(this.vault.profiles.map(p => p.id)).size !== this.vault.profiles.length) throw fail('invalid');
       this.message = connected(this.active()) ? '已保存 ChatGPT 连接；识图时使用已授权的订阅额度。' : '请登录 ChatGPT。';
-    } catch { this.damaged = true; throw fail('ChatGPT 连接文件无法解密或已损坏，原文件未被覆盖。'); }
+    } catch { this.damaged = true; this.message = 'ChatGPT 连接文件无法解密或已损坏，原文件未被覆盖；仍可手动使用本机识字。'; throw fail(this.message); }
   }
   private active(): Profile | undefined { return this.vault.profiles.find(p => p.id === this.vault.activeProfileId); }
   getState(): ChatGPTState {
@@ -213,7 +213,7 @@ export class ChatGPTAccountService {
       if (error instanceof joseErrors.JWKSNoMatchingKey) { await loadKeys(); ({ payload } = await verify()); }
       else throw fail('ChatGPT 身份验证失败，请重新登录。');
     }
-    if (!payload.sub || (nonce !== undefined && payload.nonce !== nonce)) throw fail('ChatGPT 身份验证失败，请重新登录。');
+    if (!payload.sub || (Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== clientId) || (nonce !== undefined && payload.nonce !== nonce)) throw fail('ChatGPT 身份验证失败，请重新登录。');
     return payload;
   }
 
@@ -314,8 +314,8 @@ export class ChatGPTAccountService {
     this.models = []; this.modelOwner = null;
     const authorized = scopes.includes(DIRECT_SCOPE);
     this.message = authorized ? '已登录并授权使用 ChatGPT 订阅额度；正在读取可用模型。' : '已登录，但尚未授权使用订阅额度。请再次登录并允许使用你的计划。';
-    this.closeAttempt();
     if (authorized) await this.refreshModels();
+    if (this.attempt === attempt) this.closeAttempt();
   }
   private closeAttempt(): void {
     const previous = this.attempt; this.attempt = undefined;

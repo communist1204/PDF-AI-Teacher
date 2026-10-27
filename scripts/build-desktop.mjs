@@ -12,4 +12,5 @@ await cp(resolve(root,'dist'),resolve(stage,'dist'),{recursive:true});await cp(r
 const pkg=JSON.parse(await readFile('package.json','utf8'));
 await writeFile(resolve(stage,'package.json'),JSON.stringify({name:'qingread',productName:'轻读 · QingRead',version:pkg.version,private:true,main:'main.cjs',description:'轻读 · 截图识字与朗读'},null,2));
 await writeFile(resolve(stage,'LICENSES.txt'),'Electron / Chromium licenses are included in the distribution. React and Lucide are MIT licensed. This application contains no bundled voice model or voice recording.\n');
+await cp(resolve(root,'node_modules/jose/LICENSE.md'),resolve(stage,'JOSE-LICENSE.txt'));
 console.log('Desktop application built: '+stage);

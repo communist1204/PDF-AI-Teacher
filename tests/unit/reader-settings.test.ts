@@ -78,10 +78,10 @@ it('reads the previous preference format without granting permission to a new re
 it('stores vision keys separately and old settings never grant image permission', async () => {
   const { vault, path } = await setup();
   const old = { ...defaultPreferences } as Partial<typeof defaultPreferences>;
-  delete old.recognitionMode; delete old.allowVisionCloud;
+  delete old.recognitionMode; delete old.allowVisionCloud; delete old.chatgptModel;
   await writeFile(path, cipher.encrypt(JSON.stringify({ version: 1, preferences: old, apiKey: 'old-speech-only', migrated: false, position: null })));
   await vault.load();
-  expect(vault.publicSettings(true)).toMatchObject({ hasVisionKey: false, preferences: { recognitionMode: 'local', allowVisionCloud: false } });
+  expect(vault.publicSettings(true)).toMatchObject({ hasVisionKey: false, preferences: { recognitionMode: 'chatgpt', chatgptModel: '', allowVisionCloud: false } });
   await vault.save({ preferences: { ...defaultPreferences, recognitionMode: 'smart', allowVisionCloud: true }, visionApiKey: 'mock-private-vision' });
   expect(vault.privateSettings()).toMatchObject({ apiKey: 'old-speech-only', visionApiKey: 'mock-private-vision' });
   expect(JSON.stringify(vault.publicSettings(true))).not.toContain('mock-private-vision');
@@ -92,4 +92,16 @@ it('stores vision keys separately and old settings never grant image permission'
   expect(reopened.publicSettings(true).hasVisionKey).toBe(true);
   await reopened.save({ preferences: defaultPreferences, clearVisionApiKey: true });
   expect(reopened.privateSettings()).toMatchObject({ apiKey: 'old-speech-only', visionApiKey: '' });
+});
+
+it('moves an older release to subscription setup without granting picture permission, then retains an explicit local choice', async () => {
+  const { vault, path } = await setup();
+  const old = { ...defaultPreferences, recognitionMode: 'local', allowVisionCloud: true } as Partial<typeof defaultPreferences>;
+  delete old.chatgptModel;
+  await writeFile(path, cipher.encrypt(JSON.stringify({ version: 1, preferences: old, apiKey: 'speech-kept', visionApiKey: 'api-kept', migrated: false, position: null })));
+  await vault.load();
+  expect(vault.privateSettings()).toMatchObject({ apiKey: 'speech-kept', visionApiKey: 'api-kept', preferences: { recognitionMode: 'chatgpt', allowVisionCloud: false } });
+  await vault.save({ preferences: { ...defaultPreferences, recognitionMode: 'local' } });
+  const reopened = new SettingsVault(path, cipher); await reopened.load();
+  expect(reopened.publicSettings(true).preferences.recognitionMode).toBe('local');
 });

@@ -5,7 +5,9 @@ import { SettingsVault } from './settings';
 import { ScreenCaptureService } from './screenCapture';
 import { SpeechSession } from './speechSession';
 import { createDesktopFetch, createBingFetch } from './network';
-import { recognizeWithOpenAI } from './providers/openaiVision';
+import { ChatGPTAccountService } from './chatgpt/accounts';
+import { ReadingCache } from './readingCache';
+import { recognizeWithChatGPT, recognizeWithOpenAI } from './providers/openaiVision';
 import { BingTtsProvider } from './providers/bingTts';
 import { speechConfigured } from '../../packages/shared/reader';
 
@@ -19,6 +21,8 @@ let window: BrowserWindow | null = null;
 let vault: SettingsVault;
 let capture: ScreenCaptureService;
 let speech: SpeechSession;
+let chatgpt: ChatGPTAccountService;
+const readingCache = new ReadingCache();
 let shortcutAvailable = false;
 let positionTimer: ReturnType<typeof setTimeout> | undefined;
 let quitting = false;
@@ -64,6 +68,25 @@ async function start(): Promise<void> {
   bingNetwork.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   speech = new SpeechSession(undefined, createDesktopFetch(network), () => new BingTtsProvider({ fetchImpl: createBingFetch(bingNetwork) }));
   capture = new ScreenCaptureService(() => window, __dirname);
+  chatgpt = new ChatGPTAccountService({
+    path: join(app.getPath('userData'), 'chatgpt-account.bin'),
+    cipher: { available: () => safeStorage.isEncryptionAvailable(), encrypt: text => safeStorage.encryptString(text), decrypt: bytes => safeStorage.decryptString(bytes) },
+    fetchImpl: createDesktopFetch(network), openExternal: url => shell.openExternal(url),
+  });
+  try { await chatgpt.load(); } catch { /* Keep local OCR and saved speech usable; the auth vault refuses writes. */ }
+  const changingAccount = () => { capture.cancel(); speech.cancel(); readingCache.clear(); };
+  handle('reader:chatgpt-state', () => chatgpt.getState());
+  handle('reader:chatgpt-login', id => {
+    if (id !== undefined && (typeof id !== 'string' || id.length > 200)) throw Error('账号选择无效。');
+    changingAccount(); return chatgpt.beginLogin(id as string | undefined);
+  });
+  handle('reader:chatgpt-cancel-login', () => chatgpt.cancelLogin());
+  handle('reader:chatgpt-select', id => {
+    if (typeof id !== 'string' || id.length > 200) throw Error('账号选择无效。');
+    changingAccount(); return chatgpt.selectProfile(id);
+  });
+  handle('reader:chatgpt-logout', () => { changingAccount(); return chatgpt.signOut(); });
+  handle('reader:chatgpt-models', () => chatgpt.refreshModels());
   handle('reader:settings', () => vault.publicSettings(shortcutAvailable));
   handle('reader:save-settings', async value => {
     const previous = vault.privateSettings();
@@ -71,7 +94,7 @@ async function start(): Promise<void> {
     await vault.save(value);
     const current = vault.privateSettings();
     window?.setAlwaysOnTop(current.preferences.alwaysOnTop);
-    if (previous.preferences.recognitionMode !== current.preferences.recognitionMode || (previous.preferences.allowVisionCloud && !current.preferences.allowVisionCloud) || previous.visionApiKey !== current.visionApiKey) capture.cancel();
+    if (previous.preferences.recognitionMode !== current.preferences.recognitionMode || previous.preferences.chatgptModel !== current.preferences.chatgptModel || previous.preferences.skipFormulas !== current.preferences.skipFormulas || (previous.preferences.allowVisionCloud && !current.preferences.allowVisionCloud) || previous.visionApiKey !== current.visionApiKey) { capture.cancel(); readingCache.clear(); }
     if (previousProvider !== current.preferences.provider || !speechConfigured(current.preferences, Boolean(current.apiKey))) speech.cancel();
     return vault.publicSettings(shortcutAvailable);
   });
@@ -79,6 +102,17 @@ async function start(): Promise<void> {
   handle('reader:recognize', id => {
     const settings = vault.privateSettings();
     if (settings.preferences.recognitionMode === 'local') return capture.recognize(id);
+    if (settings.preferences.recognitionMode === 'chatgpt') {
+      if (!settings.preferences.allowVisionCloud) throw Error('请在设置中允许把主动框选的图片交给 ChatGPT 整理。');
+      return capture.recognize(id, async (png, signal) => {
+        const { accessToken, model } = await chatgpt.getAccess(settings.preferences.chatgptModel, signal);
+        signal.throwIfAborted();
+        const key = readingCache.key(png, chatgpt.getState().activeProfileId ?? '', model.id, settings.preferences.skipFormulas);
+        const cached = readingCache.get(key); if (cached) return cached;
+        const result = await recognizeWithChatGPT(png, { accessToken, model, allowed: true, skipFormulas: settings.preferences.skipFormulas, fetchImpl: createDesktopFetch(network) }, signal);
+        readingCache.put(key, result, signal); return result;
+      });
+    }
     if (!settings.preferences.allowVisionCloud || !settings.visionApiKey) throw Error('智能看图尚未配置：请填写 OpenAI API Key，并单独允许发送框选图片。');
     return capture.recognize(id, (png, signal) => recognizeWithOpenAI(png, { apiKey: settings.visionApiKey, allowed: settings.preferences.allowVisionCloud, skipFormulas: settings.preferences.skipFormulas, fetchImpl: createDesktopFetch(network) }, signal));
   });
@@ -90,15 +124,15 @@ async function start(): Promise<void> {
   handle('reader:quit', () => app.quit());
   handle('reader:help', provider => {
     const selected = provider ?? vault.privateSettings().preferences.provider;
-    if (selected !== 'bing' && selected !== 'doubao' && selected !== 'openai') throw Error('未知声音来源。');
-    return shell.openExternal(selected === 'openai' ? 'https://platform.openai.com/api-keys' : selected === 'bing' ? 'https://www.bing.com/translator' : 'https://console.volcengine.com/speech/service');
+    if (selected !== 'bing' && selected !== 'doubao' && selected !== 'openai' && selected !== 'chatgpt-usage') throw Error('未知声音来源。');
+    return shell.openExternal(selected === 'chatgpt-usage' ? 'https://chatgpt.com/settings/usage' : selected === 'openai' ? 'https://platform.openai.com/api-keys' : selected === 'bing' ? 'https://www.bing.com/translator' : 'https://console.volcengine.com/speech/service');
   });
   shortcutAvailable = globalShortcut.register('CommandOrControl+Shift+R', requestCapture);
   window.on('move', () => {
     clearTimeout(positionTimer);
     positionTimer = setTimeout(() => { if (window && !window.isDestroyed()) { const { x, y } = window.getBounds(); void vault.savePosition({ x, y }).catch(() => {}); } }, 400);
   });
-  window.on('closed', () => { window = null; capture.dispose(); speech.cancel(); });
+  window.on('closed', () => { window = null; capture.dispose(); speech.cancel(); chatgpt.dispose(); readingCache.clear(); });
   await window.loadFile(html);
   window.show();
   void capture.warmup().catch(() => {});
@@ -111,8 +145,8 @@ else {
   app.on('window-all-closed', () => app.quit());
   app.on('before-quit', event => {
     if (quitting) return;
-    quitting = true; event.preventDefault(); globalShortcut.unregisterAll(); clearTimeout(positionTimer); capture?.dispose(); speech?.cancel();
+    quitting = true; event.preventDefault(); globalShortcut.unregisterAll(); clearTimeout(positionTimer); capture?.dispose(); speech?.cancel(); chatgpt?.dispose(); readingCache.clear();
     const bounds = window && !window.isDestroyed() ? window.getBounds() : null;
-    void (async () => { try { if (bounds) await vault?.savePosition({ x: bounds.x, y: bounds.y }); await vault?.flush(); } catch { /* Never replace a damaged vault during shutdown. */ } finally { app.quit(); } })();
+    void (async () => { try { if (bounds) await vault?.savePosition({ x: bounds.x, y: bounds.y }); await vault?.flush(); await chatgpt?.flush(); } catch { /* Never replace a damaged vault during shutdown. */ } finally { app.quit(); } })();
   });
 }

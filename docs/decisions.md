@@ -35,3 +35,23 @@
 - 图片中的文字是数据，不改变任务，不执行生成内容。截图只使用主进程保存的本次 crop ID；新增独立图片许可与主进程 Key，不复用语音许可，不读取 ChatGPT/Edge 登录。切换模式、撤销图片许可、更换 Key、停止和新截图均取消旧识图。
 - 请求 45 秒超时、响应 1 MiB 限制；拒绝重定向，错误脱敏，不自动重试、不偷偷退回本机 OCR。免费本机路径仍可单独使用。
 - 域名过滤采用保守规则：仅独占一行或句末来源标记。ASCII 句末必须有空白，避免误把 www.arxiv.org 中的点当句号；不一律删除字母或无空格中文后文。
+
+## 0.6.0 官方订阅登录与识图契约（2026-10-27）
+- 用户明确接受“每张图都让 GPT 整理”，取消按本地规则决定是否调用 GPT 的分流。截图内容始终作为数据，不能改变系统指令；模型不执行截图里的命令。
+- 使用官方个人本地/开源软件 Sign in with ChatGPT 流程：dynamic_agent_client 动态注册，独立 host ID、随机 PKCE S256/state/nonce、仅临时回环回调。注册后保存服务器签发的 client ID，同一连接续期或再登录沿用；ID Token 使用官方 JWKS 验签并核对 issuer/audience/azp/nonce/subject。
+- 独立 Windows 加密凭证仓库 chatgpt-account.bin；不读取浏览器 Cookie、ChatGPT/Codex token。renderer 只获取账号展示状态和模型目录。损坏账号仓库阻止覆盖，但本机 OCR 和声音配置仍可用。
+- 订阅授权含 resource.invoke 与 chatgpt.tokens.use.direct。图像许可另行明确保存。登录/模型刷新不发图或调用语音。官方订阅存在额度；提示在官方用量页管理超额付费余额，不声称无限免费，应用不自动切付费 API。
+- 模型来自授权账号 /v1/models 的 models/visibility/slug/display_name；只选择目录返回项。目录提供支持的 reasoning levels 时选择最低 none/minimal/low，否则不臆造推理参数。自动选择按服务器目录顺序；没有实测速度排名。
+- 订阅识图通过 /v1/responses，store:false、stream:true、数组 input、image 输入和严格结构化阅读计划。不发送订阅路由不支持的 max_output_tokens；只接受完整 response.completed，不读部分 delta。45 秒截止、取消、2MiB 上限、401/403/429 与流中额度错误都直接提示，不自动重试或付费降级。
+- 最多四份成功计划只留内存，图片不写历史；账号/模型/公式规则是缓存键的一部分，权限/账号变化即清空。保持既有声音链路；ChatGPT 订阅登录不代表获得 TTS 接口授权。
+- 按安全审计在本项目内升级 Electron 44.5.0→44.9.3（覆盖网络证书校验公告）、zod 4.6.5→4.6.6；新增 jose 6.2.13 验签及随包许可证。未升级全局 Node/Python、未更改 Conda/CUDA 或全局代理。
+- 官方核验资料：
+  - https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt
+  - https://developers.openai.com/siwc/token-sharing-open-source/sign-in
+  - https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
+  - https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions
+  - https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+  - https://developers.openai.com/siwc/token-sharing-open-source/token-reference
+  - https://auth.openai.com/.well-known/openid-configuration（公开 metadata 实际读回核对；未登录）
+  - https://chatgpt.com/settings/usage（官方文档实际链接）
+  - https://github.com/electron/electron/security/advisories/GHSA-jr5w-w6x2-84p9

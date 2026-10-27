@@ -1,9 +1,10 @@
+import type { ChatGPTState } from '../../packages/shared/chatgpt';
 import { expect, test, type Page } from '@playwright/test';
 
-async function mockDesktop(page: Page, options = { hasKey: true, delayedOcr: false }) {
-  await page.addInitScript(({ hasKey, delayedOcr }) => {
-    const calls = { speak: 0, cancelled: 0, saves: 0, playing: false };
-    const preferences = { recognitionMode: 'local' as 'local' | 'smart', allowVisionCloud: false, provider: 'doubao' as 'doubao' | 'bing', allowBingCloud: false, voice: 'zh_female_xiaohe_uranus_bigtts', instructions: '温和自然地读。', rate: 1, alwaysOnTop: true, allowCloud: true, skipFormulas: true };
+async function mockDesktop(page: Page, options: { hasKey?: boolean; delayedOcr?: boolean; subscription?: boolean; connected?: boolean } = {}) {
+  await page.addInitScript(({ hasKey = true, delayedOcr = false, subscription = false, connected = false }) => {
+    const calls = { speak: 0, recognized: 0, cancelled: 0, saves: 0, playing: false };
+    const preferences = { recognitionMode: (subscription ? 'chatgpt' : 'local') as 'local' | 'smart' | 'chatgpt', chatgptModel: '', allowVisionCloud: connected, provider: 'doubao' as 'doubao' | 'bing', allowBingCloud: false, voice: 'zh_female_xiaohe_uranus_bigtts', instructions: '温和自然地读。', rate: 1, alwaysOnTop: true, allowCloud: true, skipFormulas: true };
     const settings = { preferences, hasApiKey: hasKey, hasVisionKey: false, encryptionAvailable: true, migrated: false, shortcutAvailable: true };
     // Structurally valid silent WAV. Playback is mocked; malformed bytes would trigger a real decode error.
     const wave = new Uint8Array(48044), header = new DataView(wave.buffer);
@@ -12,15 +13,23 @@ async function mockDesktop(page: Page, options = { hasKey: true, delayedOcr: fal
     header.setUint32(16, 16, true); header.setUint16(20, 1, true); header.setUint16(22, 1, true);
     header.setUint32(24, 24000, true); header.setUint32(28, 48000, true); header.setUint16(32, 2, true); header.setUint16(34, 16, true);
     tag(36, 'data'); header.setUint32(40, wave.length - 44, true);
-    Object.assign(window, { readerTest: { calls, settings } });
+    const account: ChatGPTState = { status: connected ? 'connected' : 'disconnected', profiles: [], activeProfileId: null, sharing: connected, models: [], message: '' };
+    Object.assign(window, { readerTest: { calls, settings, account } });
     HTMLMediaElement.prototype.play = function () { calls.playing = true; Object.assign(window, { readerTestAudio: this }); return Promise.resolve(); };
     HTMLMediaElement.prototype.pause = function () { calls.playing = false; };
     HTMLMediaElement.prototype.load = function () {};
     window.reader = {
       getSettings: async () => settings,
+      getChatGPTState: async () => structuredClone(account),
+      loginChatGPT: async () => { account.status = 'authorizing'; return structuredClone(account); },
+      cancelChatGPTLogin: async () => { account.status = 'disconnected'; return structuredClone(account); },
+      selectChatGPTProfile: async id => { account.activeProfileId = id; return structuredClone(account); },
+      logoutChatGPT: async () => { account.status = 'disconnected'; account.sharing = false; return structuredClone(account); },
+      refreshChatGPTModels: async () => structuredClone(account),
       saveSettings: async value => { calls.saves++; settings.preferences = value.preferences; if (value.apiKey) settings.hasApiKey = true; if (value.clearApiKey) settings.hasApiKey = false; if (value.visionApiKey) settings.hasVisionKey = true; if (value.clearVisionApiKey) settings.hasVisionKey = false; return settings; },
       capture: async () => ({ id: 'capture-1', imageDataUrl: '', width: 100, height: 100 }),
       recognize: async id => {
+        calls.recognized++;
         if (delayedOcr) await new Promise<void>(resolve => Object.assign(window, { finishTestOcr: resolve }));
         return { id, text: '2026年，我们开始阅读这\n一段文字。\nx=2\n下一句仍然是普通正文。', language: 'zh-Hans', elapsedMs: 12 };
       },
@@ -201,5 +210,54 @@ test('uncertain smart plan opens review and does not automatically read; stoppin
   await page.getByRole('button', { name: '停止朗读', exact: true }).click();
   await page.evaluate(() => (window as unknown as { finishVision(): void }).finishVision());
   await expect(page.getByRole('status').first()).toContainText('已停止');
+  expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBe(0);
+});
+
+
+test('subscription default leads to login, cancellation works, and no picture is recognized before consent', async ({ page }) => {
+  await mockDesktop(page, { subscription: true });
+  await page.goto('/');
+  await page.getByRole('button', { name: '截图朗读', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Continue with ChatGPT', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue with ChatGPT', exact: true }).click();
+  await expect(page.getByText('正在等待浏览器授权…', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '取消登录', exact: true }).click();
+  await expect(page.getByText('尚未连接 ChatGPT', { exact: true })).toBeVisible();
+  const calls = await page.evaluate(() => (window as unknown as { readerTest: { calls: { recognized: number; speak: number } } }).readerTest.calls);
+  expect(calls.recognized).toBe(0); expect(calls.speak).toBe(0);
+});
+
+test('subscription login plus explicit image consent reads every capture; replay does not repeat recognition', async ({ page }) => {
+  await mockDesktop(page, { subscription: true });
+  await page.goto('/'); await page.getByRole('button', { name: '截图朗读', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue with ChatGPT', exact: true }).click();
+  await page.evaluate(() => {
+    const state = (window as unknown as { readerTest: { account: ChatGPTState } }).readerTest;
+    Object.assign(state.account, { status: 'connected', sharing: true, activeProfileId: 'mock-profile', profiles: [{ id: 'mock-profile', label: '测试账号', connected: true, sharing: true }], models: [{ id: 'account-model', label: '账号模型' }] });
+  });
+  await expect(page.getByText('已连接 · 使用 ChatGPT 订阅额度', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '截图朗读', exact: true }).click();
+  expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { recognized: number } } }).readerTest.calls.recognized)).toBe(0);
+  await page.getByLabel('允许将我主动框选的图片', { exact: false }).check();
+  await page.getByLabel('看图模型', { exact: true }).selectOption('account-model');
+  await page.getByRole('button', { name: '保存识别设置', exact: true }).click();
+  await expect(page.getByText('已保存。设置不会自动请求声音。')).toBeVisible();
+  await page.getByRole('button', { name: '截图朗读', exact: true }).click(); await expect(page.getByRole('status').first()).toContainText('正在朗读');
+  await page.getByRole('button', { name: '重听本段', exact: true }).click();
+  await page.getByLabel('朗读速度').selectOption('2');
+  expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { recognized: number } } }).readerTest.calls.recognized)).toBe(1);
+  await page.getByRole('button', { name: '截图朗读', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { readerTest: { calls: { recognized: number } } }).readerTest.calls.recognized)).toBe(2);
+  await page.getByRole('button', { name: '退出当前账号', exact: true }).click();
+  await expect(page.getByText('尚未连接 ChatGPT', { exact: true })).toBeVisible();
+  const playing = await page.evaluate(() => (window as unknown as { readerTest: { calls: { playing: boolean } } }).readerTest.calls.playing); expect(playing).toBe(false);
+});
+
+test('subscription quota failure is visible and never retries through the paid API or starts audio', async ({ page }) => {
+  await mockDesktop(page, { subscription: true, connected: true });
+  await page.goto('/');
+  await page.evaluate(() => { window.reader!.recognize = async () => { throw Error('ChatGPT 订阅额度暂不可用或已达上限。未切换收费 API。'); }; });
+  await page.getByRole('button', { name: '截图朗读', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('未切换收费 API');
   expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBe(0);
 });

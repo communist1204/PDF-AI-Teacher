@@ -20,6 +20,10 @@ try {
   await page.waitForFunction(() => window.reader !== undefined);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const settings = await page.evaluate(() => window.reader.getSettings());
+  assert.equal(settings.preferences.recognitionMode, 'chatgpt');
+  const account = await page.evaluate(() => window.reader.getChatGPTState());
+  assert.equal(account.sharing, false); assert.equal(account.status, 'disconnected');
+  assert.ok(!JSON.stringify(account).includes('access_token'));
   assert.equal(settings.hasVisionKey, false); assert.equal(settings.preferences.allowVisionCloud, false);
   assert.equal(settings.hasApiKey, false); assert.equal(settings.preferences.allowCloud, false);
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
@@ -28,6 +32,29 @@ try {
   await page.getByRole('button', { name: '声音设置', exact: true }).click();
   await page.getByRole('button', { name: '保存设置', exact: true }).waitFor();
   await page.screenshot({ path: resolve(root, 'docs/screenshots/settings.png') });
+  await page.getByRole('button', { name: 'Continue with ChatGPT', exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: resolve(root, 'docs/screenshots/chatgpt-settings.png') });
+  evidence.checks.push('Subscription mode default; ChatGPT login visible; no account tokens in renderer; no live login or inference');
+  await application.evaluate(({ shell }) => {
+    globalThis.originalOpenExternal = shell.openExternal;
+    shell.openExternal = async url => {
+      const parsed = new URL(url);
+      globalThis.loginLaunch = { origin: parsed.origin, path: parsed.pathname, client: parsed.searchParams.get('client_id'), redirect: parsed.searchParams.get('redirect_uri'), statePresent: Boolean(parsed.searchParams.get('state')), noncePresent: Boolean(parsed.searchParams.get('nonce')), pkce: parsed.searchParams.get('code_challenge_method') };
+    };
+  });
+  await page.getByRole('button', { name: 'Continue with ChatGPT', exact: true }).click();
+  await page.getByText('正在等待浏览器授权…', { exact: true }).waitFor();
+  const launchDetails = await application.evaluate(() => globalThis.loginLaunch);
+  assert.equal(launchDetails.origin, 'https://auth.openai.com');
+  assert.equal(launchDetails.path, '/api/accounts/authorize');
+  assert.equal(launchDetails.client, 'dynamic_agent_client');
+  assert.equal(launchDetails.pkce, 'S256'); assert.ok(launchDetails.statePresent && launchDetails.noncePresent);
+  assert.match(launchDetails.redirect, /^http:\/\/127\.0\.0\.1:\d+\/auth\/callback$/);
+  await page.getByRole('button', { name: '取消登录', exact: true }).click();
+  await page.getByText('尚未连接 ChatGPT', { exact: true }).waitFor();
+  await application.evaluate(({ shell }) => { shell.openExternal = globalThis.originalOpenExternal; delete globalThis.loginLaunch; delete globalThis.originalOpenExternal; });
+  evidence.checks.push('Real desktop login IPC creates official PKCE browser request and temporary loopback listener; cancel restores disconnected state (browser launch intercepted, no real auth)');
+
   await page.getByLabel('朗读来源').selectOption('bing');
   assert.equal(await page.getByLabel('允许将我主动截图', { exact: false }).isChecked(), false);
   await page.getByRole('button', { name: '保存并试听这段声音' }).scrollIntoViewIfNeeded();
@@ -38,6 +65,8 @@ try {
   await page.screenshot({ path: resolve(root, 'docs/screenshots/vision-settings.png') });
   await page.getByLabel('识别方式').selectOption('local');
   await page.getByLabel('朗读来源').selectOption('doubao');
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await page.waitForFunction(async () => (await window.reader.getSettings()).preferences.recognitionMode === 'local');
   await page.getByRole('button', { name: '收起面板', exact: true }).click();
   await page.getByLabel('朗读速度', { exact: true }).selectOption('1.5');
   await page.waitForFunction(async () => (await window.reader.getSettings()).preferences.rate === 1.5);

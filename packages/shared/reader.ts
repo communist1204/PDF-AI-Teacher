@@ -1,7 +1,9 @@
+import type { ChatGPTState } from './chatgpt';
 import type { ScreenCapture, ScreenRecognition } from './screenReading';
 
 export interface ReaderPreferences {
-  recognitionMode: 'local' | 'smart';
+  recognitionMode: 'local' | 'smart' | 'chatgpt';
+  chatgptModel: string;
   allowVisionCloud: boolean;
   provider: 'doubao' | 'bing';
   allowBingCloud: boolean;
@@ -32,6 +34,12 @@ export interface SpeechResult { generationId: string; chunkId: number; audio: Ui
 export type ReaderPanel = 'settings' | 'text' | null;
 export interface ReaderBridge {
   getSettings(): Promise<ReaderSettings>;
+  getChatGPTState(): Promise<ChatGPTState>;
+  loginChatGPT(profileId?: string): Promise<ChatGPTState>;
+  cancelChatGPTLogin(): Promise<ChatGPTState>;
+  selectChatGPTProfile(id: string): Promise<ChatGPTState>;
+  logoutChatGPT(): Promise<ChatGPTState>;
+  refreshChatGPTModels(): Promise<ChatGPTState>;
   saveSettings(value: SaveReaderSettings): Promise<ReaderSettings>;
   capture(): Promise<ScreenCapture | null>;
   recognize(id: string): Promise<ScreenRecognition>;
@@ -41,7 +49,7 @@ export interface ReaderBridge {
   setPanel(panel: ReaderPanel): Promise<void>;
   minimize(): Promise<void>;
   quit(): Promise<void>;
-  openHelp(provider?: 'doubao' | 'bing' | 'openai'): Promise<void>;
+  openHelp(provider?: 'doubao' | 'bing' | 'openai' | 'chatgpt-usage'): Promise<void>;
   onCaptureRequested(callback: () => void): () => void;
 }
 declare global { interface Window { reader?: ReaderBridge } }

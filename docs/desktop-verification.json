@@ -1,10 +1,12 @@
 {
-  "capturedAt": "2026-10-27T10:49:23.562Z",
+  "capturedAt": "2026-10-27T12:54:01.740Z",
   "packaged": false,
   "realCloudCalls": false,
   "humanListening": false,
   "checks": [
     "Isolated profile; no real key; cloud off; renderer has no Node access",
+    "Subscription mode default; ChatGPT login visible; no account tokens in renderer; no live login or inference",
+    "Real desktop login IPC creates official PKCE browser request and temporary loopback listener; cancel restores disconnected state (browser launch intercepted, no real auth)",
     "Settings panel opens; speed 1.5x saves without requesting speech",
     "Real screen crop -> local Windows OCR recognized authored Chinese text and year",
     "Warm blank overlays reused for fresh captures; every show had decoded image; Esc hides overlays and clears image",
@@ -13,9 +15,9 @@
     "Encrypted settings survive restart; no credential inherited by test profile"
   ],
   "captureReadyMs": [
-    639,
-    593,
-    572
+    647,
+    597,
+    584
   ],
   "ocrText": "截图朗读验收\n这是我们自己编写的测试文字。\n2026 年， 我们学习新的知识。\n读到这里， 可以暂停， 然后继续。\nScreen reader verification.",
   "status": "passed"
