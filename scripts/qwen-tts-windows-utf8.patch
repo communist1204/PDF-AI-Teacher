@@ -1,7 +1,0 @@
-﻿diff --git a/tools/qwen-tts.cpp b/tools/qwen-tts.cpp
---- a/tools/qwen-tts.cpp
-+++ b/tools/qwen-tts.cpp
-@@ -533,2 +533,3 @@
- int main(int argc, char ** argv) {
-+    utf8_init(&argc, &argv);
-     Args a;

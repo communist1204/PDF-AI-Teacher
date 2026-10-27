@@ -1,9 +1,0 @@
-{
-  "kind": "real-local-windows-ocr",
-  "checkedAt": "2026-10-13T16:13:26.065Z",
-  "elapsedMs": 391,
-  "text": "截图朗读测试。 神经网络可以学习数据中的规律。\n2026 年， 我们一起学习。\nDeep learning helps us understand patterns.",
-  "language": "zh-Hans-CN",
-  "input": "self-authored Chinese and English print fixture",
-  "cloudRequests": 0
-}
