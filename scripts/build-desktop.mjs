@@ -9,8 +9,7 @@ await build({entryPoints:['apps/desktop/preload.ts'],outfile:resolve(stage,'prel
 await build({entryPoints:['apps/desktop/capture-preload.ts'],outfile:resolve(stage,'capture-preload.cjs'),bundle:true,platform:'node',format:'cjs',external:['electron'],logLevel:'info'});
 for(const file of ['capture.html','capture.css','capture.js','windows-ocr.ps1'])await cp(resolve(root,'apps/desktop',file),resolve(stage,file));
 await cp(resolve(root,'dist'),resolve(stage,'dist'),{recursive:true});await cp(resolve(root,'assets'),resolve(stage,'assets'),{recursive:true});
-await cp(resolve(root,'scripts/cosy-tts-worker.py'),resolve(stage,'cosy-tts-worker.py'));
 const pkg=JSON.parse(await readFile('package.json','utf8'));
-await writeFile(resolve(stage,'package.json'),JSON.stringify({name:'pdf-ai-teacher-desktop',productName:'PDF AI Teacher',version:pkg.version,private:true,main:'main.cjs',description:'本机 PDF 阅读与 AI 教学工作台'},null,2));
-await writeFile(resolve(stage,'LICENSES.txt'),'Electron / Chromium licenses are included in the distribution. PDF.js bundled assets retain their upstream licenses.\n');
+await writeFile(resolve(stage,'package.json'),JSON.stringify({name:'screen-reader',productName:'Screen Reader',version:pkg.version,private:true,main:'main.cjs',description:'轻读 · 截图识字与朗读'},null,2));
+await writeFile(resolve(stage,'LICENSES.txt'),'Electron / Chromium licenses are included in the distribution. React and Lucide are MIT licensed. This application contains no bundled voice model or voice recording.\n');
 console.log('Desktop application built: '+stage);

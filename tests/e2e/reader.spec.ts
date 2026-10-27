@@ -5,6 +5,13 @@ async function mockDesktop(page: Page, options = { hasKey: true, delayedOcr: fal
     const calls = { speak: 0, cancelled: 0, saves: 0, playing: false };
     const preferences = { voice: 'zh_female_xiaohe_uranus_bigtts', instructions: '温和自然地读。', rate: 1, alwaysOnTop: true, allowCloud: true, skipFormulas: true };
     const settings = { preferences, hasApiKey: hasKey, encryptionAvailable: true, migrated: false, shortcutAvailable: true };
+    // Structurally valid silent WAV. Playback is mocked; malformed bytes would trigger a real decode error.
+    const wave = new Uint8Array(48044), header = new DataView(wave.buffer);
+    const tag = (offset: number, text: string) => [...text].forEach((value, i) => wave[offset + i] = value.charCodeAt(0));
+    tag(0, 'RIFF'); header.setUint32(4, wave.length - 8, true); tag(8, 'WAVEfmt ');
+    header.setUint32(16, 16, true); header.setUint16(20, 1, true); header.setUint16(22, 1, true);
+    header.setUint32(24, 24000, true); header.setUint32(28, 48000, true); header.setUint16(32, 2, true); header.setUint16(34, 16, true);
+    tag(36, 'data'); header.setUint32(40, wave.length - 44, true);
     Object.assign(window, { readerTest: { calls, settings } });
     HTMLMediaElement.prototype.play = function () { calls.playing = true; Object.assign(window, { readerTestAudio: this }); return Promise.resolve(); };
     HTMLMediaElement.prototype.pause = function () { calls.playing = false; };
@@ -18,7 +25,7 @@ async function mockDesktop(page: Page, options = { hasKey: true, delayedOcr: fal
         return { id, text: '2026年，我们开始阅读这\n一段文字。\nx=2\n下一句仍然是普通正文。', language: 'zh-Hans', elapsedMs: 12 };
       },
       beginSpeech: async () => {},
-      speak: async request => { calls.speak++; return { ...request, audio: new Uint8Array([1, 2, 3, 4]) }; },
+      speak: async request => { calls.speak++; return { ...request, audio: wave }; },
       cancel: async () => { calls.cancelled++; }, setPanel: async () => {}, minimize: async () => {}, quit: async () => {}, openHelp: async () => {}, onCaptureRequested: () => () => {},
     };
   }, options);
@@ -74,7 +81,7 @@ test('missing key still allows local OCR and never requests speech', async ({ pa
   await expect(page.getByRole('heading', { name: '声音与设置' })).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBe(0);
   await page.getByRole('button', { name: '查看识别文字' }).click();
-  await expect(page.getByLabel('识别文字')).toContainText('2026年');
+  await expect(page.getByLabel('识别文字', { exact: true })).toHaveValue(/2026年/);
 });
 
 test('stopping OCR prevents its late result from starting sound or replacing the preview', async ({ page }) => {

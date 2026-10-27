@@ -1,0 +1,16 @@
+{
+  "capturedAt": "2026-10-27T08:39:43.192Z",
+  "packaged": false,
+  "realCloudCalls": false,
+  "humanListening": false,
+  "checks": [
+    "Isolated profile; no real key; cloud off; renderer has no Node access",
+    "Settings panel opens; speed 1.5x saves without requesting speech",
+    "Real multi-window screen crop -> local Windows OCR recognized authored Chinese text and year",
+    "Escape cancels native capture and restores toolbar",
+    "Real HTMLAudio decoded synthetic WAV; pause/resume and 3x rate preserve position; stop works (mock synthesis, no cloud)",
+    "Encrypted settings survive restart; no credential inherited by test profile"
+  ],
+  "ocrText": "截图朗读验收\n这是我们自己编写的测试文字。\n2026 年， 我们学习新的知识。\n读到这里， 可以暂停， 然后继续。\nScreen reader verification.",
+  "status": "passed"
+}

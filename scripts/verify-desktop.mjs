@@ -1,0 +1,117 @@
+import { _electron as electron } from '@playwright/test';
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
+const root = process.cwd();
+await mkdir(resolve(root, 'test-results'), { recursive: true });
+await mkdir(resolve(root, 'docs/screenshots'), { recursive: true });
+const profile = await mkdtemp(resolve(root, 'test-results/desktop-profile-'));
+const env = { ...process.env, SCREEN_READER_DATA_DIR: profile };
+delete env.ELECTRON_RUN_AS_NODE;
+const executablePath = process.env.SCREEN_READER_TEST_EXE;
+const launch = () => electron.launch({ ...(executablePath ? { executablePath, args: [] } : { args: [resolve(root, 'desktop-build/main.cjs')] }), env });
+const evidence = { capturedAt: new Date().toISOString(), packaged: Boolean(executablePath), realCloudCalls: false, humanListening: false, checks: [] };
+let application, page;
+try {
+  application = await launch();
+  page = await application.firstWindow();
+  await page.getByRole('button', { name: '截图朗读', exact: true }).waitFor();
+  await page.waitForFunction(() => window.reader !== undefined);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const settings = await page.evaluate(() => window.reader.getSettings());
+  assert.equal(settings.hasApiKey, false); assert.equal(settings.preferences.allowCloud, false);
+  assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
+  evidence.checks.push('Isolated profile; no real key; cloud off; renderer has no Node access');
+  await page.screenshot({ path: resolve(root, 'docs/screenshots/toolbar.png') });
+  await page.getByRole('button', { name: '声音设置', exact: true }).click();
+  await page.getByRole('button', { name: '保存设置', exact: true }).waitFor();
+  await page.screenshot({ path: resolve(root, 'docs/screenshots/settings.png') });
+  await page.getByRole('button', { name: '收起面板', exact: true }).click();
+  await page.getByLabel('朗读速度', { exact: true }).selectOption('1.5');
+  await page.waitForFunction(async () => (await window.reader.getSettings()).preferences.rate === 1.5);
+  evidence.checks.push('Settings panel opens; speed 1.5x saves without requesting speech');
+
+  // Only self-authored verification text is captured. No external app content is used.
+  const fixtureId = await application.evaluate(async ({ BrowserWindow, screen }) => {
+    const area = screen.getPrimaryDisplay().bounds;
+    const fixture = new BrowserWindow({ ...area, frame: false, fullscreen: true, alwaysOnTop: true, backgroundColor: '#ffffff', webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    await fixture.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<html><body style="margin:80px;font:36px Microsoft YaHei,Segoe UI,sans-serif;line-height:1.8;background:white;color:black"><h1 style="font-size:42px">截图朗读验收</h1><p>这是我们自己编写的测试文字。</p><p>2026年，我们学习新的知识。</p><p>读到这里，可以暂停，然后继续。</p><p>Screen reader verification.</p></body></html>'));
+    fixture.show(); fixture.focus();
+    return fixture.id;
+  });
+  const overlayEvent = application.waitForEvent('window');
+  await page.getByRole('button', { name: '截图朗读', exact: true }).click({ force: true });
+  const overlay = await overlayEvent;
+  await overlay.waitForURL('**/capture.html');
+  await overlay.locator('#screen').waitFor();
+  await overlay.waitForFunction(() => document.querySelector('#screen').complete && document.querySelector('#screen').naturalWidth > 0);
+  await overlay.screenshot({ path: resolve(root, 'test-results/capture-overlay.png') });
+  await overlay.mouse.move(60, 60); await overlay.mouse.down(); await overlay.mouse.move(1000, 570, { steps: 15 }); await overlay.mouse.up();
+  await page.getByRole('heading', { name: '声音与设置', exact: true }).waitFor({ timeout: 30000 });
+  await page.getByRole('button', { name: '查看识别文字', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('#recognized-text')?.value.includes('2026'), undefined, { timeout: 30000 });
+  const text = await page.locator('#recognized-text').inputValue();
+  assert.match(text, /2026/); assert.match(text, /测试文字|测试.*文字/);
+  evidence.checks.push('Real multi-window screen crop -> local Windows OCR recognized authored Chinese text and year');
+  evidence.ocrText = text;
+  await page.screenshot({ path: resolve(root, 'docs/screenshots/recognized-text.png') });
+  await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.destroy(), fixtureId);
+  await page.getByRole('button', { name: '收起面板', exact: true }).click();
+  const cancelledOverlayEvent = application.waitForEvent('window');
+  await page.getByRole('button', { name: '截图朗读', exact: true }).click();
+  const cancelledOverlay = await cancelledOverlayEvent;
+  await cancelledOverlay.waitForURL('**/capture.html');
+  await cancelledOverlay.keyboard.press('Escape').catch(error => { if (!cancelledOverlay.isClosed()) throw error; });
+  await page.getByText('已取消截图', { exact: true }).waitFor();
+  evidence.checks.push('Escape cancels native capture and restores toolbar');
+  // Exercise the real HTMLAudio element with generated silence, never a cloud request.
+  await application.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('reader:begin-speech'); ipcMain.handle('reader:begin-speech', () => {});
+    ipcMain.removeHandler('reader:speak'); ipcMain.handle('reader:speak', (_event, request) => {
+      const wave = Buffer.alloc(44 + 24000 * 2 * 12);
+      wave.write('RIFF', 0); wave.writeUInt32LE(wave.length - 8, 4); wave.write('WAVEfmt ', 8);
+      wave.writeUInt32LE(16, 16); wave.writeUInt16LE(1, 20); wave.writeUInt16LE(1, 22);
+      wave.writeUInt32LE(24000, 24); wave.writeUInt32LE(48000, 28); wave.writeUInt16LE(2, 32); wave.writeUInt16LE(16, 34);
+      wave.write('data', 36); wave.writeUInt32LE(wave.length - 44, 40);
+      return { generationId: request.generationId, chunkId: request.chunkId, audio: new Uint8Array(wave) };
+    });
+  });
+  await page.evaluate(async () => {
+    const settings = await window.reader.getSettings();
+    await window.reader.saveSettings({ preferences: { ...settings.preferences, allowCloud: true }, apiKey: 'offline-verification-not-a-real-key' });
+  });
+  await page.reload();
+  await page.waitForFunction(() => window.reader !== undefined);
+  await page.evaluate(() => {
+    const original = window.HTMLMediaElement.prototype.play;
+    window.HTMLMediaElement.prototype.play = function () { window.verificationAudio = this; return original.call(this); };
+  });
+  await page.getByRole('button', { name: '查看识别文字', exact: true }).click();
+  await page.getByLabel('识别文字', { exact: true }).fill('这是一段仅用于验证播放控制的测试文字。');
+  await page.getByRole('button', { name: '朗读这段文字', exact: true }).click();
+  await page.waitForFunction(() => window.verificationAudio?.currentTime > 0.15);
+  await page.getByRole('button', { name: '暂停', exact: true }).click();
+  const pausedAt = await page.evaluate(() => window.verificationAudio.currentTime);
+  await page.getByLabel('朗读速度', { exact: true }).selectOption('3');
+  const afterRate = await page.evaluate(() => ({ paused: window.verificationAudio.paused, time: window.verificationAudio.currentTime, rate: window.verificationAudio.playbackRate }));
+  assert.equal(afterRate.paused, true); assert.equal(afterRate.rate, 3); assert.ok(Math.abs(afterRate.time - pausedAt) < 0.06);
+  await page.getByRole('button', { name: '继续', exact: true }).click();
+  await page.waitForFunction(time => window.verificationAudio.currentTime > time + 0.1, pausedAt);
+  await page.getByRole('button', { name: '停止朗读', exact: true }).click();
+  assert.equal(await page.evaluate(() => window.verificationAudio.paused), true);
+  await page.evaluate(async () => { const settings = await window.reader.getSettings(); await window.reader.saveSettings({ preferences: { ...settings.preferences, allowCloud: false, rate: 1.5 }, clearApiKey: true }); });
+  evidence.checks.push('Real HTMLAudio decoded synthetic WAV; pause/resume and 3x rate preserve position; stop works (mock synthesis, no cloud)');
+  assert.deepEqual(errors, []);
+  await application.close(); application = undefined;
+  application = await launch(); page = await application.firstWindow();
+  await page.waitForFunction(async () => window.reader && (await window.reader.getSettings()).preferences.rate === 1.5);
+  assert.equal((await page.evaluate(() => window.reader.getSettings())).hasApiKey, false);
+  evidence.checks.push('Encrypted settings survive restart; no credential inherited by test profile');
+  evidence.status = 'passed';
+} catch (error) { evidence.status = 'failed'; evidence.error = String(error); await page?.screenshot({ path: resolve(root, 'test-results/desktop-failure.png') }).catch(() => {}); throw error; }
+finally {
+  await application?.close().catch(() => {});
+  await writeFile(resolve(root, executablePath ? 'docs/packaged-verification.json' : 'docs/desktop-verification.json'), JSON.stringify(evidence, null, 2));
+  console.log(JSON.stringify(evidence, null, 2));
+}
