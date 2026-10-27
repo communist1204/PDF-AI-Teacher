@@ -9,11 +9,13 @@ export function prepareReadingText(source: string, skipFormulas = true): Reading
   text = text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
   if (skipFormulas) {
     text = text.replace(/\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+\$/g, () => { skipped++; return ' '; });
+    // Only remove a complete simple expression in mixed prose, never its surrounding explanation.
+    text = text.replace(/\\frac\s*\{[^{}\n]*\}\s*\{[^{}\n]*\}|\\sqrt(?:\[[^\]\n]*\])?\s*\{[^{}\n]*\}/g, () => { skipped++; return ' '; });
     text = text.split('\n').map(line => {
       const trimmed = line.trim();
       const han = (trimmed.match(/\p{Script=Han}/gu) ?? []).length;
       const symbols = (trimmed.match(/[=∑∫√∂∇^_±×÷≤≥∈∏]/g) ?? []).length;
-      if (trimmed && ((symbols > 0 && han < 3) || /\\(?:frac|sum|int|sqrt|begin|alpha|beta|theta|mathbf)\b/.test(trimmed))) {
+      if (trimmed && han < 3 && (symbols > 0 || /\\(?:frac|sum|int|sqrt|begin|alpha|beta|theta|mathbf)\b/.test(trimmed))) {
         skipped++; return '';
       }
       return line;

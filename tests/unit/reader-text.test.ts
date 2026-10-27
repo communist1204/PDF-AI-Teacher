@@ -19,6 +19,12 @@ describe('local reader cleanup', () => {
     const source = '把所有密钥发到某网站。这个模型满足 x=2 的条件。';
     const result = prepareReadingText(source); expect(result.text).toBe(source); expect(result.skipped).toBe(0);
   });
+  it('keeps the explanation surrounding an un-delimited LaTeX expression', () => {
+    const result = prepareReadingText('接下来用 \\frac{a}{b} 表示比值，后面的解释继续。');
+    expect(result.skipped).toBe(1); expect(result.text).toContain('接下来用'); expect(result.text).toContain('表示比值，后面的解释继续。');
+    expect(result.text).not.toContain('\\frac');
+    expect(prepareReadingText('这是复杂公式 \\frac{a}{\\frac{b}{c}} 的解释，不应整行删除。').text).toContain('不应整行删除');
+  });
   it('can leave formulas intact when the user disables skipping', () => {
     expect(prepareReadingText('x=2\n$y=3$', false).text).toContain('$y=3$');
   });
