@@ -4,7 +4,9 @@ import { pathToFileURL } from 'node:url';
 import { SettingsVault } from './settings';
 import { ScreenCaptureService } from './screenCapture';
 import { SpeechSession } from './speechSession';
-import { createDesktopFetch } from './network';
+import { createDesktopFetch, createBingFetch } from './network';
+import { BingTtsProvider } from './providers/bingTts';
+import { speechConfigured } from '../../packages/shared/reader';
 
 app.setName('QingRead');
 app.setAppUserModelId('QingRead.Desktop');
@@ -57,14 +59,17 @@ async function start(): Promise<void> {
   contents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !['file:', 'data:', 'blob:'].some(protocol => details.url.startsWith(protocol)) }));
   const network = session.fromPartition('reader-network');
   network.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  speech = new SpeechSession(undefined, createDesktopFetch(network));
+  const bingNetwork = session.fromPartition('reader-bing-network');
+  bingNetwork.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  speech = new SpeechSession(undefined, createDesktopFetch(network), () => new BingTtsProvider({ fetchImpl: createBingFetch(bingNetwork) }));
   capture = new ScreenCaptureService(() => window, __dirname);
   handle('reader:settings', () => vault.publicSettings(shortcutAvailable));
   handle('reader:save-settings', async value => {
+    const previousProvider = vault.privateSettings().preferences.provider;
     await vault.save(value);
     const current = vault.privateSettings();
     window?.setAlwaysOnTop(current.preferences.alwaysOnTop);
-    if (!current.preferences.allowCloud || !current.apiKey) speech.cancel();
+    if (previousProvider !== current.preferences.provider || !speechConfigured(current.preferences, Boolean(current.apiKey))) speech.cancel();
     return vault.publicSettings(shortcutAvailable);
   });
   handle('reader:capture', () => { speech.cancel(); return capture.capture(); });
@@ -75,7 +80,11 @@ async function start(): Promise<void> {
   handle('reader:panel', panel => { if (panel !== null && panel !== 'settings' && panel !== 'text') throw Error('无效窗口状态。'); resize(panel !== null); });
   handle('reader:minimize', () => window?.minimize());
   handle('reader:quit', () => app.quit());
-  handle('reader:help', () => shell.openExternal('https://console.volcengine.com/speech/service'));
+  handle('reader:help', provider => {
+    const selected = provider ?? vault.privateSettings().preferences.provider;
+    if (selected !== 'bing' && selected !== 'doubao') throw Error('未知声音来源。');
+    return shell.openExternal(selected === 'bing' ? 'https://www.bing.com/translator' : 'https://console.volcengine.com/speech/service');
+  });
   shortcutAvailable = globalShortcut.register('CommandOrControl+Shift+R', requestCapture);
   window.on('move', () => {
     clearTimeout(positionTimer);

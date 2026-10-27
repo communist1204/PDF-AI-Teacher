@@ -1,20 +1,26 @@
 import { z } from 'zod';
+import { BingTtsProvider } from './providers/bingTts';
 import type { ReaderPreferences, SpeechResult } from '../../packages/shared/reader';
 import { DoubaoTtsProvider, type DoubaoTtsOptions } from './providers/doubaoTts';
 
 const GenerationSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$/);
 const RequestSchema = z.object({ generationId: GenerationSchema, chunkId: z.number().int().min(0).max(511), text: z.string().trim().min(1).max(6000).refine(value => !value.includes('\0')) }).strict();
-type VoiceProvider = Pick<DoubaoTtsProvider, 'speak' | 'dispose'>;
+type VoiceProvider = { speak(text: string, speed: number, signal: AbortSignal, sectionId?: string): Promise<{ audio: Buffer; mimeType?: 'audio/wav' | 'audio/mpeg' }>; dispose(): void };
 type Generation = { id: string; provider: VoiceProvider; controllers: Set<AbortController>; chunks: Set<number>; characters: number };
 
 /** A generation freezes one voice. Late responses can never enter a new reading. */
 export class SpeechSession {
   private current: Generation | null = null;
-  constructor(private readonly createProvider: (options: DoubaoTtsOptions) => VoiceProvider = options => new DoubaoTtsProvider(options), private readonly fetchImpl?: typeof fetch) {}
+  constructor(private readonly createProvider: (options: DoubaoTtsOptions) => VoiceProvider = options => new DoubaoTtsProvider(options), private readonly fetchImpl?: typeof fetch, private readonly createBing: () => VoiceProvider = () => new BingTtsProvider({ fetchImpl: fetch })) {}
   begin(generationId: unknown, preferences: ReaderPreferences, apiKey: string): void {
     this.cancel();
     const parsed = GenerationSchema.safeParse(generationId);
     if (!parsed.success) throw Error('朗读任务标识无效，请重新截图。');
+    if (preferences.provider === 'bing') {
+      if (!preferences.allowBingCloud) throw Error('请在设置中允许把主动框选的文字发送至微软 Bing 朗读。');
+      this.current = { id: parsed.data, provider: this.createBing(), controllers: new Set(), chunks: new Set(), characters: 0 };
+      return;
+    }
     if (!preferences.allowCloud) throw Error('请在设置中允许把主动框选的文字发给豆包朗读。');
     if (!apiKey.trim()) throw Error('请先在设置中填写豆包语音 API Key。截图识字仍可在本机使用。');
     this.current = { id: parsed.data, provider: this.createProvider({ apiKey, voice: preferences.voice, instructions: preferences.instructions, fetchImpl: this.fetchImpl }), controllers: new Set(), chunks: new Set(), characters: 0 };
@@ -32,7 +38,7 @@ export class SpeechSession {
     try {
       const result = await current.provider.speak(request.text, 1, controller.signal, current.id);
       if (this.current !== current || controller.signal.aborted) throw Error('朗读已取消或过期。');
-      return { generationId: current.id, chunkId: request.chunkId, audio: new Uint8Array(result.audio) };
+      return { generationId: current.id, chunkId: request.chunkId, audio: new Uint8Array(result.audio), ...(result.mimeType ? { mimeType: result.mimeType } : {}) };
     } finally { current.controllers.delete(controller); }
   }
   cancel(): void {

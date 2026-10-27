@@ -12,3 +12,10 @@
 10. Edge PDF 翻译面板发声与整页“朗读”不可混为一谈。官方 PDF 功能介绍未提供该面板扬声器的开发接口或准确 voice ID；无法保证第三方接入同一声音。参考：https://explore.microsoft.com/en-us/edge/features/pdf-reader?form=MT0160 。Translator Text V3 不包含 TTS，官方建议使用 Speech：https://learn.microsoft.com/en-us/azure/ai-services/translator/text-translation/how-to/migrate-to-v3 。
 11. 正式微软接入可使用 Azure Speech REST/SDK：https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech 。官方定价 F0 普通 Neural TTS 每月 50 万字符免费，不等于无限、不覆盖所有语音模型：https://azure.microsoft.com/en-us/pricing/details/speech/ 。需要自己的 Azure 资源/凭证，注册条件和支付验证以 https://azure.microsoft.com/en-us/pricing/purchase-options/azure-account 为准。当前没有接入，不声称已试听或与 Edge 音色相同。
 12. 社区 edge-tts 为非微软官方客户端；开源代码不构成服务免费额度、稳定性或支持承诺，不作为“官方免费接口”悄悄接入。其 README 也记录自定义 SSML 受上游限制：https://github.com/rany2/edge-tts 。
+
+
+13. 0.3.0通过本机Edge资源和当前Bing网页确认PDF翻译小喇叭来源，选用其晓晓和-20%基础语速，而非Edge整页Read Aloud。详见edge-translation-research.md。
+14. Bing作为实验选项，保留豆包；无需用户Key，只用匿名非持久化分区建立网页会话，不读取浏览器登录资料，不声称官方开发API支持或无限免费。
+15. 微软和豆包分别授权；旧设置缺少新字段时仍为doubao且allowBingCloud=false。MP3使用正确MIME并沿用单播放器，调速无需重新生成。
+16. Electron Session.fetch的manual地区跳转会取消；参照https://www.electronjs.org/docs/latest/api/client-request 和 https://www.electronjs.org/docs/latest/api/net/核验。GET逐跳域名/路径守卫、POST禁止重定向，使用当前本机实际cn.bing.com入口。失败不会转向收费声音。
+17. 设置保存互斥，试听绑定独立用户意图；停止/新任务使旧试听失效，保存自身取消不会误杀新试听。原PRD验收标准保持不变。

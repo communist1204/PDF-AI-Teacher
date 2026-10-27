@@ -6,6 +6,8 @@ import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_V
 import type { ReaderPreferences, ReaderSettings } from '../../packages/shared/reader';
 
 export const PreferencesSchema = z.object({
+  provider: z.enum(['doubao', 'bing']).default('doubao'),
+  allowBingCloud: z.boolean().default(false),
   voice: z.string().refine(value => DOUBAO_TTS_VOICES.some(voice => voice.id === value)),
   instructions: z.string().trim().max(1000).refine(value => !value.includes('\0')),
   rate: z.number().finite().min(0.25).max(3),
@@ -22,6 +24,7 @@ const PrivateSettingsSchema = z.object({
   apiKey: z.string().max(500), migrated: z.boolean(), position: PositionSchema.nullable(),
 }).strict();
 export const defaultPreferences: ReaderPreferences = {
+  provider: 'doubao', allowBingCloud: false,
   voice: DEFAULT_DOUBAO_TTS_VOICE, instructions: DEFAULT_DOUBAO_TTS_INSTRUCTIONS,
   rate: 1, alwaysOnTop: true, allowCloud: false, skipFormulas: true,
 };

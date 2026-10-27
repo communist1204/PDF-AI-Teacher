@@ -11,3 +11,6 @@ npm run dev 仅界面预览，没有桌面截图/真实语音桥接。
 Key 在桌面设置填写并由 Windows 加密，不发到聊天、不提交 Git、不放前端变量。设置保存不产生调用；首次允许云朗读后，主动截图识别的文字才发火山引擎。
 
 本机项目路径已改为 D:\QingRead。开发时请打开这个目录；GitHub 按用户选择保留原仓库名。软件显示名为轻读 / QingRead。
+
+
+0.3.0已增加Bing翻译朗读（晓晓），来源见docs/edge-translation-research.md。独立微软许可默认关闭；豆包配置保留。真实网络验收显式运行node scripts/verify-bing.mjs --live，仅发送自制短句；普通单测/e2e不调用云语音。

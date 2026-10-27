@@ -52,3 +52,15 @@ Windows；Node 24.19.0，npm 11.17.0，Git 2.56.0.windows.3。仅项目局部依
 项目实际路径 D:\QingRead。移动后再次执行 desktop:build 与打包程序 test:desktop，均通过；packaged-verification.json 记录本次结果。两个快捷方式的 TargetPath 和 IconLocation 已读回核验。旧目录子项数为 0，删除空目录受当前会话占用阻挡；没有停止 Codex 或其他用户进程。
 
 正常用户配置下已从新路径启动，主窗口“轻读 · 截图朗读”响应正常；未自动截图或请求云语音。
+
+
+## 0.3.0 微软翻译朗读
+- 实际执行typecheck、lint、99项单测（7文件）、build、8项e2e、desktop:package及打包版test:desktop，通过。
+- 模拟测试覆盖匿名页面会话共享/过期、XML转义、动态IID、音频大小/MP3检查、限流不重试、取消超时、逐跳域名守卫、旧配置兼容和独立微软授权。
+- UI测试覆盖无需Key但需独立允许、首次切来源保存试听、保存期间停止阻止迟到开声，以及调速/截图/文本朗读的保存互斥。
+- node scripts/verify-bing.mjs --live使用隔离无Key配置和自制34字短句。打包程序真实按钮贯穿ReaderAudio和微软服务，约878ms开始播放、9.18秒MP3；静音HTMLAudio解码、暂停续读和2×原位调速通过。记录docs/bing-verification.json。
+- 实际查看bing-settings.png与bing-playing.png，新声音来源、许可与音色清楚；仍为浅蓝色。
+- 首轮桌面验证脚本重载时窗口关闭，改为真实设置控件操作；浏览器对象声明的lint错误已修复。
+- 首轮匿名请求未保留地区来源/会话，返回空HTTP200；Electron manual跳转取消，之后采用逐跳守卫及本机实际cn入口成功。失败均未假报成功，POST禁跳转保护保留。
+- 审查发现设置/试听竞态，已用保存互斥与独立试听意图标识修复并补测试。
+- 未调用豆包付费接口，未发送用户截图/PDF，未完成人工音质评估、数小时长文或所有网络环境测试。上述延迟仅一条样本。

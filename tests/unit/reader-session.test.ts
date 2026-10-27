@@ -67,3 +67,14 @@ describe('Reader speech generation ownership', () => {
     await expect(pending).rejects.toThrow('过期');
   });
 });
+
+it('keeps Bing consent separate and never needs or passes a Doubao key to its provider', async () => {
+  const doubao = vi.fn(), bingSpeak = vi.fn(async () => ({ audio: Buffer.from([1, 2]), mimeType: 'audio/mpeg' as const }));
+  const bing = vi.fn(() => ({ speak: bingSpeak, dispose: vi.fn() }));
+  const session = new SpeechSession(doubao, undefined, bing);
+  expect(() => session.begin('b1', { ...defaultPreferences, provider: 'bing', allowCloud: true }, 'private-doubao-key')).toThrow('微软 Bing');
+  session.begin('b2', { ...defaultPreferences, provider: 'bing', allowBingCloud: true }, '');
+  expect(await session.speak({ generationId: 'b2', chunkId: 0, text: '你好。' })).toMatchObject({ mimeType: 'audio/mpeg' });
+  expect(bing).toHaveBeenCalledWith(); expect(doubao).not.toHaveBeenCalled();
+  session.cancel();
+});

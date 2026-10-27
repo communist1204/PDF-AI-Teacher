@@ -27,6 +27,11 @@ try {
   await page.getByRole('button', { name: '声音设置', exact: true }).click();
   await page.getByRole('button', { name: '保存设置', exact: true }).waitFor();
   await page.screenshot({ path: resolve(root, 'docs/screenshots/settings.png') });
+  await page.getByLabel('朗读来源').selectOption('bing');
+  assert.equal(await page.getByLabel('允许将我主动截图', { exact: false }).isChecked(), false);
+  await page.getByRole('button', { name: '保存并试听这段声音' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: resolve(root, 'docs/screenshots/bing-settings.png') });
+  await page.getByLabel('朗读来源').selectOption('doubao');
   await page.getByRole('button', { name: '收起面板', exact: true }).click();
   await page.getByLabel('朗读速度', { exact: true }).selectOption('1.5');
   await page.waitForFunction(async () => (await window.reader.getSettings()).preferences.rate === 1.5);

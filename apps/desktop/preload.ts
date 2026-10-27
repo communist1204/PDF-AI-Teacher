@@ -12,7 +12,7 @@ const bridge: ReaderBridge = {
   setPanel: panel => ipcRenderer.invoke('reader:panel', panel),
   minimize: () => ipcRenderer.invoke('reader:minimize'),
   quit: () => ipcRenderer.invoke('reader:quit'),
-  openHelp: () => ipcRenderer.invoke('reader:help'),
+  openHelp: provider => ipcRenderer.invoke('reader:help', provider),
   onCaptureRequested: callback => {
     const listener = () => callback(); ipcRenderer.on('reader:capture-requested', listener);
     return () => ipcRenderer.removeListener('reader:capture-requested', listener);

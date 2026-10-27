@@ -1,0 +1,42 @@
+{
+  "capturedAt": "2026-10-27T10:14:08.271Z",
+  "packaged": true,
+  "provider": "bing-translator",
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "synthesisRate": "-20.00%",
+  "realCloudCalls": true,
+  "calls": 1,
+  "userCredentials": false,
+  "humanListening": false,
+  "checks": [
+    "Real text-preview button -> ReaderAudio -> production IPC/Bing -> HTMLAudio, isolated no-key profile",
+    "Valid MP3 decoded by Electron HTMLAudio",
+    "Pause/resume and 2x change preserve current position; muted test, no subjective listening"
+  ],
+  "elapsedMs": 878,
+  "network": [
+    {
+      "host": "cn.bing.com",
+      "path": "/translator",
+      "method": "GET",
+      "status": 200,
+      "type": "default",
+      "contentType": "text/html; charset=utf-8",
+      "length": "101847",
+      "redirectHost": null
+    },
+    {
+      "host": "cn.bing.com",
+      "path": "/tfettts",
+      "method": "POST",
+      "status": 200,
+      "type": "default",
+      "contentType": "audio/mpeg",
+      "length": "36720",
+      "redirectHost": null
+    }
+  ],
+  "characters": 34,
+  "durationSeconds": 9.18,
+  "status": "passed"
+}

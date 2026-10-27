@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 async function mockDesktop(page: Page, options = { hasKey: true, delayedOcr: false }) {
   await page.addInitScript(({ hasKey, delayedOcr }) => {
     const calls = { speak: 0, cancelled: 0, saves: 0, playing: false };
-    const preferences = { voice: 'zh_female_xiaohe_uranus_bigtts', instructions: '温和自然地读。', rate: 1, alwaysOnTop: true, allowCloud: true, skipFormulas: true };
+    const preferences = { provider: 'doubao' as 'doubao' | 'bing', allowBingCloud: false, voice: 'zh_female_xiaohe_uranus_bigtts', instructions: '温和自然地读。', rate: 1, alwaysOnTop: true, allowCloud: true, skipFormulas: true };
     const settings = { preferences, hasApiKey: hasKey, encryptionAvailable: true, migrated: false, shortcutAvailable: true };
     // Structurally valid silent WAV. Playback is mocked; malformed bytes would trigger a real decode error.
     const wave = new Uint8Array(48044), header = new DataView(wave.buffer);
@@ -92,4 +92,58 @@ test('stopping OCR prevents its late result from starting sound or replacing the
   await page.evaluate(() => (window as unknown as { finishTestOcr(): void }).finishTestOcr());
   await expect(page.getByRole('status')).toContainText('已停止');
   expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBe(0);
+});
+
+test('Bing has separate consent, needs no key and can audition without losing Doubao settings', async ({ page }) => {
+  await mockDesktop(page, { hasKey: false, delayedOcr: false }); await page.goto('/');
+  await page.getByRole('button', { name: '声音设置', exact: true }).click();
+  await page.getByLabel('朗读来源').selectOption('bing');
+  await expect(page.getByLabel('豆包语音 API Key')).toBeHidden();
+  await expect(page.getByLabel('朗读音色')).toHaveValue('xiaoxiao');
+  await page.getByRole('button', { name: '保存并试听这段声音' }).click();
+  await expect(page.getByText('请先勾选当前声音的联网朗读许可；豆包还需要 API Key。')).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBe(0);
+  await page.getByLabel('允许将我主动截图', { exact: false }).check();
+  await page.getByRole('button', { name: '保存并试听这段声音' }).click();
+  await expect(page.getByRole('status').first()).toContainText('正在朗读');
+  await page.getByLabel('朗读速度').selectOption('2');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { readerTestAudio: HTMLAudioElement }).readerTestAudio.playbackRate)).toBe(2);
+  await page.getByLabel('允许将我主动截图', { exact: false }).uncheck();
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await expect(page.getByRole('button', { name: '暂停', exact: true })).toBeDisabled();
+  await page.getByLabel('朗读来源').selectOption('doubao');
+  await expect(page.getByLabel('朗读音色')).toHaveValue('zh_female_xiaohe_uranus_bigtts');
+});
+
+test('stopping while audition settings save is pending prevents late speech and locks competing changes', async ({ page }) => {
+  await mockDesktop(page); await page.goto('/');
+  await page.getByRole('button', { name: '声音设置', exact: true }).click();
+  await page.getByLabel('朗读来源').selectOption('bing');
+  await page.getByLabel('允许将我主动截图', { exact: false }).check();
+  await page.evaluate(() => {
+    const original = window.reader!.saveSettings;
+    window.reader!.saveSettings = async value => {
+      await new Promise<void>(resolve => Object.assign(window, { finishSettingsSave: resolve }));
+      return original(value);
+    };
+  });
+  await page.getByRole('button', { name: '保存并试听这段声音' }).click();
+  await expect(page.getByLabel('朗读速度')).toBeDisabled();
+  await expect(page.getByRole('button', { name: '截图朗读', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '停止朗读', exact: true }).click();
+  await page.evaluate(() => (window as unknown as { finishSettingsSave(): void }).finishSettingsSave());
+  await expect(page.getByText('已取消本次试听。设置仍已保存。')).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBe(0);
+  await expect(page.getByLabel('朗读速度')).toBeEnabled();
+});
+
+test('switching directly from Doubao to Bing can save and audition on the first click', async ({ page }) => {
+  await mockDesktop(page); await page.goto('/');
+  await page.getByRole('button', { name: '声音设置', exact: true }).click();
+  await page.getByLabel('朗读来源').selectOption('bing');
+  await page.getByLabel('允许将我主动截图', { exact: false }).check();
+  await page.getByRole('button', { name: '保存并试听这段声音' }).click();
+  await expect(page.getByRole('status').first()).toContainText('正在朗读');
+  expect(await page.evaluate(() => (window as unknown as { readerTest: { settings: { preferences: { provider: string } }; calls: { speak: number } } }).readerTest)).toMatchObject({ settings: { preferences: { provider: 'bing' } }, calls: { speak: expect.any(Number) } });
+  expect(await page.evaluate(() => (window as unknown as { readerTest: { calls: { speak: number } } }).readerTest.calls.speak)).toBeGreaterThan(0);
 });

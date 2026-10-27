@@ -10,7 +10,7 @@ export interface AudioDevice {
 type Prepared = { url: string } | { error: string };
 export interface AudioDependencies {
   audio: AudioDevice;
-  createUrl(bytes: Uint8Array): string;
+  createUrl(bytes: Uint8Array, mimeType?: 'audio/wav' | 'audio/mpeg'): string;
   revokeUrl(url: string): void;
   id(): string;
 }
@@ -31,7 +31,7 @@ export class ReaderAudio {
   private listeners = new Set<(state: AudioState) => void>();
   constructor(private bridge: Pick<ReaderBridge, 'beginSpeech' | 'speak' | 'cancel'>, private dependencies: AudioDependencies = {
     audio: new Audio(),
-    createUrl: bytes => URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'audio/wav' })),
+    createUrl: (bytes, mimeType = 'audio/wav') => URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: mimeType })),
     revokeUrl: url => URL.revokeObjectURL(url), id: () => crypto.randomUUID(),
   }) {}
   subscribe(listener: (state: AudioState) => void) { this.listeners.add(listener); listener(this.state); return () => { this.listeners.delete(listener); }; }
@@ -71,7 +71,7 @@ export class ReaderAudio {
       this.active++;
       const request = this.bridge.speak({ generationId, chunkId, text: this.chunks[chunkId] }).then(result => {
         if (epoch !== this.epoch || result.generationId !== generationId || result.chunkId !== chunkId) return { error: '朗读结果已过期。' };
-        const url = this.dependencies.createUrl(result.audio); this.urls.add(url); return { url };
+        const url = this.dependencies.createUrl(result.audio, result.mimeType); this.urls.add(url); return { url };
       }, error => ({ error: error instanceof Error ? error.message : '声音准备失败，请稍后重试。' })).finally(() => {
         if (epoch === this.epoch) { this.active--; this.fill(epoch); }
       });

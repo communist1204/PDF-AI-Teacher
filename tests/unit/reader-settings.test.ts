@@ -63,3 +63,14 @@ describe('Reader settings vault (mock cipher)', () => {
     const other = new SettingsVault(join(directory, 'new.bin'), cipher); await writeFile(legacy, 'broken'); await other.load(legacy); expect(other.publicSettings(true).hasApiKey).toBe(false);
   });
 });
+
+it('reads the previous preference format without granting permission to a new recipient', async () => {
+  const { vault, path } = await setup();
+  const old = { ...defaultPreferences, allowCloud: true } as Partial<typeof defaultPreferences>;
+  delete old.provider; delete old.allowBingCloud;
+  await writeFile(path, cipher.encrypt(JSON.stringify({ version: 1, preferences: old, apiKey: 'retained-doubao-key', migrated: false, position: null })));
+  await vault.load();
+  expect(vault.privateSettings()).toMatchObject({ apiKey: 'retained-doubao-key', preferences: { provider: 'doubao', allowCloud: true, allowBingCloud: false } });
+  await vault.save({ preferences: { ...defaultPreferences, provider: 'bing', allowBingCloud: true } });
+  expect(vault.privateSettings().apiKey).toBe('retained-doubao-key');
+});
