@@ -6,7 +6,8 @@ import { ScreenCaptureService } from './screenCapture';
 import { SpeechSession } from './speechSession';
 import { createDesktopFetch } from './network';
 
-app.setName('ScreenReader');
+app.setName('QingRead');
+app.setAppUserModelId('QingRead.Desktop');
 // An explicit launch-time profile override makes local verification isolated from real credentials.
 if (process.env.SCREEN_READER_DATA_DIR) app.setPath('userData', process.env.SCREEN_READER_DATA_DIR);
 else app.setPath('userData', join(app.getPath('appData'), 'ScreenReader'));
@@ -44,7 +45,7 @@ async function start(): Promise<void> {
   await vault.load(process.env.SCREEN_READER_DATA_DIR ? undefined : join(app.getPath('appData'), 'PDF-AI-Teacher', 'private-settings.bin'));
   const preferences = vault.privateSettings().preferences;
   const area = screen.getPrimaryDisplay().workArea, saved = vault.privateSettings().position;
-  window = new BrowserWindow({ title: '截图朗读', width: 560, height: 138, x: saved?.x ?? area.x + Math.max(0, area.width - 590), y: saved?.y ?? area.y + 70, frame: false, resizable: false, maximizable: false, show: false, alwaysOnTop: preferences.alwaysOnTop, backgroundColor: '#f7f8f4', icon: join(__dirname, 'assets/app.ico'), webPreferences: { preload: join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, devTools: !app.isPackaged, partition: 'persist:reader-ui' } });
+  window = new BrowserWindow({ title: '截图朗读', width: 560, height: 138, x: saved?.x ?? area.x + Math.max(0, area.width - 590), y: saved?.y ?? area.y + 70, frame: false, resizable: false, maximizable: false, show: false, alwaysOnTop: preferences.alwaysOnTop, backgroundColor: '#f3f9ff', icon: join(__dirname, 'assets/qingread.ico'), webPreferences: { preload: join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, devTools: !app.isPackaged, partition: 'persist:reader-ui' } });
   resize(false);
   const contents = window.webContents;
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));

@@ -1,5 +1,6 @@
+import brandIcon from '../../../assets/qingread.svg';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, Pause, Play, Settings, Square, AlignLeft, Minus, X, ChevronLeft, Volume2 } from 'lucide-react';
+import { Camera, Pause, Play, Settings, Square, AlignLeft, Minus, X, ChevronLeft } from 'lucide-react';
 import { DEFAULT_DOUBAO_TTS_INSTRUCTIONS, DEFAULT_DOUBAO_TTS_VOICE, DOUBAO_TTS_VOICES } from '../../../packages/shared/doubaoSpeech';
 import type { ReaderPanel, ReaderPreferences, ReaderSettings, SaveReaderSettings } from '../../../packages/shared/reader';
 import { prepareReadingText } from '../../../packages/shared/readingText';
@@ -105,7 +106,7 @@ export function App() {
   const audioStatus = audio.phase === 'preparing' ? '正在准备声音…' : audio.phase === 'playing' ? `正在朗读 · ${audio.index + 1}/${audio.total}` : audio.phase === 'paused' ? `已暂停 · ${audio.index + 1}/${audio.total}` : audio.phase === 'done' ? '朗读完成' : '';
   const status = !bridge ? '界面预览 · 请打开桌面软件截图朗读' : error || (audio.phase === 'error' ? messageOf(new Error(audio.message)) : '') || (work === 'capturing' ? '拖动框选 · Esc 取消' : work === 'recognizing' ? '正在本机识别文字…' : audioStatus || notice || (settings.hasApiKey && settings.preferences.allowCloud ? '框选想听的内容，松开后开始朗读' : '先设置声音，也可以直接截图识字'));
   return <main className="reader-shell">
-    <header className="titlebar"><span className="brand"><Volume2 size={13} />轻读<span className="brand-sub">截图朗读</span></span><div className="window-actions"><button aria-label="最小化" title="最小化" onClick={() => void bridge?.minimize()}><Minus size={14}/></button><button aria-label="退出" title="退出软件" onClick={() => void bridge?.quit()}><X size={14}/></button></div></header>
+    <header className="titlebar"><span className="brand"><img className="brand-logo" src={brandIcon} alt="" />轻读<span className="brand-sub">截图朗读</span></span><div className="window-actions"><button aria-label="最小化" title="最小化" onClick={() => void bridge?.minimize()}><Minus size={14}/></button><button aria-label="退出" title="退出软件" onClick={() => void bridge?.quit()}><X size={14}/></button></div></header>
     <div className="toolbar">
       <button className="capture-button" onClick={() => void capture()} disabled={!bridge || !loaded || work === 'capturing'} title={settings.shortcutAvailable ? '截图朗读 · Ctrl+Shift+R' : '截图朗读'}><Camera size={19}/><span>截图朗读</span></button>
       <button className="pause-button" disabled={!['preparing', 'playing', 'paused'].includes(audio.phase)} onClick={() => player?.togglePause()}>{audio.phase === 'paused' ? <Play size={17}/> : <Pause size={17}/>}<span>{audio.phase === 'paused' ? '继续' : '暂停'}</span></button>

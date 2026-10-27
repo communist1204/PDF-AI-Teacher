@@ -39,3 +39,16 @@ Windows；Node 24.19.0，npm 11.17.0，Git 2.56.0.windows.3。仅项目局部依
 
 ## 交付核验
 新版 codex/screen-reader 分支的实现提交 fe035a43d8476a363898e15fc79230131baa5ce8 已推送并通过 ls-remote 核验。Git 直连曾连接重置，之后仅本次命令使用系统已启用的代理完成上传，未修改全局代理。正常启动后主窗口为“轻读 · 截图朗读”，进程响应正常；没有自动截图或付费请求。
+
+## 0.2.1 品牌与清理复验
+- npm run icons、typecheck、lint、test、test:e2e、desktop:package 实际通过；83 项单测、5 项界面测试，数量未改变。
+- SCREEN_READER_TEST_EXE 指向 release/QingRead-win32-x64/QingRead.exe，桌面验收通过：真实屏幕裁剪/Windows OCR、Esc 取消、静音 WAV 播放、暂停续读、3× 原位调速、加密设置重启保留。未调用真实语音接口。
+- 实际查看新 logo 和 docs/screenshots 下工具条、设置、识字预览，均为浅蓝色，文字可辨，无控件遮挡。
+- 品牌批量替换初次误改部分字符，类型检查立即发现；从修改前版本恢复受影响文件并逐项准确替换，随后类型、lint 和构建通过。
+- 首次桌面复验未截到自制文稿，等待年份识别超时。测试使用全屏文稿时，点击工具条会改变前台窗口；改为普通置顶文稿、通过真实按钮事件触发而不切换前台，未降低识字断言，复验通过。失败截图只在忽略的 test-results 本机目录中，不上传。
+- 旧功能审查：没有旧 PDF/板书/账号登录、本地模型代码或依赖。代码中的 PDF-AI-Teacher 字样仅为旧设置迁移；GitHub 仓库名、恢复文档和历史由用户明确保留。
+
+## 新路径复验
+项目实际路径 D:\QingRead。移动后再次执行 desktop:build 与打包程序 test:desktop，均通过；packaged-verification.json 记录本次结果。两个快捷方式的 TargetPath 和 IconLocation 已读回核验。旧目录子项数为 0，删除空目录受当前会话占用阻挡；没有停止 Codex 或其他用户进程。
+
+正常用户配置下已从新路径启动，主窗口“轻读 · 截图朗读”响应正常；未自动截图或请求云语音。

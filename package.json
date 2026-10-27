@@ -1,6 +1,6 @@
 {
-  "name": "screen-reader",
-  "version": "0.2.0",
+  "name": "qingread",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -18,7 +18,8 @@
     "desktop:dev": "node scripts/run-desktop.mjs",
     "desktop:package": "npm run desktop:build && node scripts/package-desktop.mjs",
     "test:desktop": "node scripts/verify-desktop.mjs",
-    "preview": "vite preview --host 127.0.0.1 --port 4320 --strictPort"
+    "preview": "vite preview --host 127.0.0.1 --port 4320 --strictPort",
+    "icons": "node scripts/create-icon.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.48.0",

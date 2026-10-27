@@ -62,7 +62,7 @@ export class ScreenCaptureService {
           for (const display of displays) {
             const source = sources.find(item => item.display_id === String(display.id));
             if (!source || source.thumbnail.isEmpty()) continue;
-            const window = new BrowserWindow({ ...display.bounds, frame: false, show: false, resizable: false, movable: false, hasShadow: false, skipTaskbar: true, alwaysOnTop: true, enableLargerThanScreen: true, backgroundColor: '#18241f', webPreferences: { preload: join(this.directory, 'capture-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, partition: 'screen-crop', devTools: false } });
+            const window = new BrowserWindow({ ...display.bounds, frame: false, show: false, resizable: false, movable: false, hasShadow: false, skipTaskbar: true, alwaysOnTop: true, enableLargerThanScreen: true, backgroundColor: '#182f48', webPreferences: { preload: join(this.directory, 'capture-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, partition: 'screen-crop', devTools: false } });
             window.setAlwaysOnTop(true, 'screen-saver');
             window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
             window.webContents.on('will-navigate', event => event.preventDefault());

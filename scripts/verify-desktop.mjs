@@ -35,13 +35,15 @@ try {
   // Only self-authored verification text is captured. No external app content is used.
   const fixtureId = await application.evaluate(async ({ BrowserWindow, screen }) => {
     const area = screen.getPrimaryDisplay().bounds;
-    const fixture = new BrowserWindow({ ...area, frame: false, fullscreen: true, alwaysOnTop: true, backgroundColor: '#ffffff', webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    const fixture = new BrowserWindow({ ...area, frame: false, alwaysOnTop: true, backgroundColor: '#ffffff', webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    fixture.setAlwaysOnTop(true, 'screen-saver');
     await fixture.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<html><body style="margin:80px;font:36px Microsoft YaHei,Segoe UI,sans-serif;line-height:1.8;background:white;color:black"><h1 style="font-size:42px">截图朗读验收</h1><p>这是我们自己编写的测试文字。</p><p>2026年，我们学习新的知识。</p><p>读到这里，可以暂停，然后继续。</p><p>Screen reader verification.</p></body></html>'));
     fixture.show(); fixture.focus();
     return fixture.id;
   });
   const overlayEvent = application.waitForEvent('window');
-  await page.getByRole('button', { name: '截图朗读', exact: true }).click({ force: true });
+  // Invoke the real button without foregrounding the toolbar over the fixture.
+  await page.getByRole('button', { name: '截图朗读', exact: true }).evaluate(button => button.click());
   const overlay = await overlayEvent;
   await overlay.waitForURL('**/capture.html');
   await overlay.locator('#screen').waitFor();
